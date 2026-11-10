@@ -34,26 +34,9 @@
 
 ## 架构图
 
-```mermaid
-flowchart TB
-  U(["用户<br/>提需求，在两处门禁做决定"])
-  W1["<b>W1 项目管理</b>（1 个任务）<br/>立项规划 → 立项评审 → 〔立项确认〕→ 环境基线<br/>→ 模块下发 → 调度 → 项目验收 → 〔人工终审〕→ 收尾合并"]
-  W2["<b>W2 模块管理</b>（每模块 1 个，可并行）<br/>模块规划 → 等待开发 → 验收调查"]
-  W3["<b>W3 开发</b>（每任务 1 个 worktree）<br/>待开发 → 开发 → 审核（换 profile、新会话）→ 合并"]
-  M[("管理目录 mgmt_root<br/>需求 R-n / 担当表 / 进度 / 决策")]
-  G["守护 automation<br/>每 20 分钟运行 stage.py"]
+![架构图：W1 项目管理、W2 模块管理、W3 开发三层，加上管理目录和守护](docs/architecture.svg)
 
-  U -- "新建项目任务" --> W1
-  W1 -- "创建模块任务" --> W2
-  W2 -- "创建开发子任务" --> W3
-  W3 -- "合并到模块分支 + REPORT" --> W2
-  W2 -- "模块验收 REPORT" --> W1
-  W1 -. "attention.md：需要你决定的事" .-> U
-  W1 & W2 <-. "读写" .-> M
-  G -. "ALERT" .-> W1 & W2
-```
-
-〔〕是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；更详细的流程图（包括 agent 之间允许哪些交互）见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
+黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；更详细的流程图（包括 agent 之间允许哪些交互）见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
 
 ## 怎么使用
 

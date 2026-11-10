@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 612" width="1000" height="612" role="img" aria-labelledby="t d">
+  <title id="t">Kandev 多 Agent 开发架构</title>
+  <desc id="d">三层 workflow：W1 项目管理、W2 模块管理、W3 开发；管理目录保存状态；守护每 20 分钟检查一次；用户只在立项确认和人工终审两处做决定。</desc>
+  <style>
+    svg { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; }
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .guard { fill: #ffffff; stroke: #8c959f; stroke-dasharray: 5 4; }
+    .user { fill: #fff8c5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 600; }
+    .s { fill: #59636e; font-size: 12px; }
+    .m { fill: #59636e; font-size: 11.5px; }
+    .c { font-size: 13.5px; text-anchor: middle; }
+    .pm { fill: #ddf4ff; stroke: #54aeff; } .tpm { fill: #0a3069; }
+    .au { fill: #fbefff; stroke: #c297ff; } .tau { fill: #512a97; }
+    .dv { fill: #dafbe1; stroke: #4ac26b; } .tdv { fill: #044f1e; }
+    .mc { fill: #eff2f5; stroke: #afb8c1; } .tmc { fill: #424a53; }
+    .hu { fill: #fff8c5; stroke: #d4a72c; } .thu { fill: #4d2d00; }
+    .hold { fill: none; stroke: #8c959f; stroke-dasharray: 4 3; } .thold { fill: #59636e; }
+    .ln { fill: none; stroke: #6e7781; stroke-width: 1.4; }
+    .dash { stroke-dasharray: 5 4; }
+    .ah { fill: #6e7781; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .box { fill: #0d1117; stroke: #3d444d; }
+      .guard { fill: #0d1117; stroke: #6e7681; }
+      .user { fill: #2e2200; stroke: #9e6a03; }
+      .h { fill: #e6edf3; }
+      .s, .m { fill: #9198a1; }
+      .pm { fill: #0c2d6b; stroke: #1f6feb; } .tpm { fill: #cae8ff; }
+      .au { fill: #2e1461; stroke: #8957e5; } .tau { fill: #ecd8ff; }
+      .dv { fill: #04260f; stroke: #2ea043; } .tdv { fill: #aff5b4; }
+      .mc { fill: #21262d; stroke: #484f58; } .tmc { fill: #d1d9e0; }
+      .hu { fill: #3b2300; stroke: #bb8009; } .thu { fill: #f8e3a1; }
+      .hold { stroke: #6e7681; } .thold { fill: #9198a1; }
+      .ln { stroke: #8b949e; }
+      .ah { fill: #8b949e; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1000" height="612" rx="14"/>
+
+  <!-- 用户 -->
+  <rect class="user" x="20" y="18" width="960" height="46" rx="10"/>
+  <text class="h" x="40" y="46">用户</text>
+  <text class="s" x="84" y="46">提需求；只在两处门禁做决定；平时看 attention.md（需要你决定的事）和 stage.md（现在在等谁）</text>
+
+  <!-- W1 -->
+  <rect class="lane" x="20" y="112" width="960" height="92" rx="10"/>
+  <text class="h" x="36" y="152">W1 项目管理</text>
+  <text class="s" x="36" y="172">1 个任务，pm 常驻</text>
+
+  <g>
+    <rect class="pm" x="170" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="208" y="163">立项规划</text>
+    <rect class="au" x="261" y="140" width="76" height="36" rx="8"/><text class="c tau" x="299" y="163">立项评审</text>
+    <rect class="hu" x="352" y="140" width="76" height="36" rx="8"/><text class="c thu" x="390" y="163">立项确认</text>
+    <rect class="pm" x="443" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="481" y="163">环境基线</text>
+    <rect class="pm" x="534" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="572" y="163">模块下发</text>
+    <rect class="pm" x="625" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="663" y="163">调度</text>
+    <rect class="au" x="716" y="140" width="76" height="36" rx="8"/><text class="c tau" x="754" y="163">项目验收</text>
+    <rect class="hu" x="807" y="140" width="76" height="36" rx="8"/><text class="c thu" x="845" y="163">人工终审</text>
+    <rect class="mc" x="898" y="140" width="76" height="36" rx="8"/><text class="c tmc" x="936" y="163">收尾合并</text>
+  </g>
+  <g>
+    <line class="ln" x1="247" y1="158" x2="260" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="338" y1="158" x2="351" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="429" y1="158" x2="442" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="520" y1="158" x2="533" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="611" y1="158" x2="624" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="702" y1="158" x2="715" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="793" y1="158" x2="806" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="884" y1="158" x2="897" y2="158" marker-end="url(#a)"/>
+  </g>
+
+  <!-- 管理目录 -->
+  <rect class="box" x="20" y="264" width="310" height="92" rx="10"/>
+  <text class="h" x="36" y="292">管理目录 mgmt_root</text>
+  <text class="s" x="36" y="316">需求 R-n · 担当表 · 进度 · 决策记录</text>
+  <text class="s" x="36" y="337">attention.md · stage.md · 各角色 NOW.md</text>
+
+  <!-- W2 -->
+  <rect class="lane" x="360" y="264" width="620" height="92" rx="10"/>
+  <text class="h" x="376" y="304">W2 模块管理</text>
+  <text class="s" x="376" y="324">每模块 1 个，可并行</text>
+  <g>
+    <rect class="pm" x="534" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="572" y="315">模块规划</text>
+    <rect class="pm" x="625" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="663" y="315">等待开发</text>
+    <rect class="pm" x="716" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="754" y="315">验收调查</text>
+  </g>
+  <line class="ln" x1="611" y1="310" x2="624" y2="310" marker-end="url(#a)"/>
+  <line class="ln" x1="702" y1="310" x2="715" y2="310" marker-end="url(#a)"/>
+  <text class="m" x="808" y="306">子任务全部完成后</text>
+  <text class="m" x="808" y="324">自动进入验收调查</text>
+
+  <!-- 守护 -->
+  <rect class="guard" x="20" y="416" width="310" height="110" rx="10"/>
+  <text class="h" x="36" y="444">守护 automation</text>
+  <text class="s" x="36" y="467">每 20 分钟运行确定性脚本 stage.py</text>
+  <text class="s" x="36" y="487">发现卡住、等待、额度用尽等情况时</text>
+  <text class="s" x="36" y="507">ALERT 对应的 W1 / W2 管理者</text>
+
+  <!-- W3 -->
+  <rect class="lane" x="360" y="416" width="620" height="110" rx="10"/>
+  <text class="h" x="376" y="456">W3 开发</text>
+  <text class="s" x="376" y="476">每任务 1 个 worktree</text>
+  <text class="s" x="376" y="496">同时开发最多 4 个</text>
+  <g>
+    <rect class="hold" x="534" y="444" width="76" height="36" rx="8"/><text class="c thold" x="572" y="467">待开发</text>
+    <rect class="dv" x="625" y="444" width="76" height="36" rx="8"/><text class="c tdv" x="663" y="467">开发</text>
+    <rect class="au" x="716" y="444" width="76" height="36" rx="8"/><text class="c tau" x="754" y="467">审核</text>
+    <rect class="mc" x="807" y="444" width="76" height="36" rx="8"/><text class="c tmc" x="845" y="467">合并</text>
+  </g>
+  <line class="ln" x1="611" y1="462" x2="624" y2="462" marker-end="url(#a)"/>
+  <line class="ln" x1="702" y1="462" x2="715" y2="462" marker-end="url(#a)"/>
+  <line class="ln" x1="793" y1="462" x2="806" y2="462" marker-end="url(#a)"/>
+  <path class="ln" d="M754,480 V506 H663 V482" marker-end="url(#a)"/>
+  <text class="m" x="708" y="501" text-anchor="middle">退回</text>
+  <text class="m" x="898" y="458">测试通过、</text>
+  <text class="m" x="898" y="476">审核逐条确认</text>
+  <text class="m" x="898" y="494">后才合并</text>
+
+  <!-- 跨层连线（最后绘制，避免被背景遮住） -->
+  <!-- 用户 ↔ W1 -->
+  <line class="ln" x1="208" y1="64" x2="208" y2="138" marker-end="url(#a)"/>
+  <text class="m" x="216" y="100">新建项目任务</text>
+  <line class="ln dash" x1="390" y1="66" x2="390" y2="138" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="398" y="100">批准 / 带意见退回</text>
+  <line class="ln dash" x1="845" y1="66" x2="845" y2="138" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="853" y="100">批准 / 带意见退回</text>
+
+  <!-- W1 ↔ W2 -->
+  <line class="ln" x1="572" y1="176" x2="572" y2="290" marker-end="url(#a)"/>
+  <text class="m" x="564" y="242" text-anchor="end">创建模块任务</text>
+  <path class="ln dash" d="M754,292 V236 H663 V178" marker-end="url(#a)"/>
+  <text class="m" x="762" y="262">模块验收 REPORT</text>
+
+  <!-- W2 ↔ W3 -->
+  <line class="ln" x1="572" y1="328" x2="572" y2="442" marker-end="url(#a)"/>
+  <text class="m" x="564" y="394" text-anchor="end">创建开发子任务</text>
+  <path class="ln dash" d="M845,444 V388 H663 V330" marker-end="url(#a)"/>
+  <text class="m" x="754" y="381" text-anchor="middle">合并进模块分支 + REPORT</text>
+
+  <line class="ln" x1="175" y1="206" x2="175" y2="262" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="183" y="238">读写</text>
+  <line class="ln" x1="332" y1="310" x2="358" y2="310" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line class="ln dash" x1="175" y1="416" x2="175" y2="358" marker-end="url(#a)"/>
+  <text class="m" x="183" y="392">写 stage.md</text>
+
+  <!-- 图例 -->
+  <g>
+    <rect class="pm" x="20" y="550" width="16" height="14" rx="3"/><text class="s" x="42" y="562">pm：规划、委派、验收，不写代码</text>
+    <rect class="au" x="250" y="550" width="16" height="14" rx="3"/><text class="s" x="272" y="562">auditor / reviewer：独立审查（新会话、换 profile）</text>
+    <rect class="dv" x="580" y="550" width="16" height="14" rx="3"/><text class="s" x="602" y="562">developer</text>
+    <rect class="mc" x="680" y="550" width="16" height="14" rx="3"/><text class="s" x="702" y="562">mechanical（便宜模型）</text>
+    <rect class="hu" x="860" y="550" width="16" height="14" rx="3"/><text class="s" x="882" y="562">人工门禁</text>
+  </g>
+  <g>
+    <line class="ln" x1="20" y1="586" x2="52" y2="586" marker-end="url(#a)"/><text class="s" x="60" y="590">创建任务 / 步骤流转</text>
+    <line class="ln dash" x1="200" y1="586" x2="232" y2="586" marker-end="url(#a)"/><text class="s" x="240" y="590">REPORT、人的操作、守护写入</text>
+    <rect class="hold" x="430" y="579" width="16" height="14" rx="3"/><text class="s" x="452" y="590">排队，不启动会话</text>
+  </g>
+</svg>
