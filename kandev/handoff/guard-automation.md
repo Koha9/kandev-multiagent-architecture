@@ -66,5 +66,5 @@
 
 ## 为什么不在外部完成
 
-- 外部 MCP（`localhost:38429`）没有创建 automation 的工具，也没有 `message_task_kandev`（试点 1 已确认）；已有 automation 可以用 `list_settings_resources_kandev` 查看、用 `get_settings_kandev` / `update_settings_kandev` 读改（2026-11-10 确认，守护的自动停用就用它）。
+- 外部 MCP（`localhost:38429`）没有创建 automation 的工具，也没有 `message_task_kandev`；已有 automation 可以用 `list_settings_resources_kandev` 查看、用 `get_settings_kandev` / `update_settings_kandev` 读改（守护的自动停用就用它）。
 - 守护运行时需要 `message_task_kandev` 发 ALERT，所以守护本身也必须是 Kandev 内部的 automation。

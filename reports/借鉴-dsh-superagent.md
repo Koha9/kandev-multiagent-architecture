@@ -1,7 +1,7 @@
 # 借鉴 dsh-superagent：对 workflow v3 的改进建议
 
 > 对比对象：[deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype)（2026-11-09 克隆的 main，浅克隆）。读了 README、SETUP、`docs/000–005`、`007` 的部分章节、`prompts/` 全部内容，以及 `src/core/stage.ts` 和 `tests/docs.spec.ts`。
-> 我方基准：`docs/workflow.md`（v3）、`mgmt-template/`、试点 1 的评价和事件记录（本机记录，未公开）。
+> 我方基准：`docs/workflow.md`（v3）、`mgmt-template/`、试点 1 的评价和事件记录。
 
 ## 1. 两者是什么
 
@@ -67,7 +67,7 @@
 **我们的问题**：守护用 LLM 读信号做判断。试点中门禁等了 13 分钟，用户以为卡住了，原因是没有一个地方直接回答"现在在等谁"。
 
 **改进**：
-- 在试点 1 的监控脚本 `monitor.py` / `watch.py`（本机记录，未公开）的基础上，写一个确定性的 `stage(task)` 分类器，输入 Kandev 任务状态、会话状态、待处理的提问和权限请求、NOW：
+- 在试点 1 的监控脚本 `monitor.py` / `watch.py`的基础上，写一个确定性的 `stage(task)` 分类器，输入 Kandev 任务状态、会话状态、待处理的提问和权限请求、NOW：
   `等人(门禁/提问/权限) > 失败 > 空闲未推进 > 排队(WIP) > 运行中 > 完成`，第一条匹配的生效。
 - 输出一个 `project/attention.md`（或写入 status.json 的 `needs_user` 字段），只列需要人处理的事项。守护里的 LLM 只负责在异常时写告警文字，判断交给脚本。
 - 守护角色卡的信号表可以直接改写成这张表的形式。

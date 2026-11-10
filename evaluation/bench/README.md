@@ -1,6 +1,6 @@
 # 基准项目：每次改 workflow 后跑一次
 
-> 目的：用一个固定的小项目比较不同 workflow 版本，不必每次都做一次完整试点。结果可比的前提是需求、环境和 profile 都不变。
+> 目的：用一个固定的小项目比较不同 workflow 版本，不必每次都用真实项目做一次完整试点。结果可比的前提是需求、环境和 profile 都不变。
 > 规模：2 个模块、每个模块 2 个任务（其中 1 个有前置任务），预计 30–45 分钟。会产生真实的 agent 会话费用。
 
 ## 任务描述（原样使用，只替换尖括号）
@@ -41,7 +41,7 @@ branch: <自动> base main
 运行结束（到达「人工终审」）后：
 
 ```
-<python> evaluation/metrics.py > evaluation/bench/results/<版本>-<日期>.jsonl
+python evaluation/metrics.py > evaluation/bench/results/<版本>-<日期>.jsonl
 ```
 
 在 `evaluation/bench/results.md` 里追加一行：

@@ -1,4 +1,4 @@
-> **已被 [docs/workflow.md](docs/workflow.md)（v3）取代**，本文件仅作为设计演进记录保留。
+> **已被 [docs/workflow.md](../workflow.md)取代**，本文件仅作为设计演进记录保留。
 
 # 多 Agent 开发 Workflow v2（优化稿）
 

@@ -1,6 +1,6 @@
 # 管理 workspace 构造（抗压缩版）
 
-> 配套 [workflow.md](workflow.md)（v3）。可直接复制的模板在 `mgmt-template/`，消息格式在 `mgmt-template/protocol/message.md`，各步骤的 prompt 在 [prompts.md](prompts.md)。
+> 配套 [workflow.md](workflow.md)。可直接复制的模板在 `mgmt-template/`，消息格式在 `mgmt-template/protocol/message.md`，各步骤的 prompt 在 [prompts.md](prompts.md)。
 
 ## 1. 目标
 
@@ -137,8 +137,8 @@ R1 的配套机制是**幂等**：
 - **机器要判断的状态用 JSON**（registry.json、status.json、tasks.json）。字段固定，只允许修改"状态类字段"（见第 8 节）。参考 Anthropic 的经验：模型乱改 JSON 的倾向比乱改 Markdown 小。
 - **叙述内容用 Markdown，标题固定**。agent 靠标题定位内容，**不准改标题名**；没有内容的节写"无"，不要删掉。
 - **日志只追加**，一行一个事件，不回头修改：`YYYY-MM-DD HH:MM | 类型 | 内容 | 指针`。
-- **时间戳取自系统时钟**，不要推断（试点中出现过推断的时间偏差约 1 小时）。
-- **管理目录如果用 git 管理，只 `git add` 自己担当的路径**。单写者规则管的是文件，`git add -A` 会把别人的文件一起提交。v3.1 起用 `tools/mgmt_precommit.py` 钩子强制：提交时用 `MGMT_SCOPE` 声明 scope，越界的文件被拒绝。
+- **时间戳取自系统时钟**，不要推断。
+- **管理目录如果用 git 管理，只 `git add` 自己担当的路径**。单写者规则管的是文件，`git add -A` 会把别人的文件一起提交。用 `tools/mgmt_precommit.py` 钩子强制：提交时用 `MGMT_SCOPE` 声明 scope，越界的文件被拒绝。
 - **结论如实**：验收类结论只用 `pass` / `fail` / `unverified(原因)`；部分完成写 `partial`。
 - **临时资源登记**：临时目录、worktree、后台进程、端口写进自己的 NOW「注意」节，用完清理；留给终审的写进 final-report「临时资源」，由收尾合并步骤清理。
 - **引用用路径或 ID**（`modules/auth/interfaces.md#login`、`ADR-0003`、`M-mod.auth-261109-102000`），不复制原文。
@@ -215,22 +215,8 @@ ID 规则：
 
 ---
 
-## 10. v3 新增
+## 10. 设计取舍
 
-- pm 任务的任务文档 `charter-review`，由立项评审写。
-- final-report 增加「终审运行方式」「临时资源」「收尾」三节；首轮验收要用实际内容替换模板占位。
-- 刷新用的记录行：常驻 agent 去「刷新」步骤之前，在 NOW「注意」节写一行 `刷新返回：<步骤名>`。
-
-## 11. v3.1 新增
-
-- charter「需求」节：逐条摘录用户原文为 R-n；PA、模块、MA、AC 都用 covers 或 refs 指回去，立项评审输出需求覆盖表，项目验收逐条判断 R。
-- `project/attention.md`：所有需要用户处理的事集中在这里，每项附推荐答案和默认做法。
-- `tools/`：`check_owns.py`（owns 越界检查）、`quota.py`（额度账本）、`mgmt_precommit.py`（管理目录单写者钩子）。
-- `evidence/<任务id>/`、`quota/ledger.json`、`agents/guard/stage.md`。
-- tasks.json 增加 `refs`、`ui`，status 增加 `held`、`dropped`；report 增加 `dropped`、`remaining`、`scope_check`、`visual_evidence`。
-
-## 12. 与 v2 设计稿的差异
-
-- **"询问阶梯"改为"谁担当就问谁"**：去掉"先自己翻对话记录、读代码"这几级，改为查担当表后直接问担当者（详见 `protocol/message.md` 第 1 节）。
-- **立项规划不开 plan mode**：Claude Code 的 plan mode 不能写文件，而立项规划的产出就是管理文件。用户审核改到"人工确认"步骤做。
-- 开发和审核的状态从"管理目录"挪到"Kandev 任务文档"。原因是管理目录在 worktree 外面，而开发 agent 只需要自己的那份状态。
+- **立项规划不开 plan mode**：Claude Code 的 plan mode 不能写文件，而立项规划的产出就是管理文件。用户审核放在「立项确认」步骤。
+- **开发和审核的状态放在 Kandev 任务文档里，不放管理目录**：管理目录在 worktree 外面，而开发 agent 只需要自己的那份状态。
+- **谁担当就问谁**：不让 agent 先翻对话记录、读代码去找答案，而是查担当表后直接问担当者（详见 `protocol/message.md` 第 1 节）。

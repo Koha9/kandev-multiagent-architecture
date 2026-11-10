@@ -1,20 +1,46 @@
-"""Export the three workflows, save them, and print a compact per-step summary for verification."""
+"""Export the three deployed workflows, print a compact per-step summary for verification,
+and save a shareable copy under export/ with every workspace-specific ID replaced by a placeholder.
+
+Usage (from kandev/): python verify_export.py [--ids kandev_ids.json] [--out export] [--url URL]
+"""
+import argparse
 import json
+import os
 import sys
 
-sys.path.insert(0, ".")
-from build_workflows import Kandev  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from build_workflows import DEFAULT_URL, W1_NAME, W2_NAME, W3_NAME, Kandev  # noqa: E402
 
-sys.stdout.reconfigure(encoding="utf-8")
-ids = json.load(open("kandev_ids.json", encoding="utf-8"))
-k = Kandev()
-for wname, info in ((n, i) for n, i in ids.items() if not n.startswith("_")):
-    doc = k.call("export_workflow_kandev", {"workflow_id": info["workflow_id"]})
-    fname = {"多Agent · 项目管理": "W1-project.json", "多Agent · 模块管理": "W2-module.json",
-             "多Agent · 开发": "W3-dev.json"}[wname]
-    with open(fname, "w", encoding="utf-8") as f:
-        json.dump(doc, f, ensure_ascii=False, indent=2)
-    print(f"== {wname}  (version {doc.get('version')}) -> {fname}")
+FILES = {W1_NAME: ("W1-project.json", "W1"), W2_NAME: ("W2-module.json", "W2"), W3_NAME: ("W3-dev.json", "W3")}
+# Same names as the placeholders in docs/prompts.md (build_workflows.py dump)
+NAMED = {("W3", "开发"): "<W3_DEV_STEP_ID>", ("W3", "待开发"): "<W3_HOLD_STEP_ID>",
+         ("W2", "模块规划"): "<W2_PLAN_STEP_ID>"}
+
+
+def placeholders(ids):
+    """Map every local ID in kandev_ids.json to a stable placeholder."""
+    out = {}
+    ws = ids.get("_meta", {}).get("workspace_id")
+    if ws:
+        out[ws] = "<WORKSPACE_ID>"
+    for wname, info in ids.items():
+        if wname.startswith("_") or wname not in FILES:
+            continue
+        tag = FILES[wname][1]
+        out[info["workflow_id"]] = f"<{tag}_ID>"
+        for sname, sid in info["steps"].items():
+            out[sid] = NAMED.get((tag, sname), f"<{tag}_STEP_ID:{sname}>")
+    return out
+
+
+def sanitize(obj, repl):
+    text = json.dumps(obj, ensure_ascii=False, indent=2)
+    for real, ph in repl.items():
+        text = text.replace(real, ph)
+    return text + "\n"
+
+
+def summary(doc):
     for s in doc["workflows"][0]["steps"]:
         prof = s.get("agent_profile")
         prof = f"{prof.get('model')}/{prof.get('mode')}" if prof else "-"
@@ -28,3 +54,30 @@ for wname, info in ((n, i) for n, i in ids.items() if not n.startswith("_")):
         if p:
             print(f"     prompt: {len(p)} chars, has{{task_id}}={'{task_id}' in p}, "
                   f"has{{{{task_prompt}}}}={'{{task_prompt}}' in p}, step_entry={'{step_entry_number}' in p}")
+
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ids", default=os.path.join(here, "kandev_ids.json"))
+    ap.add_argument("--out", default=os.path.join(here, "export"))
+    ap.add_argument("--url", default=DEFAULT_URL)
+    a = ap.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8")
+    ids = json.load(open(a.ids, encoding="utf-8"))
+    repl = placeholders(ids)
+    os.makedirs(a.out, exist_ok=True)
+    k = Kandev(a.url)
+    for wname, info in ids.items():
+        if wname.startswith("_") or wname not in FILES:
+            continue
+        doc = k.call("export_workflow_kandev", {"workflow_id": info["workflow_id"]})
+        fname = os.path.join(a.out, FILES[wname][0])
+        with open(fname, "w", encoding="utf-8") as f:
+            f.write(sanitize(doc, repl))
+        print(f"== {wname}  (version {doc.get('version')}) -> {os.path.relpath(fname, here)}")
+        summary(doc)
+
+
+if __name__ == "__main__":
+    main()
