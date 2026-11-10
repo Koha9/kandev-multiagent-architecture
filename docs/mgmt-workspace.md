@@ -1,5 +1,7 @@
 # 管理 workspace 构造（抗压缩版）
 
+**中文** | [English](mgmt-workspace.en.md)
+
 > 配套 [workflow.md](workflow.md)。可直接复制的模板在 `mgmt-template/`，消息格式在 `mgmt-template/protocol/message.md`，各步骤的 prompt 在 [prompts.md](prompts.md)。
 
 ## 1. 目标

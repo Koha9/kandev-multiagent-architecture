@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 636" width="1000" height="636" role="img" aria-labelledby="t d">
+  <title id="t">Kandev multi-agent development architecture</title>
+  <desc id="d">Three workflow layers: W1 project management, W2 module management, W3 development. A management directory holds state, a guard checks every 20 minutes, and the user decides only at two gates: plan approval and final human review.</desc>
+  <style>
+    svg { font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .guard { fill: #ffffff; stroke: #8c959f; stroke-dasharray: 5 4; }
+    .user { fill: #fff8c5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 600; }
+    .s { fill: #59636e; font-size: 12px; }
+    .m { fill: #59636e; font-size: 11.5px; }
+    .c { font-size: 12.5px; text-anchor: middle; }
+    .z { font-size: 10.5px; text-anchor: middle; opacity: .72; }
+    .pm { fill: #ddf4ff; stroke: #54aeff; } .tpm { fill: #0a3069; }
+    .au { fill: #fbefff; stroke: #c297ff; } .tau { fill: #512a97; }
+    .dv { fill: #dafbe1; stroke: #4ac26b; } .tdv { fill: #044f1e; }
+    .mc { fill: #eff2f5; stroke: #afb8c1; } .tmc { fill: #424a53; }
+    .hu { fill: #fff8c5; stroke: #d4a72c; } .thu { fill: #4d2d00; }
+    .hold { fill: none; stroke: #8c959f; stroke-dasharray: 4 3; } .thold { fill: #59636e; }
+    .ln { fill: none; stroke: #6e7781; stroke-width: 1.4; }
+    .dash { stroke-dasharray: 5 4; }
+    .ah { fill: #6e7781; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .box { fill: #0d1117; stroke: #3d444d; }
+      .guard { fill: #0d1117; stroke: #6e7681; }
+      .user { fill: #2e2200; stroke: #9e6a03; }
+      .h { fill: #e6edf3; }
+      .s, .m { fill: #9198a1; }
+      .pm { fill: #0c2d6b; stroke: #1f6feb; } .tpm { fill: #cae8ff; }
+      .au { fill: #2e1461; stroke: #8957e5; } .tau { fill: #ecd8ff; }
+      .dv { fill: #04260f; stroke: #2ea043; } .tdv { fill: #aff5b4; }
+      .mc { fill: #21262d; stroke: #484f58; } .tmc { fill: #d1d9e0; }
+      .hu { fill: #3b2300; stroke: #bb8009; } .thu { fill: #f8e3a1; }
+      .hold { stroke: #6e7681; } .thold { fill: #9198a1; }
+      .ln { stroke: #8b949e; }
+      .ah { fill: #8b949e; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="ah" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1000" height="636" rx="14"/>
+
+  <!-- User -->
+  <rect class="user" x="20" y="18" width="960" height="46" rx="10"/>
+  <text class="h" x="40" y="46">User</text>
+  <text class="s" x="86" y="46">States the requirements; decides only at two gates; otherwise watches attention.md (decisions needed) and stage.md (who we are waiting on)</text>
+
+  <!-- W1 -->
+  <rect class="lane" x="20" y="112" width="960" height="92" rx="10"/>
+  <text class="h" x="36" y="140">W1 Project</text>
+  <text class="h" x="36" y="158">management</text>
+  <text class="s" x="36" y="180">1 task, pm resident</text>
+  <g>
+    <rect class="pm" x="170" y="136" width="76" height="44" rx="8"/><text class="c tpm" x="208" y="154">Planning</text><text class="z tpm" x="208" y="171">立项规划</text>
+    <rect class="au" x="261" y="136" width="76" height="44" rx="8"/><text class="c tau" x="299" y="154">Plan review</text><text class="z tau" x="299" y="171">立项评审</text>
+    <rect class="hu" x="352" y="136" width="76" height="44" rx="8"/><text class="c thu" x="390" y="154">Approval</text><text class="z thu" x="390" y="171">立项确认</text>
+    <rect class="pm" x="443" y="136" width="76" height="44" rx="8"/><text class="c tpm" x="481" y="154">Baseline</text><text class="z tpm" x="481" y="171">环境基线</text>
+    <rect class="pm" x="534" y="136" width="76" height="44" rx="8"/><text class="c tpm" x="572" y="154">Dispatch</text><text class="z tpm" x="572" y="171">模块下发</text>
+    <rect class="pm" x="625" y="136" width="76" height="44" rx="8"/><text class="c tpm" x="663" y="154">Coordinate</text><text class="z tpm" x="663" y="171">调度</text>
+    <rect class="au" x="716" y="136" width="76" height="44" rx="8"/><text class="c tau" x="754" y="154">Acceptance</text><text class="z tau" x="754" y="171">项目验收</text>
+    <rect class="hu" x="807" y="136" width="76" height="44" rx="8"/><text class="c thu" x="845" y="154">Final review</text><text class="z thu" x="845" y="171">人工终审</text>
+    <rect class="mc" x="898" y="136" width="76" height="44" rx="8"/><text class="c tmc" x="936" y="154">Final merge</text><text class="z tmc" x="936" y="171">收尾合并</text>
+  </g>
+  <g>
+    <line class="ln" x1="247" y1="158" x2="260" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="338" y1="158" x2="351" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="429" y1="158" x2="442" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="520" y1="158" x2="533" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="611" y1="158" x2="624" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="702" y1="158" x2="715" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="793" y1="158" x2="806" y2="158" marker-end="url(#a)"/>
+    <line class="ln" x1="884" y1="158" x2="897" y2="158" marker-end="url(#a)"/>
+  </g>
+
+  <!-- Management directory -->
+  <rect class="box" x="20" y="264" width="310" height="92" rx="10"/>
+  <text class="h" x="36" y="292">Management directory</text>
+  <text class="s" x="36" y="316">Requirements (R-n) · owners · progress · ADRs</text>
+  <text class="s" x="36" y="337">attention.md · stage.md · NOW.md per role</text>
+
+  <!-- W2 -->
+  <rect class="lane" x="360" y="264" width="620" height="92" rx="10"/>
+  <text class="h" x="376" y="292">W2 Module</text>
+  <text class="h" x="376" y="310">management</text>
+  <text class="s" x="376" y="332">1 per module, parallel</text>
+  <g>
+    <rect class="pm" x="534" y="288" width="76" height="44" rx="8"/><text class="c tpm" x="572" y="306">Planning</text><text class="z tpm" x="572" y="323">模块规划</text>
+    <rect class="pm" x="625" y="288" width="76" height="44" rx="8"/><text class="c tpm" x="663" y="306">Waiting</text><text class="z tpm" x="663" y="323">等待开发</text>
+    <rect class="pm" x="716" y="288" width="76" height="44" rx="8"/><text class="c tpm" x="754" y="306">Acceptance</text><text class="z tpm" x="754" y="323">验收调查</text>
+  </g>
+  <line class="ln" x1="611" y1="310" x2="624" y2="310" marker-end="url(#a)"/>
+  <line class="ln" x1="702" y1="310" x2="715" y2="310" marker-end="url(#a)"/>
+  <text class="m" x="808" y="306">When all subtasks finish,</text>
+  <text class="m" x="808" y="324">moves to acceptance</text>
+
+  <!-- Guard -->
+  <rect class="guard" x="20" y="416" width="310" height="110" rx="10"/>
+  <text class="h" x="36" y="444">Guard automation</text>
+  <text class="s" x="36" y="467">Runs the deterministic stage.py every 20 min</text>
+  <text class="s" x="36" y="487">On stalls, waits or quota limits, sends</text>
+  <text class="s" x="36" y="507">an ALERT to the W1 / W2 manager in charge</text>
+
+  <!-- W3 -->
+  <rect class="lane" x="360" y="416" width="620" height="110" rx="10"/>
+  <text class="h" x="376" y="456">W3 Development</text>
+  <text class="s" x="376" y="476">1 worktree per task</text>
+  <text class="s" x="376" y="496">Up to 4 in development</text>
+  <g>
+    <rect class="hold" x="534" y="440" width="76" height="44" rx="8"/><text class="c thold" x="572" y="458">Queued</text><text class="z thold" x="572" y="475">待开发</text>
+    <rect class="dv" x="625" y="440" width="76" height="44" rx="8"/><text class="c tdv" x="663" y="458">Develop</text><text class="z tdv" x="663" y="475">开发</text>
+    <rect class="au" x="716" y="440" width="76" height="44" rx="8"/><text class="c tau" x="754" y="458">Review</text><text class="z tau" x="754" y="475">审核</text>
+    <rect class="mc" x="807" y="440" width="76" height="44" rx="8"/><text class="c tmc" x="845" y="458">Merge</text><text class="z tmc" x="845" y="475">合并</text>
+  </g>
+  <line class="ln" x1="611" y1="462" x2="624" y2="462" marker-end="url(#a)"/>
+  <line class="ln" x1="702" y1="462" x2="715" y2="462" marker-end="url(#a)"/>
+  <line class="ln" x1="793" y1="462" x2="806" y2="462" marker-end="url(#a)"/>
+  <path class="ln" d="M754,484 V508 H663 V486" marker-end="url(#a)"/>
+  <text class="m" x="708" y="503" text-anchor="middle">send back</text>
+  <text class="m" x="898" y="458">Merges only</text>
+  <text class="m" x="898" y="476">after tests and</text>
+  <text class="m" x="898" y="494">review pass</text>
+
+  <!-- Cross-layer connectors (drawn last so backgrounds do not hide them) -->
+  <line class="ln" x1="208" y1="64" x2="208" y2="134" marker-end="url(#a)"/>
+  <text class="m" x="216" y="96">create project task</text>
+  <line class="ln dash" x1="390" y1="66" x2="390" y2="134" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="398" y="96">approve / send back with notes</text>
+  <line class="ln dash" x1="845" y1="66" x2="845" y2="134" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="853" y="96">approve / send back</text>
+
+  <line class="ln" x1="572" y1="180" x2="572" y2="286" marker-end="url(#a)"/>
+  <text class="m" x="564" y="240" text-anchor="end">create module tasks</text>
+  <path class="ln dash" d="M754,288 V236 H663 V182" marker-end="url(#a)"/>
+  <text class="m" x="762" y="262">module REPORT</text>
+
+  <line class="ln" x1="572" y1="332" x2="572" y2="438" marker-end="url(#a)"/>
+  <text class="m" x="564" y="394" text-anchor="end">create dev subtasks</text>
+  <path class="ln dash" d="M845,440 V388 H663 V334" marker-end="url(#a)"/>
+  <text class="m" x="754" y="381" text-anchor="middle">merged + REPORT</text>
+
+  <line class="ln" x1="175" y1="206" x2="175" y2="262" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="183" y="238">read / write</text>
+  <line class="ln" x1="332" y1="310" x2="358" y2="310" marker-start="url(#a)" marker-end="url(#a)"/>
+  <line class="ln dash" x1="175" y1="416" x2="175" y2="358" marker-end="url(#a)"/>
+  <text class="m" x="183" y="392">writes stage.md</text>
+
+  <!-- Legend -->
+  <g>
+    <rect class="pm" x="20" y="550" width="16" height="14" rx="3"/><text class="s" x="42" y="562">pm: plans, delegates and verifies; writes no code</text>
+    <rect class="au" x="350" y="550" width="16" height="14" rx="3"/><text class="s" x="372" y="562">auditor / reviewer: independent check (fresh session, different profile)</text>
+    <rect class="dv" x="20" y="576" width="16" height="14" rx="3"/><text class="s" x="42" y="588">developer</text>
+    <rect class="mc" x="130" y="576" width="16" height="14" rx="3"/><text class="s" x="152" y="588">mechanical (cheap model)</text>
+    <rect class="hu" x="350" y="576" width="16" height="14" rx="3"/><text class="s" x="372" y="588">human gate</text>
+    <rect class="hold" x="480" y="576" width="16" height="14" rx="3"/><text class="s" x="502" y="588">queued, no session</text>
+    <line class="ln" x1="20" y1="610" x2="52" y2="610" marker-end="url(#a)"/><text class="s" x="60" y="614">creates a task / moves a step</text>
+    <line class="ln dash" x1="270" y1="610" x2="302" y2="610" marker-end="url(#a)"/><text class="s" x="310" y="614">REPORT, human action, guard write</text>
+    <text class="s" x="620" y="614">Small text under each step: its name in Kandev</text>
+  </g>
+</svg>

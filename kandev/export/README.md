@@ -1,5 +1,7 @@
 # 示例 workflow（Kandev 导出）
 
+**中文** | [English](README.en.md)
+
 这三个文件是从一个实际部署的 Kandev workspace 用 `export_workflow_kandev` 导出的，内容与 `build_workflows.py` 生成的完全一致。本机相关的 ID 已经换成占位符。
 
 | 文件 | workflow | 步骤 |

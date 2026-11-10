@@ -1,5 +1,7 @@
 # Kandev 部署
 
+**中文** | [English](README.en.md)
+
 把 [多 Agent 开发 Workflow](../docs/workflow.md) 部署到任意 Kandev workspace。想让 agent 代为部署和验收，见 [../AGENTS.md](../AGENTS.md)。
 
 ## 文件

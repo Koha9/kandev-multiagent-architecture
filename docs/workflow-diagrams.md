@@ -1,5 +1,7 @@
 # Workflow v3.1 流程图
 
+**中文** | [English](workflow-diagrams.en.md)
+
 > 配套 [workflow.md](workflow.md)。图用 Mermaid 编写，可在 VS Code（Markdown Preview Mermaid 插件）、GitHub、Typora 中直接渲染，也可以用浏览器打开 `workflow-diagrams.html`。
 
 ---

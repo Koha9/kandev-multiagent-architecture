@@ -1,5 +1,7 @@
 # 评估：用开发项目检验架构
 
+**中文** | [English](README.en.md)
+
 架构本身见 [../docs/workflow.md](../docs/workflow.md)，它不依赖这里的任何内容。
 
 | 路径 | 内容 |

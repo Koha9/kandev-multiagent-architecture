@@ -1,5 +1,7 @@
 # 多 Agent 开发 Workflow（v3.1）
 
+**中文** | [English](workflow.en.md)
+
 > 本文件讲多 agent 架构本身：角色、workflow、步骤、通信、状态与恢复、门禁、并发。
 > 配套文档：
 > - [workflow-diagrams.md](workflow-diagrams.md)：流程图

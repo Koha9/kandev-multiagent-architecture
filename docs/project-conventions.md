@@ -1,5 +1,7 @@
 # 开发项目约定
 
+**中文** | [English](project-conventions.en.md)
+
 > 本文件写的是**被开发项目一侧**的约定：多 agent 架构要求每个项目具备什么、遵守什么。
 > 这些内容由 pm 在「立项规划」「环境基线」写进**项目自己的**管理文件（`project/conventions.md`、`project/environment.md`，模板在 [../mgmt-template/project/](../mgmt-template/project/conventions.md)），每个项目按自己的技术栈填写。
 > 架构文档 [workflow.md](workflow.md) 只规定由哪个步骤、哪个角色落实这些约定，以及被拦下时怎么升级，不规定具体内容。
