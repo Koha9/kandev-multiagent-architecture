@@ -1,0 +1,200 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Workflow v3.1 流程图</title><style>body{background:#fff;font-family:sans-serif;margin:16px}</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script></head><body>
+<pre class="mermaid">flowchart TD
+  START([&quot;入口：用户新建 pm 任务&lt;br/&gt;[TASK v1]：mode = attended / unattended，plan_only&quot;])
+
+  subgraph W1[&quot;W1 项目管理（1 个任务）&quot;]
+    P1[&quot;立项规划&lt;br/&gt;charter：需求 R-n 原文 + 模块 + PA + ADR&quot;]
+    PR[&quot;立项评审（独立会话）&lt;br/&gt;需求覆盖表 → charter-review&quot;]
+    PRC{&quot;评审结论&quot;}
+    P2{&quot;立项确认&lt;br/&gt;（attended 或 plan_only）&quot;}
+    P3[&quot;环境基线&lt;br/&gt;骨架 / 冒烟 / 检查脚本 / 额度开关&lt;br/&gt;约束清单：禁推送 / owns 检查 / 额度账本&quot;]
+    P3C{&quot;冒烟测试通过?&quot;}
+    P4[&quot;模块下发&lt;br/&gt;create_task × N&quot;]
+    P5[&quot;调度（常驻）&lt;br/&gt;每条上报 = 一轮&quot;]
+    P5C{&quot;所有模块完成?&quot;}
+    P6[&quot;项目验收（独立会话）&lt;br/&gt;integration + 全量验证 + 逐条核对 R&quot;]
+    P6C{&quot;有 fail?&quot;}
+    P7{&quot;人工终审&quot;}
+    PF[&quot;收尾合并（mechanical）&lt;br/&gt;integration → 基线 / 冒烟 / 清理&quot;]
+    PFC{&quot;合并 + 冒烟通过?&quot;}
+    REF1[&quot;刷新（中转）&lt;br/&gt;重置上下文后移回&quot;]
+  end
+
+  subgraph W2[&quot;W2 模块管理（每模块 1 个，可并行）&quot;]
+    M1[&quot;模块规划&lt;br/&gt;spec / interfaces / tasks.json&lt;br/&gt;create_task 开发子任务&quot;]
+    M2[&quot;等待开发（常驻）&lt;br/&gt;答疑 / 处理升级 / 本地合并&lt;br/&gt;放行待开发 / 确认 dropped&quot;]
+    M3[&quot;验收调查（重置上下文）&lt;br/&gt;先查 FAILED 子任务&quot;]
+    M3C{&quot;模块验收通过?&quot;}
+    REF2[&quot;刷新（中转）&quot;]
+  end
+
+  subgraph W3[&quot;W3 开发（每子任务独立 worktree，「开发」WIP 4）&quot;]
+    D0[&quot;待开发（不计 WIP）&lt;br/&gt;有前置的任务停在这里&quot;]
+    D1[&quot;开发&lt;br/&gt;冒烟 → 实现 → 测试 + owns 检查 → report&quot;]
+    R1[&quot;审核（新会话，不同 profile）&lt;br/&gt;原样重跑 + 逐条 AC 证据 + 边界抽查&quot;]
+    R1C{&quot;审核结论&quot;}
+    D3[&quot;等待决策&quot;]
+    D4[&quot;合并到模块分支&quot;]
+  end
+
+  FIN([&quot;正常出口：集成分支合入基线，项目完成&quot;])
+  ESC([&quot;异常出口：停下交给人&lt;br/&gt;超出上限 / 无法决策 / 收尾合并失败&quot;])
+  GUARD[&quot;守护（Kandev automation）&lt;br/&gt;每 20 分钟运行 stage.py&lt;br/&gt;→ stage.md + ALERT&quot;]
+
+  START --&gt; P1 --&gt; PR --&gt; PRC
+  PRC --&gt;|&quot;阻塞问题（退回 ≤2 次）&quot;| P1
+  PRC --&gt;|&quot;通过 · unattended&quot;| P3
+  PRC --&gt;|&quot;通过 · attended / plan_only&quot;| P2
+  P2 --&gt;|&quot;发消息：带意见&quot;| P1
+  P2 --&gt;|&quot;拖到环境基线 = 批准&quot;| P3
+  P3 --&gt; P3C
+  P3C --&gt;|&quot;否（≤3 次）&quot;| P3
+  P3C --&gt;|&quot;是&quot;| P4
+  P4 --&gt;|&quot;每个模块&quot;| M1
+  P4 --&gt; P5
+
+  M1 --&gt;|&quot;无前置的子任务&quot;| D1
+  M1 --&gt;|&quot;有前置的子任务&quot;| D0
+  M1 --&gt; M2
+  M2 -.-&gt;|&quot;前置已合入：放行&quot;| D0
+  D0 --&gt; D1
+  D1 -.-&gt;|&quot;dropped / blocked：ESCALATE&quot;| M2
+  D1 --&gt;|&quot;step_complete + handoff&quot;| R1 --&gt; R1C
+  R1C --&gt;|&quot;minor（≤3 轮）&quot;| D1
+  R1C --&gt;|&quot;direction / 第 3 轮&quot;| D3
+  R1C --&gt;|&quot;pass&quot;| D4
+  D3 -.-&gt;|&quot;ESCALATE&quot;| M2
+  M2 -.-&gt;|&quot;改契约后退回 / 拆分&quot;| D1
+  D4 --&gt;|&quot;on_children_completed&quot;| M3
+  M3 --&gt; M3C
+  M3C --&gt;|&quot;否：修复子任务&quot;| M2
+  M3C -.-&gt;|&quot;是：REPORT&quot;| P5
+
+  P5 --&gt; P5C
+  P5C --&gt;|&quot;否：继续等&quot;| P5
+  P5C --&gt;|&quot;是&quot;| P6 --&gt; P6C
+  P6C --&gt;|&quot;是：待修复&quot;| P4
+  P6C --&gt;|&quot;否（unverified 列入需要用户处理）&quot;| P7
+  P7 --&gt;|&quot;发消息：带意见&quot;| P4
+  P7 --&gt;|&quot;拖到收尾合并 = 批准&quot;| PF --&gt; PFC
+  PFC --&gt;|&quot;是&quot;| FIN
+  PFC --&gt;|&quot;否：停下说明&quot;| ESC
+
+  P5 -.-&gt;|&quot;会话过长&quot;| REF1 -.-&gt;|&quot;移回&quot;| P5
+  M2 -.-&gt;|&quot;会话过长&quot;| REF2 -.-&gt;|&quot;移回 / 子任务已全终态 → 验收&quot;| M2
+  M2 -.-&gt;|&quot;跨模块 / 超限&quot;| P5
+  P5 -.-&gt;|&quot;无法决策&quot;| ESC
+  GUARD -.-&gt;|&quot;ALERT&quot;| M2
+  GUARD -.-&gt;|&quot;ALERT&quot;| P5
+
+  classDef entry fill:#d1fae5,stroke:#059669,stroke-width:2px,color:#064e3b
+  classDef exit fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef exc fill:#fee2e2,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
+  classDef loop fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+  classDef gate fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  classDef aux fill:#f3f4f6,stroke:#6b7280,stroke-dasharray:4 3,color:#111827
+  class START entry
+  class FIN exit
+  class ESC exc
+  class PRC,P3C,R1C,M3C,P5C,P6C,PFC loop
+  class P2,P7 gate
+  class GUARD,REF1,REF2,D0 aux
+</pre>
+<pre class="mermaid">sequenceDiagram
+  actor U as 👤 用户
+  participant PM as 项目管理 agent
+
+  U-&gt;&gt;+PM: 建 pm 任务（mode = attended / unattended）【入口】
+  Note over PM: 立项规划
+  create participant AU as 独立评审 agent（每次新会话）
+  PM-&gt;&gt;AU: step_complete → 立项评审
+  activate AU
+  alt 有阻塞问题（退回 ≤2 次）
+    AU--&gt;&gt;PM: move_task 退回立项规划（附问题清单）
+  else 通过 · unattended
+    AU--&gt;&gt;PM: move_task → 环境基线（代替人工确认）
+  else 通过 · attended
+    AU-&gt;&gt;U: step_complete → 立项确认（人工门禁）
+    U--&gt;&gt;PM: 拖到环境基线 = 批准；发消息 = 带意见回到立项规划
+  end
+  deactivate AU
+  Note over PM: 环境基线 → 模块下发
+
+  create participant MM as 模块管理 / 验收 agent
+  PM-&gt;&gt;MM: create_task（前置模块完成后自动启动）
+  activate MM
+  Note over MM: 模块规划：写 spec / interfaces / tasks.json
+
+  create participant D as 开发 agent
+  MM-&gt;&gt;D: create_task（autopilot，base_branch=mod/模块）
+  activate D
+  Note over MM: 等待开发（常驻）
+
+  opt 开发中有疑问
+    D-&gt;&gt;MM: ask_parent_question
+    MM--&gt;&gt;D: message 答复（reply_to_question_id）
+  end
+
+  loop 开发 ↔ 审核，最多 3 轮
+    create participant R as 审核 agent（每次新会话）
+    D-&gt;&gt;R: step_complete + handoff（report）
+    activate R
+    Note over R: 原样重跑测试，逐条 AC 证据，边界抽查
+    alt minor
+      R--&gt;&gt;D: move_task 退回（附说明），开发沿用原会话
+    else direction / 第 3 轮
+      R-&gt;&gt;MM: KMSG ESCALATE
+      Note over D: 等待决策
+      MM--&gt;&gt;D: 改契约后 move_task 退回，或 stop_task 后拆分
+    else pass
+      R--&gt;&gt;D: step_complete → 合并到模块分支
+    end
+    deactivate R
+  end
+  deactivate D
+  Note over D: 子任务结束（仍可被提问唤醒）
+  D--&gt;&gt;MM: 全部子任务结束 → on_children_completed
+
+  rect rgb(243, 244, 246)
+    participant G as 守护（Kandev automation）
+    G-&gt;&gt;MM: KMSG ALERT（只读巡检：会话过长 / 卡住）
+    MM--&gt;&gt;D: INSTRUCT 写检查点后带 reset_context 重开，或拆分
+    G-&gt;&gt;PM: KMSG ALERT（调度会话过长）
+    PM-&gt;&gt;PM: 写「刷新返回」→ 移到「刷新」→ 重置后移回「调度」
+  end
+
+  Note over MM: 验收调查（重置上下文）：先查 FAILED 子任务
+  opt 交付物（report / review）不清楚：谁担当就问谁
+    MM-&gt;&gt;D: KMSG QUESTION（最多 2 轮，不翻对话或代码）
+    D--&gt;&gt;MM: KMSG ANSWER（只答不改）
+  end
+  alt 模块验收不通过（第 3 次进入前）
+    MM-&gt;&gt;MM: 建修复子任务，回到等待开发
+  else 跨模块问题 / 超限
+    MM-&gt;&gt;PM: KMSG ESCALATE
+    PM--&gt;&gt;MM: KMSG DECISION（ADR）
+  end
+  MM-&gt;&gt;PM: KMSG REPORT（模块上报）
+  deactivate MM
+
+  Note over PM: 调度：全部模块完成
+  PM-&gt;&gt;AU: move_task → 项目验收（新会话）
+  activate AU
+  alt PA 全部通过
+    AU-&gt;&gt;U: step_complete → 人工终审（final-report 写明运行方式）
+  else 有 fail
+    AU--&gt;&gt;PM: move_task 回模块下发（建修复任务）
+  end
+  deactivate AU
+  alt 用户批准
+    U-&gt;&gt;PM: 拖到「收尾合并」
+    Note over PM: 收尾合并（mechanical）：integration → 基线、冒烟、清理【正常出口】
+  else 用户有意见
+    U-&gt;&gt;PM: 发消息 → 带意见回到模块下发
+  end
+  deactivate PM
+</pre>
+<div id="err"></div>
+<script>mermaid.initialize({startOnLoad:false});mermaid.run({querySelector:'.mermaid'}).then(()=>{document.title='ok'}).catch(e=>{document.getElementById('err').textContent='ERR '+(e.message||e);document.title='err'});</script>
+</body></html>

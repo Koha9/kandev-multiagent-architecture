@@ -1,0 +1,41 @@
+{
+  "project": "<project>",
+  "mgmt_root": "<D:/WorkSpace/<project>-mgmt>",
+  "repo": "<D:/WorkSpace/<project>>",
+  "base_branch": "main",
+  "updated": "2026-11-09 10:00",
+  "kandev_ids": {
+    "workspace": "<uuid>",
+    "w2_module_workflow": "<uuid>",
+    "w2_module_plan_step": "<uuid>",
+    "w3_dev_workflow": "<uuid>",
+    "w3_dev_step": "<uuid>",
+    "w3_hold_step": "<uuid>"
+  },
+  "agents": [
+    {
+      "scope": "pm",
+      "role": "pm",
+      "kandev_task_id": "<uuid>",
+      "owns": ["project/*", "跨模块决策", "项目规范", "与用户沟通"],
+      "branch": null,
+      "status": "active"
+    },
+    {
+      "scope": "mod:auth",
+      "role": "module",
+      "kandev_task_id": null,
+      "owns": ["modules/auth/*", "auth 模块对外接口", "auth 子任务的契约与验收"],
+      "branch": "mod/auth",
+      "status": "active"
+    },
+    {
+      "scope": "guard",
+      "role": "guard",
+      "kandev_task_id": null,
+      "owns": ["上下文巡检"],
+      "branch": null,
+      "status": "active"
+    }
+  ]
+}

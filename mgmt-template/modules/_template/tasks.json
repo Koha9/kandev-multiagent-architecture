@@ -1,0 +1,36 @@
+{
+  "module": "auth",
+  "branch": "mod/auth",
+  "updated": "2026-11-09 10:00",
+  "_status_values": "planned | creating | held（在「待开发」等前置） | todo（已进入「开发」） | merged | dropped | failed",
+  "tasks": [
+    {
+      "id": "auth-01",
+      "title": "用户表与密码哈希",
+      "owns": ["src/auth/models/", "tests/auth/test_models.py"],
+      "blocked_by": [],
+      "acceptance": ["AC-1 密码以 argon2 哈希存储 · covers: MA-1", "AC-2 用户名唯一约束 · covers: MA-2"],
+      "refs": ["R-1"],
+      "ui": false,
+      "kandev_task_id": null,
+      "status": "planned",
+      "passes": false,
+      "review_rounds": 0,
+      "note": ""
+    },
+    {
+      "id": "auth-02",
+      "title": "登录接口",
+      "owns": ["src/auth/api/login.py", "tests/auth/test_login.py"],
+      "blocked_by": ["auth-01"],
+      "acceptance": ["AC-1 正确凭据返回 token · covers: MA-3", "AC-2 错误凭据返回 401 BAD_CREDENTIALS · covers: MA-3"],
+      "refs": ["R-1"],
+      "ui": false,
+      "kandev_task_id": null,
+      "status": "planned",
+      "passes": false,
+      "review_rounds": 0,
+      "note": ""
+    }
+  ]
+}

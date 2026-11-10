@@ -1,0 +1,17 @@
+{
+  "phase": "planning",
+  "updated": "2026-11-09 10:00",
+  "modules": [
+    {
+      "name": "auth",
+      "kandev_task_id": null,
+      "status": "blocked",
+      "done": 0,
+      "total": 0,
+      "last_report": null,
+      "blocked_reason": null
+    }
+  ],
+  "open_escalations": [],
+  "open_decisions": []
+}

@@ -1,0 +1,4 @@
+# 管理目录用 git 管理时生效
+*.lock
+*.tmp
+__pycache__/

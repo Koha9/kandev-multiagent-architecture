@@ -1,0 +1,50 @@
+# 环境基线 · <project>
+
+> 写者：pm（环境基线步骤）。所有开发会话开始时都要按「冒烟测试」一节执行一遍。
+
+## 运行环境
+- OS / Shell：
+- 语言与版本：
+- 解释器或环境：<例如 conda 环境名，写在仓库根目录的 .conda-env>
+
+## 安装
+```
+<从零到可运行的命令，按顺序>
+```
+
+## 常用命令
+| 用途 | 命令 | 期望 |
+|---|---|---|
+| 构建 | | |
+| 单元测试 | | 全部通过 |
+| lint / 类型检查 | | 无错误 |
+
+## 冒烟测试
+- 命令：`<一条命令>`
+- 期望输出：<关键一行>
+- 耗时：<约 N 秒>
+
+## Copy files（Kandev 仓库设置）
+- `<.conda-env>`
+- `<.env.local>`
+
+## 合并方式
+- 开发分支合入模块分支：<PR（base=mod/<模块>）+ 必需检查 | 本地由模块 agent 合并>
+
+## 约束落实
+<!-- 对应 conventions「约束清单」，写出可直接执行的命令。 -->
+| 约束 | 命令或机制 | 已验证 |
+|---|---|---|
+| 禁止推送 | `git -C <repo> remote set-url --push origin DISABLED` | <日期> |
+| owns 检查 | `python <mgmt_root>/tools/check_owns.py --tasks <mgmt_root>/modules/<模块>/tasks.json --task <任务id> --base mod/<模块>` | |
+| 额度账本 | 账本 `<mgmt_root>/quota/ledger.json`；打开真实调用时同时设置 `MA_QUOTA_LEDGER=<账本>`、`MA_QUOTA_TOOL=<mgmt_root>/tools/quota.py`；查看用量 `python <mgmt_root>/tools/quota.py --ledger <账本> show` | |
+| 真实调用开关 | `<PROJECT>_REAL_AI=1`（conftest 检查，未设置一律 skip） | |
+
+## 截图
+<!-- 有界面的项目填写；ui: true 的任务按这里截图 -->
+- 工具与命令：<例如 Playwright 脚本 `scripts/shot.ps1 <url> <out>`>
+- 视口：<例如 390×844、700×1000、1440×900>
+- 存放：`<mgmt_root>/evidence/<任务id>/`，文件名 `<页面>-<视口>-before|after.png`
+
+## 已知问题
+- 无

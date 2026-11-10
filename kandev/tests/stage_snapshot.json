@@ -1,0 +1,22 @@
+{
+ "pm_task": "00000000-0000-0000-0000-0000000000aa",
+ "tasks": [
+  {"id": "00000000-0000-0000-0000-0000000000aa", "title": "pm", "workflow": "多Agent · 项目管理", "step": "立项规划", "state": "IN_PROGRESS",
+   "sessions": [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]},
+  {"id": "00000000-0000-0000-0000-0000000000bb", "title": "mod:core", "workflow": "多Agent · 模块管理", "step": "等待开发", "state": "IN_PROGRESS",
+   "description": "[TASK v1]\nparent: pm @ task 00000000-0000-0000-0000-0000000000aa\npm: task 00000000-0000-0000-0000-0000000000aa\n",
+   "sessions": [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]},
+  {"id": "00000000-0000-0000-0000-000000000001", "title": "core-01", "workflow": "多Agent · 开发", "step": "完成", "state": "COMPLETED",
+   "description": "parent: mod:core @ task 00000000-0000-0000-0000-0000000000bb"},
+  {"id": "00000000-0000-0000-0000-000000000002", "title": "core-02", "workflow": "多Agent · 开发", "step": "待开发", "state": "CREATED",
+   "description": "parent: mod:core @ task 00000000-0000-0000-0000-0000000000bb", "blockers": ["00000000-0000-0000-0000-000000000001"]},
+  {"id": "00000000-0000-0000-0000-000000000003", "title": "core-03", "workflow": "多Agent · 开发", "step": "开发", "state": "IN_PROGRESS",
+   "description": "parent: mod:core @ task 00000000-0000-0000-0000-0000000000bb", "wip_step": true, "wip_admitted": true,
+   "sessions": [{"state": "RUNNING", "updated_at": "2026-11-09T04:50:00Z"}]},
+  {"id": "00000000-0000-0000-0000-000000000004", "title": "core-04", "workflow": "多Agent · 开发", "step": "开发", "state": "CREATED",
+   "description": "parent: mod:core @ task 00000000-0000-0000-0000-0000000000bb", "wip_step": true, "wip_admitted": false},
+  {"id": "00000000-0000-0000-0000-000000000005", "title": "core-05", "workflow": "多Agent · 开发", "step": "审核", "state": "IN_PROGRESS",
+   "description": "parent: mod:core @ task 00000000-0000-0000-0000-0000000000bb", "perm": 1,
+   "sessions": [{"state": "RUNNING", "updated_at": "2026-11-09T04:59:00Z"}]}
+ ]
+}
