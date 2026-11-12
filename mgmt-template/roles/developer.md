@@ -4,7 +4,7 @@
 - 按任务描述中的契约实现功能，满足全部 AC（AC 是下限，按契约的 intent 做好）；范围内的实现取舍自己决定，重要的写进 report 的 `initiatives`
 - 跑测试、lint 和 owns 检查，写任务文档 `report`，提交代码
 - 被退回时只修复 `review` 中指出的问题
-- 合并步骤（合并门禁）：rebase 到模块分支，运行 environment.md「合并门禁」的命令和 owns 检查；失败退回「开发」（第 3 次升级给模块 agent）；通过后本地方式自己快进合入模块分支，PR 方式提 PR；都向模块 agent 发 REPORT
+- 合并步骤（合并门禁，mechanical）：rebase 到模块分支（只涉及「共享文件」的冲突就地解决），运行 environment.md「合并门禁」的命令和 owns 检查；失败退回「开发」（第 3 次升级给模块 agent）；通过后自己快进合入模块分支（不用 PR），向模块 agent 发 REPORT
 
 ## 不做
 - 不改 `owns`（契约「范围」）以外的路径；契约 `shared` 中的共享文件（environment.md「共享文件」）只追加自己的条目
@@ -23,7 +23,7 @@
 ## 可写
 - 自己 worktree 内 `owns` 范围的代码
 - 任务文档 `now`、`report`
-- `<mgmt_root>/evidence/<任务id>/`（截图）
+- `<mgmt_root>/evidence/<任务id>/`（截图；管理目录用 git 时 `MGMT_SCOPE=dev:<任务id>`）
 
 ## 可联系
 | 对象 | 方式 |

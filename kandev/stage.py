@@ -30,8 +30,13 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
   4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
   5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
   6 等上级    最新会话 FAILED / CANCELLED                 → 告警上级 session_failed
-  7 等上级    步骤=待开发，前置中有 FAILED / CANCELLED    → 告警上级 hold_broken
+  7 等上级    步骤=待开发，前置失败                       → 告警上级 hold_broken
   8 等上级    步骤=待开发，前置全部完成，停留 ≥10 分钟    → 告警上级 hold_ready
+              前置关系取自 <mgmt_root>/modules/*/tasks.json（含 -fix-<n> 修复模块）：任务的 blocked_by 中每个任务
+              status 都是 merged / dropped → 完成；有 status=failed → 失败。v3.1 任务在 Kandev 里设置的 blocked_by
+              仍然有效（FAILED / CANCELLED 为失败，未到「完成」为未完成）。两种来源任一表明未完成就不放行；
+              读不到 tasks.json 或解析失败时，只剩 Kandev 来源；两者都没有 → 只在 stage.md 显示，不告警
+  8a 等上级   步骤=开发，前置未满足、还没有会话，停留 ≥10 分钟 → 告警上级 dev_blocked（v3.2 不应出现，多见于 v3.1 任务）
   9 等上级    要求完成信号的步骤中会话已空闲 ≥10 分钟     → 告警上级 idle_no_signal
               例外：W1（项目管理）的这类步骤，会话属于 pm 以外的评审者 / 机械 agent，发给 pm 没人处理 →
               归为"等人：空闲未推进"，只写进 stage.md（步骤和空闲分钟数），不告警
@@ -72,6 +77,7 @@ LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会
 ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
+PREREQ_DONE = {"merged", "dropped"}      # tasks.json 中算"前置已完成"的 status
 GUARD_NAME = "多Agent 守护"
 RESUME_TEXT = ("continue\n\n（守护 guard：本会话上一轮因到达用量上限而中断，上限已于 {reset} 重置。请从中断处继续当前步骤："
                "先核对 NOW / now、磁盘与 git 的实际状态，已经完成的操作不要重复。）")
@@ -100,6 +106,19 @@ def header_field(desc, name):
 def header_task(desc, name):
     m = re.search(rf"task\s+({UUID})", header_field(desc, name))
     return m.group(1) if m else None
+
+
+def prereq_state(t, by_id):
+    """任务前置的状态：(是否有前置信息, 是否有失败的前置, 前置是否全部完成)。
+    两个来源：t["blocker_status"]（tasks.json 中 blocked_by 各任务的 status，None 表示读不到）、
+    t["blockers"]（v3.1：Kandev 中的前置任务 id，用它们的 step / state 判断）。"""
+    statuses, kblockers = t.get("blocker_status") or [], t.get("blockers") or []
+    known = bool(statuses or kblockers)
+    kb = [by_id.get(b) for b in kblockers]
+    failed = "failed" in statuses or any(b and b["state"] in ("FAILED", "CANCELLED") for b in kb)
+    done = (all(s in PREREQ_DONE for s in statuses)
+            and all(b and (b["step"] == DONE or b["state"] == "COMPLETED") for b in kb))
+    return known, failed, done and known
 
 
 def mins(a, b):
@@ -191,13 +210,13 @@ def classify(t, now, by_id):
         return r("等上级：等待决策", "decision_pending" if in_step >= T_DECISION else None, in_step, T_DECISION)
     if s0 and s0.get("state") in ("FAILED", "CANCELLED"):
         return r("等上级：会话失败", "session_failed", s0["state"], "-")
+    known, pre_failed, pre_done = prereq_state(t, by_id)
     if step == HOLD:
-        if not t.get("blockers"):
+        if not known:
             return r("待开发（tasks.json 中查不到前置）")
-        blockers = [by_id.get(b) for b in t["blockers"]]
-        if any(b and (b["state"] in ("FAILED", "CANCELLED")) for b in blockers):
-            return r("等上级：前置失败", "hold_broken", "前置 FAILED/CANCELLED", "-")
-        if all(b and (b["step"] == DONE or b["state"] == "COMPLETED") for b in blockers):
+        if pre_failed:
+            return r("等上级：前置失败", "hold_broken", "前置 failed / FAILED / CANCELLED", "-")
+        if pre_done:
             return r("等上级：可放行", "hold_ready" if in_step >= T_HOLD else None, in_step, T_HOLD)
         return r("待开发")
     if step in SIGNAL_STEPS and s0 and s0.get("state") in IDLE_STATES and idle >= T_IDLE:
@@ -206,6 +225,8 @@ def classify(t, now, by_id):
         return r("等上级：空闲未推进", "idle_no_signal", idle, T_IDLE)
     if s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
         return r("等上级：疑似卡住", "running_stale", idle, T_STALE)
+    if step == "开发" and not s0 and known and not pre_done and t["workflow"].endswith("开发"):
+        return r("等上级：开发步骤前置未满足", "dev_blocked" if in_step >= T_IDLE else None, in_step, T_IDLE)
     if (t.get("wip_step") and t.get("wip_admitted") is False) or (step in AGENT_STEPS and not s0):
         return r("排队", value=in_step)
     if step in RESIDENT:
@@ -221,7 +242,7 @@ def route(t, pm_task):
     return t["id"]
 
 
-SUGGEST = {"decision_pending": "unblock", "session_failed": "unblock", "hold_broken": "split",
+SUGGEST = {"dev_blocked": "unblock", "decision_pending": "unblock", "session_failed": "unblock", "hold_broken": "split",
            "hold_ready": "unblock", "idle_no_signal": "unblock", "running_stale": "refresh", "limit_resume": "continue"}
 SELF_SIGNALS = {"limit_resume"}   # 发给任务自己、不升级的信号
 
@@ -262,7 +283,8 @@ def evaluate(tasks, now, state, pm_task):
 
 # ------------------------------------------------------------------ data collection
 def load_blockers(mgmt_root):
-    """kandev task id -> [kandev ids of blocked_by], from modules/*/tasks.json."""
+    """kandev task id -> [blocked_by 各任务的 status]，取自 modules/*/tasks.json（含 -fix-<n> 修复模块）。
+    blocked_by 中查不到的任务记为 None（视为未完成）。文件不存在或解析失败的模块跳过，不报错。"""
     out = {}
     mods = os.path.join(mgmt_root, "modules")
     if not os.path.isdir(mods):
@@ -275,10 +297,23 @@ def load_blockers(mgmt_root):
             tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
         except (OSError, json.JSONDecodeError):
             continue
-        kid = {t["id"]: t.get("kandev_task_id") for t in tasks}
-        for t in tasks:
-            if t.get("kandev_task_id"):
-                out[t["kandev_task_id"]] = [kid.get(b) for b in t.get("blocked_by", []) if kid.get(b)]
+        try:
+            status = {t["id"]: t.get("status") for t in tasks}
+            for t in tasks:
+                if t.get("kandev_task_id"):
+                    out[t["kandev_task_id"]] = [status.get(b) for b in t.get("blocked_by") or []]
+        except (TypeError, KeyError, AttributeError):
+            continue
+    return out
+
+
+def kandev_blockers(t):
+    """v3.1：任务在 Kandev 里设置的 blocked_by（list_tasks 返回的字段，形状不确定：id 字符串或带 id 的对象）。"""
+    out = []
+    for b in t.get("blocked_by") or []:
+        bid = b if isinstance(b, str) else (b.get("blocked_by_task_id") or b.get("task_id") or b.get("id")) if isinstance(b, dict) else None
+        if bid:
+            out.append(bid)
     return out
 
 
@@ -315,7 +350,7 @@ def collect(ids):
             step = names.get(t["workflow_step_id"], "?")
             item = {"id": t["id"], "title": t["title"], "workflow": wname, "step": step, "state": t["state"],
                     "description": t.get("description", ""), "wip_admitted": t.get("wip_admitted"),
-                    "wip_step": step in wip_steps, "blockers": [],
+                    "wip_step": step in wip_steps, "blockers": kandev_blockers(t),
                     "question": t["id"] in pq_tasks, "sessions": [], "perm": 0}
             if step != DONE and t["state"] != "COMPLETED":
                 item["sessions"] = k.call("list_task_sessions_kandev", {"task_id": t["id"]}).get("sessions", [])
@@ -455,7 +490,7 @@ def main():
         if ready and not a.snapshot:
             blockers = load_blockers(root)
             for t in pr["tasks"]:
-                t["blockers"] = blockers.get(t["id"], [])
+                t["blocker_status"] = blockers.get(t["id"])
         state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
         state = json.load(open(state_path, encoding="utf-8")) if os.path.exists(state_path) else {}
         rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])

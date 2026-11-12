@@ -179,6 +179,7 @@ ID rules:
 | `agents[].kandev_task_id` | filled in after creation | yes |
 | `agents[].owns` | ownership scope (files or responsibilities), used for "whom to ask" | requires an ADR |
 | `agents[].branch` | module branch | no |
+| `agents[].current_branch` | current branch: the original branch or the latest fix branch; every merge of module branches uses only this | yes (the pm updates it when a fix module finishes) |
 | `agents[].status` | `active` / `done` / `failed` | yes |
 
 Ownership of development tasks is not in the registry; it is recorded in the corresponding module's `tasks.json`.
@@ -198,7 +199,7 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 |---|---|---|
 | `id`, `title` | task identity | no |
 | `owns` | paths this task may modify, i.e. its ownership scope | requires replanning |
-| `blocked_by` | prerequisite task ids | requires replanning |
+| `blocked_by` | prerequisite task ids (recorded only here; Queued tasks in Kandev have no blocked_by) | requires replanning |
 | `acceptance` | AC list, each with `covers: MA-n` | requires replanning, plus an entry in acceptance.md |
 | `refs` | requirement sources (R numbers in the charter) | requires replanning |
 | `tests` | list of directly runnable test commands (the contract's test commands match it) | requires replanning |

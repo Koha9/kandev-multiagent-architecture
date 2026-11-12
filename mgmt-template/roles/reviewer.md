@@ -13,7 +13,7 @@
 5. 接口与 `interfaces.md` 一致
 6. `ui: true` 的任务：report 的截图存在，并与 AC 一致，结果写进 `visual_check`
 7. 让功能显得没做完、达不到契约意图的问题
-8. 结合测试任务（kind: integration-test）：测试跑的是真实组装的应用，断言的是用户可见的结果和数据状态；没有用 mock、skip 或放宽断言换取通过；`manual_checks` 中的手动验证有原因和证据
+8. 结合测试任务（kind: integration-test）：测试跑的是真实组装的应用，断言的是用户可见的结果和数据状态；没有用 mock、skip 或放宽断言换取通过（引用 ADR 编号的已知问题预期失败不算）；`manual_checks` 中的手动验证有原因和证据
 
 ## 不做
 - 不提纯个人口味的偏好，不干预内部实现方式

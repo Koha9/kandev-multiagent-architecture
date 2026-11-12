@@ -49,8 +49,10 @@
 ## 调度（常驻，只做路由）
 - 不论对话历史是否还在，以 NOW 和文件为准：先执行恢复协议
 - 模块 REPORT → status.json；ESCALATE → ADR + DECISION，或按运行模式问用户
-- 结合测试模块上报缺陷或合并冲突 → 按担当模块建修复模块任务（从集成分支切出）；修复完成后通知结合测试模块重新合并并重跑；同一缺陷 2 轮仍不过 → attended 问用户，unattended 登记 attention.md 并停止该缺陷的修复
-- 修复模块报 misrouted → 转给结合测试模块，由报告缺陷的测试任务重新判断；这一轮不计入修复轮数
+- 结合测试模块上报缺陷或合并冲突 → 按担当模块建修复模块任务（从集成分支切出；集成分支还不存在时从担当模块的 `current_branch` 切出）；修复完成后通知结合测试模块重新合并并重跑；同一缺陷 2 轮仍不过 → attended 问用户，unattended 登记 attention.md 并停止该缺陷的修复
+- 修复模块报 misrouted（它已自己结束）→ status.json 标 dropped。来源是结合测试缺陷：转给结合测试模块，由报告缺陷的测试任务重新判断，这一轮不计入修复轮数；来源是项目验收修复项：status.json 记 misrouted 和证据指针，留给下一轮项目验收
+- 修复模块完成 → registry.json 把担当模块的 `current_branch` 改为修复分支，给依赖它且仍在进行中的模块发 NOTICE
+- attended 时也只有阻塞全局的问题才在调度里 ask_user，其余登记 attention.md 留到门禁
 - ESCALATE / DECISION 影响到已完成的模块（接口变更、新依赖）→ 为它建修复模块任务，不给已完成的任务发消息
 
 ## 刷新

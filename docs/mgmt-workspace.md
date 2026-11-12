@@ -179,6 +179,7 @@ ID 规则：
 | `agents[].kandev_task_id` | 创建后回填 | 是 |
 | `agents[].owns` | 担当范围（文件或职责），用于"问谁" | 需 ADR |
 | `agents[].branch` | 模块分支 | 否 |
+| `agents[].current_branch` | 当前分支：原分支，或最新的修复分支；所有合并各模块分支的地方只合它 | 是（修复模块完成时 pm 更新） |
 | `agents[].status` | `active` / `done` / `failed` | 是 |
 
 开发任务的担当关系不进 registry，记在对应模块的 `tasks.json`。
@@ -198,7 +199,7 @@ ID 规则：
 |---|---|---|
 | `id`、`title` | 任务标识 | 否 |
 | `owns` | 这个任务允许修改的路径，也就是它的担当范围 | 需重新规划 |
-| `blocked_by` | 前置任务 id | 需重新规划 |
+| `blocked_by` | 前置任务 id（只记在这里，Kandev 的「待开发」任务不设 blocked_by） | 需重新规划 |
 | `acceptance` | AC 列表，每条写 `covers: MA-n` | 需重新规划，并在 acceptance.md 记一笔 |
 | `refs` | 需求出处（charter 的 R 编号） | 需重新规划 |
 | `tests` | 可直接执行的测试命令列表（契约中的测试命令与它一致） | 需重新规划 |

@@ -29,8 +29,9 @@
 | 4b | 等上限：等待重置 | 最新会话停在用量上限，还没到重置时间 | 不告警，只写进 stage.md |
 | 5 | 等上级：等待决策 | 步骤=等待决策，停留 ≥10 分钟（开发任务上报 blocked / dropped / 缺陷后自己移到这里；不会再判为空闲未推进） | `decision_pending` |
 | 6 | 等上级：会话失败 | 最新会话 FAILED / CANCELLED | `session_failed` |
-| 7 | 等上级：前置失败 | 步骤=待开发，前置中有 FAILED / CANCELLED | `hold_broken` |
+| 7 | 等上级：前置失败 | 步骤=待开发，前置有 failed（tasks.json）或 FAILED / CANCELLED（v3.1 的 Kandev 前置） | `hold_broken` |
 | 8 | 等上级：可放行 | 步骤=待开发，前置全部完成，停留 ≥10 分钟 | `hold_ready` |
+| 8a | 等上级：开发步骤前置未满足 | 步骤=开发，前置未满足、还没有会话，停留 ≥10 分钟（v3.2 不应出现，多见于 v3.1 任务；不再无声地归为排队） | `dev_blocked` |
 | 9 | 等上级：空闲未推进 | 要求完成信号的步骤中会话已空闲 ≥10 分钟（W2 / W3） | `idle_no_signal` |
 | 9a | 等人：空闲未推进 | 同上，但任务属于 W1（项目管理）：这些步骤的会话是评审者 / 机械 agent / 等 pm 的，发给 pm 没人处理 | 不告警，只写进 stage.md（步骤和空闲分钟数） |
 | 10 | 等上级：疑似卡住 | 会话 RUNNING 但 ≥45 分钟没有更新 | `running_stale` |
@@ -39,6 +40,7 @@
 | 13 | 常驻 | 步骤=调度 / 等待开发 | — |
 | 14 | 运行中 | 其他 | — |
 
+- **前置关系的来源**：v3.2 的「待开发」任务不在 Kandev 里设 blocked_by，前置只记在 `modules/<模块>/tasks.json`（含 `-fix-<n>` 修复模块）。任务 `blocked_by` 中每个任务 status 都是 `merged` / `dropped` 才算完成，有 `failed` 算失败；v3.1 任务在 Kandev 里设置的 blocked_by 仍然有效，两种来源任一表明未完成就不放行。读不到 tasks.json 时只剩 Kandev 来源，都没有就只在 stage.md 显示
 - 同一任务的同一信号 60 分钟内只告警一次（去重状态存在架构仓库的 `kandev/guard_state/<pm 任务 id>.json`，不在管理目录里）
 - pm 的告警发给 pm 自己；pm 停在常驻步骤（调度）时，同一信号 60 分钟后仍未消除 → `pm_unresponsive`，输出带 `return_step`（当前步骤名）。pm 在立项规划、模块下发、项目验收、收尾合并等其他步骤不升级为 `pm_unresponsive`（刷新默认回到「调度」，会跳过剩下的工作），到期后重发原信号
 - 管理目录还没初始化（没有 README.md，例如立项规划刚开始）时，不写 stage.md，以免干扰 pm 判断"管理目录是否存在"

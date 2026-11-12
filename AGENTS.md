@@ -64,16 +64,16 @@
 2. **结构**：`python kandev/verify_export.py` 的输出中：
    - W1 有 11 个步骤（0 待立项 … 9 完成、10 刷新，没有「环境基线」），「立项规划」start=True；立项评审、项目验收、收尾合并的会话策略是 `new/complete`；`5 调度` 的 on_enter 是 reset_agent_context + auto_start_agent；`3 立项确认` 的 on_turn_start 是 `move_to_step {'step_position': 1}`，`7 人工终审` 的是 `move_to_step {'step_position': 4}`。
    - W2 有 5 个步骤，「等待开发」的事件含 reset_agent_context + auto_start_agent 和 `on_children_completed: move_to_next`；「验收调查」的会话策略是 `new/complete`。
-   - W3：`0 待开发`（无 prompt、无事件、wip=0）、`1 开发`（start=True，wip=4）、`2 审核` 的 on_turn_complete 是 `move_to_step {'step_position': 4}`、`4 合并` 的 on_turn_complete 和 on_pr_merged 都是 `move_to_step {'step_position': 5}`。
+   - W3：`0 待开发`（无 prompt、无事件、wip=0）、`1 开发`（start=True，wip=4）、`2 审核` 的 on_turn_complete 是 `move_to_step {'step_position': 4}`、`4 合并` 的 on_turn_complete 是 `move_to_step {'step_position': 5}`（没有 on_pr_merged）。
    - 所有 agent 步骤的 profile 是第 A2 步确认的那几个模型，不是 `-`（立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
    - `kandev/export/W2-module.json` 中出现 `<W3_DEV_STEP_ID>`、`<W3_HOLD_STEP_ID>`（说明部署的 prompt 里写入了真实 ID，导出时被替换回占位符）。
 3. **「待开发」行为**（会启动一次真实会话，先征得用户同意）：
    | # | 操作 | 期望 |
    |---|---|---|
-   | a | 在 W3 建临时任务 A：`workflow_step_id`=「待开发」，`start_agent=false`，prompt="只回复 OK，然后结束本轮，不做任何其他事" | A 停在「待开发」，没有会话 |
-   | b | 再建 B：同样建到「待开发」，`start_agent=false`，`start_when_unblocked=false`，`blocked_by=[A]`；然后把 A 移到「完成」 | B 仍在「待开发」，没有被自动启动 |
-   | c | 把 B 移到「开发」 | B 启动会话（on_enter auto_start）；回复 OK 后因为没有完成信号停在「开发」 |
-   | d | 请用户删除 A、B（或经同意后删除） | 不留下 worktree 或分支 |
+   | a | 在 W3 建临时任务 A：`workflow_step_id`=「待开发」，`start_agent=false`，不设 blocked_by，prompt="只回复 OK，然后结束本轮，不做任何其他事" | A 停在「待开发」，没有会话 |
+   | b | 等 1 分钟后再看 A | A 仍在「待开发」，没有被自动启动 |
+   | c | 把 A 移到「开发」 | A 启动会话（on_enter auto_start）；回复 OK 后因为没有完成信号停在「开发」 |
+   | d | 请用户删除 A（或经同意后删除） | 不留下 worktree 或分支 |
 
    任一项不符合期望：记为 fail，不要启动项目，回报给用户。
 4. **守护**：`list_settings_resources_kandev`（`resource_type=automation`）中有「多Agent 守护」且已启用；`python kandev/stage.py --json` 退出码 0（没有进行中的项目时无输出）；守护运行过一次后，`kandev/guard_state/last_run.json` 的 `at` 在 20 分钟以内。

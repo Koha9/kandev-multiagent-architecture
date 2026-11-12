@@ -6,7 +6,7 @@ from datetime import timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from stage import evaluate, group_projects, parse_reset, should_disable, ts, usage_limit  # noqa: E402
+from stage import evaluate, group_projects, load_blockers, parse_reset, should_disable, ts, usage_limit  # noqa: E402
 
 PM, MOD = "00000000-0000-0000-0000-0000000000aa", "00000000-0000-0000-0000-0000000000bb"
 
@@ -45,6 +45,8 @@ def main():
     test_steps_v32()
     test_pm_unresponsive()
     test_w1_idle_and_decision()
+    test_hold_from_tasks_json()
+    test_load_blockers()
     print("OK test_stage")
 
 
@@ -195,6 +197,63 @@ def test_w1_idle_and_decision():
     assert [(a["signal"], a["to_task"]) for a in alerts] == [("decision_pending", uid(11))], alerts
     rows, alerts, st = evaluate([d], now + timedelta(minutes=40), st, uid(1))
     assert alerts == [], alerts
+
+
+def test_hold_from_tasks_json():
+    """v3.2：「待开发」的前置取自 tasks.json 的 status；v3.1 的 Kandev 前置仍然有效。"""
+    now = ts("2026-11-09T05:00:00Z")
+    later = now + timedelta(minutes=15)
+
+    def cat(statuses, kblockers=(), extra=(), step="待开发"):
+        h = task(30, "开发", step, f"parent: mod:a @ task {uid(11)}")
+        h["blocker_status"], h["blockers"] = statuses, list(kblockers)
+        rows, first, st = evaluate([h, *extra], now, {}, uid(1))
+        rows, second, st = evaluate([h, *extra], later, st, uid(1))      # 15 分钟后（去重：同一信号不重复）
+        return rows[0]["category"], [(a["signal"], a["to_task"]) for a in first + second]
+
+    assert cat(["merged", "dropped"]) == ("等上级：可放行", [("hold_ready", uid(11))])
+    assert cat(["merged", "todo"]) == ("待开发", [])
+    assert cat(["merged", None]) == ("待开发", [])                                   # blocked_by 在 tasks.json 里查不到
+    assert cat(["merged", "failed"]) == ("等上级：前置失败", [("hold_broken", uid(11))])
+    assert cat(["held"]) == ("待开发", [])
+    assert cat(None) == ("待开发（tasks.json 中查不到前置）", [])                      # 读不到 tasks.json：只显示，不告警
+    # v3.1：Kandev 里的前置
+    k_done = task(40, "开发", "完成", "", state="COMPLETED")
+    k_run = task(41, "开发", "开发", "")
+    k_bad = task(42, "开发", "开发", "", state="FAILED")
+    assert cat(None, [uid(40)], [k_done]) == ("等上级：可放行", [("hold_ready", uid(11))])
+    assert cat(None, [uid(40), uid(41)], [k_done, k_run]) == ("待开发", [])
+    assert cat(None, [uid(42)], [k_bad]) == ("等上级：前置失败", [("hold_broken", uid(11))])
+    # 两种来源任一表明未完成就不放行
+    assert cat(["merged"], [uid(41)], [k_run]) == ("待开发", [])
+    assert cat(["todo"], [uid(40)], [k_done]) == ("待开发", [])
+    # 「开发」步骤里前置未满足、没有会话：不再无声地排队，向模块 agent 告警一次
+    c, al = cat(["todo"], step="开发")
+    assert c == "等上级：开发步骤前置未满足" and al == [("dev_blocked", uid(11))], (c, al)
+    c, al = cat(["merged"], step="开发")                                             # 前置满足：照常排队
+    assert c == "排队" and al == [], (c, al)
+    c, al = cat(None, step="开发")                                                   # 没有前置信息：照常排队
+    assert c == "排队" and al == [], (c, al)
+
+
+def test_load_blockers():
+    import tempfile
+    with tempfile.TemporaryDirectory() as root:
+        def put(mod, text):
+            os.makedirs(os.path.join(root, "modules", mod))
+            with open(os.path.join(root, "modules", mod, "tasks.json"), "w", encoding="utf-8") as f:
+                f.write(text)
+        put("auth", json.dumps({"tasks": [
+            {"id": "a-1", "kandev_task_id": "K1", "blocked_by": [], "status": "merged"},
+            {"id": "a-2", "kandev_task_id": "K2", "blocked_by": ["a-1", "a-9"], "status": "held"}]}))
+        put("auth-fix-1", json.dumps({"tasks": [{"id": "f-1", "kandev_task_id": "K3", "blocked_by": ["f-0"]},
+                                                {"id": "f-0", "kandev_task_id": "K4", "status": "failed"}]}))
+        put("broken", "{坏的")
+        put("weird", json.dumps({"tasks": ["不是对象"]}))
+        put("_template", json.dumps({"tasks": [{"id": "x", "kandev_task_id": "KX"}]}))
+        got = load_blockers(root)
+        assert got == {"K1": [], "K2": ["merged", None], "K3": ["failed"], "K4": []}, got
+        assert load_blockers(os.path.join(root, "nope")) == {}
 
 
 def uid(n):

@@ -12,7 +12,7 @@ W2「验收调查」步骤的独立验收者。用全新会话（profile `module
 - pm 的 DECISION 已接受为已知问题的项记 `unverified(已知问题，ADR 编号)`，不算 fail，所以可以 REPORT partial 结束
 - 修复模块（scope `mod:<模块>-fix-<n>`）只核对修复项本身：复跑对应的失败测试和合并门禁，不重做整个模块的验收
 - 把每个 fail 写成可直接下发的修复项（格式见下），写进 `acceptance.md` 本轮一节
-- 收到与验收无关的 KMSG：不处理，原文记入本轮的「转交」节，在退回的 instructions 或 REPORT 中提示接手者
+- 收到与验收无关的 KMSG：不处理，原文记入本轮的「转交」节，在退回的 instructions 或 REPORT 中列出（通过时也列，由 pm 转给相关方）
 - 路由：通过 → REPORT 给 pm；有 fail → 退回「等待开发」；第 3 轮仍有 fail 或涉及其他模块 → ESCALATE 给 pm 后退回
 
 ## 修复项格式

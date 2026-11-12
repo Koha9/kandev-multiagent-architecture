@@ -28,6 +28,7 @@
       "kandev_task_id": null,
       "owns": ["modules/baseline/*", "project/environment.md", "仓库骨架、冒烟测试、检查脚本、约束落实"],
       "branch": "mod/baseline",
+      "current_branch": "mod/baseline",
       "status": "active"
     },
     {
@@ -36,6 +37,7 @@
       "kandev_task_id": null,
       "owns": ["modules/auth/*", "auth 模块对外接口", "auth 子任务的契约与验收"],
       "branch": "mod/auth",
+      "current_branch": "mod/auth",
       "status": "active"
     },
     {
