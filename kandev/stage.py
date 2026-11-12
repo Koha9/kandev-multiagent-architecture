@@ -28,21 +28,24 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
   4 等人      步骤=立项确认 / 人工终审                    → 同上
   4a 等上限   最新会话停在用量上限，已过重置时间 2 分钟   → 恢复该任务自己 limit_resume（不告警上级）
   4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
-  5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending
+  5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
   6 等上级    最新会话 FAILED / CANCELLED                 → 告警上级 session_failed
   7 等上级    步骤=待开发，前置中有 FAILED / CANCELLED    → 告警上级 hold_broken
   8 等上级    步骤=待开发，前置全部完成，停留 ≥10 分钟    → 告警上级 hold_ready
   9 等上级    要求完成信号的步骤中会话已空闲 ≥10 分钟     → 告警上级 idle_no_signal
+              例外：W1（项目管理）的这类步骤，会话属于 pm 以外的评审者 / 机械 agent，发给 pm 没人处理 →
+              归为"等人：空闲未推进"，只写进 stage.md（步骤和空闲分钟数），不告警
  10 等上级    会话 RUNNING 但 ≥45 分钟没有更新            → 告警上级 running_stale
  11 排队      在设了 WIP 的步骤但未获准入，或在 agent 步骤还没有会话
  12 待开发    步骤=待开发（前置未完成）
  13 常驻      步骤=调度 / 等待开发
  14 运行中    其他
 上级：开发任务 → [TASK v1] 头 parent 中的模块任务；模块任务 → pm；pm → pm 自己。limit_resume 发给任务自己。
-同一任务的同一信号 60 分钟内只告警一次；pm 的同一信号告警 60 分钟后仍未消除 → pm_unresponsive（守护把 pm 移到「刷新」）。
+同一任务的同一信号 60 分钟内只告警一次；pm 停在常驻步骤（调度）时，同一信号告警 60 分钟后仍未消除 → pm_unresponsive
+（守护把 pm 移到「刷新」，instructions 写「刷新返回：<return_step>」）。pm 在其他步骤不升级，到期后重发原信号。
 limit_resume 不升级为 pm_unresponsive：恢复后又碰到上限，就等新的重置时间，且距上次恢复 ≥60 分钟再试。
 --json 时标准输出每行一个要发出的告警（带 project、mgmt_root、journal；pm_unresponsive 另带 workflow_id 和
-refresh_step_id；limit_resume 另带 session_id 和 message）；否则打印给人看的摘要。没有进行中的项目且没有停用守护时
+refresh_step_id；pm_unresponsive 另带 return_step = 当前步骤名；limit_resume 另带 session_id 和 message）；否则打印给人看的摘要。没有进行中的项目且没有停用守护时
 什么都不输出。只用标准库。
 """
 import argparse
@@ -198,6 +201,8 @@ def classify(t, now, by_id):
             return r("等上级：可放行", "hold_ready" if in_step >= T_HOLD else None, in_step, T_HOLD)
         return r("待开发")
     if step in SIGNAL_STEPS and s0 and s0.get("state") in IDLE_STATES and idle >= T_IDLE:
+        if t["workflow"].endswith("项目管理"):   # 会话是评审者 / 机械 agent / 等 pm 的，告警 pm 没人处理：只给人看
+            return r("等人：空闲未推进", value=f"{step}，空闲 {idle} 分钟")
         return r("等上级：空闲未推进", "idle_no_signal", idle, T_IDLE)
     if s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
         return r("等上级：疑似卡住", "running_stale", idle, T_STALE)
@@ -238,10 +243,12 @@ def evaluate(tasks, now, state, pm_task):
             to_task = t["id"] if own else route(t, pm_task)
             is_pm = to_task == t["id"] and not own
             if last is None or now - last >= timedelta(minutes=T_DEDUP):
-                signal = "pm_unresponsive" if (is_pm and last is not None) else c["signal"]
+                signal = "pm_unresponsive" if (is_pm and last is not None and t["step"] in RESIDENT) else c["signal"]
                 al = {"to_task": to_task, "object": f"{t['title']} @ task {t['id']}", "step": t["step"],
                       "signal": signal, "value": c["value"], "threshold": c["threshold"],
                       "suggest": "refresh" if signal == "pm_unresponsive" else SUGGEST[c["signal"]]}
+                if signal == "pm_unresponsive":
+                    al["return_step"] = t["step"]
                 if own:
                     al.update({"session_id": t["limit"].get("session_id"), "message": RESUME_TEXT.format(reset=c["value"])})
                 alerts.append(al)

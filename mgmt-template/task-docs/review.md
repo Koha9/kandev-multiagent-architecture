@@ -4,7 +4,7 @@
 
 ```yaml
 task: auth-02
-round: 1                  # = 审核步骤的 step_entry_number
+round: 1                  # 自模块 agent 最近一次 INSTRUCT / 改契约之后的第几次审核（不是整个生命周期的进入次数）
 reviewer_session: <session uuid>   # 别人要就结论提问时，用它定位这次审核会话
 verdict: pass             # pass | minor | direction
 checks:                   # 审核者自己重跑的结果

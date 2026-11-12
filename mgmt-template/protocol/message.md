@@ -109,9 +109,10 @@ refs: <路径、文档名或 ADR，逗号分隔 | ->
 需要谁决定：<scope | 用户>
 等待期间我将：<暂停 X | 继续做不受影响的 Y>
 ```
-开发任务也用 ESCALATE 报告两种情况（经 `ask_parent_question_kandev`，refs 指向 report）：
+开发任务也用 ESCALATE 报告下面的情况（用 `message_task_kandev` 发给 parent，refs 指向 report，然后把自己移到「等待决策」，不占 WIP；普通提问仍用 `ask_parent_question_kandev`）：
 - 建议 dropped：读完契约和代码后发现无需改动。问题写"建议本任务 dropped"，选项 A=确认 dropped，B=按 <调整> 继续。
 - blocked：做不完。问题写卡住的原因，remaining 写在 report 里。
+- 结合测试任务测出产品缺陷：defects 写在 report 里，每条写明担当模块。
 
 ### DECISION（上级的决定，reply: none）
 ```

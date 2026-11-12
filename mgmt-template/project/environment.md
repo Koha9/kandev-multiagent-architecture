@@ -1,6 +1,6 @@
 # 环境基线 · <project>
 
-> 写者：baseline 模块 agent（mod:baseline），命令和结果取自它的开发子任务的 report。所有开发会话开始时都要按「冒烟测试」一节执行一遍；合并步骤按「合并门禁」执行。
+> 写者：baseline 模块 agent（mod:baseline；修复时为 mod:baseline-fix-<n>），命令和结果取自它的开发子任务的 report。所有开发会话开始时都要按「冒烟测试」一节执行一遍；合并步骤按「合并门禁」执行。
 
 ## 运行环境
 - OS / Shell：
@@ -33,6 +33,13 @@
 - 允许 mock 的外部调用：<只限消耗额度的，例如真实 AI>
 - 手动操作产品只作回退：自动化工具做不到的场景才用，并在 report 写明原因和证据
 
+## 共享文件
+<!-- 多个模块、任务都要追加条目的文件。tasks.json 的 shared 列出它们：允许多个任务修改，但只追加自己的条目。 -->
+| 文件 | 用途 | 每个模块在哪里追加 |
+|---|---|---|
+| `<package.json / requirements.txt>` | 依赖清单 | 按字母序追加自己的依赖 |
+| `<src/routes.py>` | 路由注册 | 在 `# --- modules ---` 下各追加一行 |
+
 ## Copy files（Kandev 仓库设置）
 - `<.conda-env>`
 - `<.env.local>`
@@ -53,7 +60,7 @@
 <!-- 对应 conventions「约束清单」，写出可直接执行的命令。 -->
 | 约束 | 命令或机制 | 已验证 |
 |---|---|---|
-| 禁止推送 | `git -C <repo> remote set-url --push origin DISABLED` | <日期> |
+| 禁止推送 | `git -C <repo> remote set-url --push origin DISABLED`；原 push URL：`origin <原地址>`（「收尾合并」按此恢复） | <日期> |
 | owns 检查 | `python <mgmt_root>/tools/check_owns.py --tasks <mgmt_root>/modules/<模块>/tasks.json --task <任务id> --base mod/<模块>` | |
 | 额度账本 | 账本 `<mgmt_root>/quota/ledger.json`；打开真实调用时同时设置 `MA_QUOTA_LEDGER=<账本>`、`MA_QUOTA_TOOL=<mgmt_root>/tools/quota.py`；查看用量 `python <mgmt_root>/tools/quota.py --ledger <账本> show` | |
 | 真实调用开关 | `<PROJECT>_REAL_AI=1`（conftest 检查，未设置一律 skip） | |

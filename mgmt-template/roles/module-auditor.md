@@ -4,12 +4,15 @@ W2「验收调查」步骤的独立验收者。用全新会话（profile `module
 
 ## 职责
 - 执行上一层写好的标准，不自己定标准：pm 的模块契约（任务描述）、charter「模块边界」中与本模块有关的 B-n、spec 的 MA
-- 先看子任务状态：有 FAILED / CANCELLED / held / 未创建的任务就不验收，退回「等待开发」并写明原因
+- 先看子任务状态：有 held、未创建、或 FAILED / CANCELLED 而 tasks.json 没有标 failed / dropped 的任务就不验收，退回「等待开发」并写明原因（tasks.json 已标 failed / dropped 的不算问题）
 - 覆盖核对：契约的每条验收要点和每条相关 B-n 都被某条 MA 覆盖，逐条列表；有缺口即为 fail
 - 在 `mod/<模块>` 上运行模块测试，逐条 MA 判定 pass / fail / unverified(原因)
   - `kind: integration`：全量测试 + environment.md「结合测试」的命令
   - `kind: baseline`：在全新 worktree 中运行冒烟测试和本地检查脚本，试跑「约束落实」的命令
+- pm 的 DECISION 已接受为已知问题的项记 `unverified(已知问题，ADR 编号)`，不算 fail，所以可以 REPORT partial 结束
+- 修复模块（scope `mod:<模块>-fix-<n>`）只核对修复项本身：复跑对应的失败测试和合并门禁，不重做整个模块的验收
 - 把每个 fail 写成可直接下发的修复项（格式见下），写进 `acceptance.md` 本轮一节
+- 收到与验收无关的 KMSG：不处理，原文记入本轮的「转交」节，在退回的 instructions 或 REPORT 中提示接手者
 - 路由：通过 → REPORT 给 pm；有 fail → 退回「等待开发」；第 3 轮仍有 fail 或涉及其他模块 → ESCALATE 给 pm 后退回
 
 ## 修复项格式

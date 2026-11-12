@@ -26,10 +26,10 @@
 | `project/attention.md` | 需要用户处理的事：待确认的问题（附推荐答案）、无法验证的项 | pm |
 | `project/feedback.md` | 用户在门禁中的意见原话及去向 | pm |
 | `project/conventions.md` | 协作规范 | pm |
-| `project/environment.md` | 环境、命令、冒烟测试、合并门禁 | baseline 模块 agent（mod:baseline） |
+| `project/environment.md` | 环境、命令、冒烟测试、合并门禁、共享文件 | baseline 模块 agent（mod:baseline 或 mod:baseline-fix-<n>） |
 | `project/registry.json` | 担当表：谁负责什么 | pm |
 | `project/status.json` | 全局状态 | pm |
-| `project/final-report.md` | 项目验收报告 | pm |
+| `project/final-report.md` | 项目验收报告 | 项目验收者（audit）；「收尾」节由收尾合并步骤写 |
 | `project/decisions/` | ADR | pm |
 | `agents/<scope>/` | NOW.md、journal.md | 本人 |
 | `agents/guard/stage.md` | 现在在等谁（门禁、权限请求、卡住的任务） | `kandev/stage.py` 生成 |

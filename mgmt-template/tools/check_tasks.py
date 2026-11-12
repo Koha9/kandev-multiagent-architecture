@@ -7,6 +7,9 @@
   1. 任务 id 非空且唯一
   2. 每个任务 owns 非空；不同任务的 owns 不重叠
      （规范化后路径相等，或一个是另一个的目录前缀；`src/a/` 与 `src/a/b.py` 重叠，`src/a` 与 `src/ab.py` 不重叠）
+     可选字段 shared：多个任务都可以改的共享文件（依赖清单、路由注册等，每个任务只追加自己的条目）。
+     shared 不参与任务之间的 owns 重叠检查（不同任务可以有相同的 shared 路径），但必须是具体文件路径
+     （以 / 结尾的报问题），并且一个路径不能既是某个任务的 owns（含目录前缀）又出现在另一个任务的 shared 里
   3. 每个任务 acceptance 非空、tests（可直接执行的测试命令）非空
   4. blocked_by 引用的 id 都存在；依赖无环；依赖链深度（最长路径上的任务数）超过 3 时给出警告（WARN，不影响退出码）
   5. 给了 --boundaries 时：其中每个编号都至少出现在某个任务的 boundaries 里；任务里出现了 --boundaries 之外的编号时给出警告
@@ -99,7 +102,7 @@ def check(tasks, boundaries=None):
     ids = set(seen)
     active = [t for t in tasks if t.get("id") in ids and t.get("status") not in SKIPPED]
 
-    owns = {}
+    owns, shared = {}, {}
     for t in active:
         owns[t["id"]] = [n for n in (norm(p) for p in as_list(t, "owns") if isinstance(p, str)) if n]
         if not owns[t["id"]]:
@@ -108,6 +111,10 @@ def check(tasks, boundaries=None):
             problems.append(f"{t['id']}: acceptance 为空")
         if not [c for c in as_list(t, "tests") if isinstance(c, str) and c.strip()]:
             problems.append(f"{t['id']}: tests 为空（需要可直接执行的测试命令）")
+        shared[t["id"]] = [n for n in (norm(p) for p in as_list(t, "shared") if isinstance(p, str)) if n]
+        for p in shared[t["id"]]:
+            if p.endswith("/"):
+                problems.append(f"{t['id']}: shared 中的 {p} 是目录，必须是具体文件路径")
     for x in range(len(active)):
         for y in range(x + 1, len(active)):
             a, b = active[x]["id"], active[y]["id"]
@@ -117,6 +124,11 @@ def check(tasks, boundaries=None):
                 for pb in owns[b]:
                     if overlap(pa, pb):
                         problems.append(f"{a} 与 {b}: owns 重叠（{pa} 与 {pb}）")
+            for x_id, y_id in ((a, b), (b, a)):   # 一个任务的 owns 不能覆盖另一个任务的 shared
+                for po in owns[x_id]:
+                    for ps in shared[y_id]:
+                        if overlap(po, ps):
+                            problems.append(f"{x_id} 的 owns（{po}）与 {y_id} 的 shared（{ps}）冲突：共享文件不能归某个任务独占")
 
     graph = {}
     for t in tasks:

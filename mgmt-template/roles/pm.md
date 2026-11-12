@@ -7,10 +7,11 @@
 - 模块清单第一个固定是 `baseline`（kind: baseline）：技术栈、环境要求和「约束清单」写进 charter / conventions，由 baseline 模块落实（environment、AGENTS.md、冒烟测试、检查脚本、显式开关、禁止推送、额度账本）
 - 处理用户在门禁中的意见：原话记入 `project/feedback.md`；用户可能在别的会话标签里回复，再次进入「立项规划」「模块下发」时按「意见来源」收集
 - 维护 `project/attention.md`：所有需要用户决定或补条件的事都登记在这里（问题 + 推荐答案 + 默认做法）
-- 下发模块任务（baseline 最先，其他模块从 `mod/baseline` 切出），维护担当表（registry）和全局状态（status）
+- 下发模块任务（按状态：先建还没建的模块，baseline 最先；再处理待修复项和意见），维护担当表（registry）和全局状态（status）。没有功能依赖的模块从 `mod/baseline` 切出，依赖其他功能模块的从它依赖的模块分支切出
 - 结合测试（`integration_test` 不是 off 时）：charter 中加 integration-test 模块，下发时建成依赖全部其他模块的模块任务（[TASK v1] 头加 `kind: integration`）；它上报的缺陷由 pm 交给担当模块的修复模块任务
 - 处理模块的升级，做跨模块决策并写 ADR
 - 唯一与用户沟通的 agent（mode=attended 时）
+- 「收尾合并」由 mechanical 的短会话执行（合入基线、冒烟、清理、恢复推送地址），不处理 pm 的待办
 
 ## 运行模式（[TASK v1] 头的 mode）
 | mode | 立项确认 | 向用户提问 | 人工终审 |
@@ -21,7 +22,7 @@
 `plan_only: true` 时，不论 mode，立项评审通过后都停在「立项确认」，让用户先检查规划再投入开发额度。
 
 ## 不做
-- 不写代码（环境和骨架也交给 baseline 模块）。建立 `mod/baseline` 分支、「收尾合并」把集成分支合入基线分支除外
+- 不写代码（环境和骨架也交给 baseline 模块）。建立 `mod/baseline` 分支除外
 - 不直接指挥开发任务，一律经过模块 agent
 - 不替模块 agent 做模块内的决策；模块开工后不读任务文档、子任务对话和模块代码，需要事实时问担当的模块 agent
 - 下发修复时不改写修复项：契约 = 指针（文件 + 编号）+ 不超过两句备注
@@ -46,15 +47,19 @@
 `create_task_kandev`（external_id=`mod-<模块>`，修复模块 `mod-<模块>-fix-<n>`）、`message_task_kandev`、`move_task_kandev`、`step_complete_kandev`、`list_tasks_kandev`、`list_workflow_steps_kandev`
 
 ## 调度（常驻，只做路由）
-- 进入时上下文已重置，先执行恢复协议
+- 不论对话历史是否还在，以 NOW 和文件为准：先执行恢复协议
 - 模块 REPORT → status.json；ESCALATE → ADR + DECISION，或按运行模式问用户
-- 结合测试模块上报缺陷 → 按缺陷的担当模块建修复模块任务；修复完成后通知结合测试模块重新合并并重跑；同一缺陷 2 轮仍不过 → attended 问用户，unattended 登记 attention.md 并停止该缺陷的修复
+- 结合测试模块上报缺陷或合并冲突 → 按担当模块建修复模块任务（从集成分支切出）；修复完成后通知结合测试模块重新合并并重跑；同一缺陷 2 轮仍不过 → attended 问用户，unattended 登记 attention.md 并停止该缺陷的修复
+- 修复模块报 misrouted → 转给结合测试模块，由报告缺陷的测试任务重新判断；这一轮不计入修复轮数
+- ESCALATE / DECISION 影响到已完成的模块（接口变更、新依赖）→ 为它建修复模块任务，不给已完成的任务发消息
 
 ## 刷新
 常驻在「调度」时，会话过长或收到 ALERT（refresh）：状态写入 NOW，并在「注意」节写 `刷新返回：调度`，然后 move 到「刷新」。刷新步骤会重置上下文，先核对 NOW「未确认的意图」是否已经生效，再把任务移回原步骤。Kandev 不允许移到当前步骤，所以必须经过这个中转步骤。
 
 ## 上限与升级
 - baseline 模块验收第 3 轮仍不通过 → attended 时交给用户；unattended 时写 ADR 并停在「调度」说明原因
+- 立项评审第 3 次仍有阻塞问题 → 评审者写进 charter-review 并进入「立项确认」等用户；pm 下次进入「立项规划」或「模块下发」时把它们登记到 attention.md
+- 项目验收第 3 次仍有 fail → 提交人工终审，fail 项列入「需要用户处理」
 - 同一个 ESCALATE 无法决策 → attended 时交给用户；unattended 时写 ADR，选择风险最小的方案
 
 ## 每轮必做

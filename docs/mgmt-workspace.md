@@ -67,7 +67,7 @@ R1 的配套机制是**幂等**：
 │   ├─ charter.md            需求原文 R-n、目标、范围、模块、模块边界 B-n、PA  PM
 │   ├─ attention.md          需要用户处理的事（附推荐答案）  PM
 │   ├─ conventions.md        协作规范、约束清单              PM
-│   ├─ environment.md        环境、命令、冒烟测试、合并门禁  baseline 模块 agent
+│   ├─ environment.md        环境、命令、冒烟测试、合并门禁、共享文件  baseline 模块 agent（或 mod:baseline-fix-<n>）
 │   ├─ registry.json         担当表（谁负责什么、task id）   PM
 │   ├─ status.json           全局状态快照                    PM
 │   ├─ final-report.md       项目验收报告                    项目验收步骤（auditor）；「收尾」节由收尾合并步骤写
@@ -152,7 +152,7 @@ ID 规则：
 
 | 对象 | 格式 | 例 |
 |---|---|---|
-| scope | `pm` / `mod:<模块>` / `mod-audit:<模块>` / `dev:<任务id>` / `rev:<任务id>` / `guard` | `dev:auth-02` |
+| scope | `pm` / `audit`（项目验收）/ `mod:<模块>`（修复模块 `mod:<模块>-fix-<n>`）/ `mod-audit:<模块>` / `dev:<任务id>` / `rev:<任务id>` / `guard` | `dev:auth-02` |
 | 模块边界 | `B-<n>` | `B-2` |
 | 修复项 / 缺陷 | `F-<n>`（acceptance.md、final-report 的某一轮内）/ `D-<n>`（结合测试 report 内） | `acceptance.md 第 2 轮 F-1` |
 | 模块 | 小写英文 | `auth` |
@@ -203,10 +203,11 @@ ID 规则：
 | `refs` | 需求出处（charter 的 R 编号） | 需重新规划 |
 | `tests` | 可直接执行的测试命令列表（契约中的测试命令与它一致） | 需重新规划 |
 | `boundaries` | 本任务落实的 B-n（本模块是提供方），可为空 | 需重新规划 |
+| `shared` | 可选；environment.md「共享文件」中本任务要追加条目的文件（多个任务可共有，只追加自己的条目，不算 owns 重叠） | 需重新规划 |
 | `kind` | 可选；`integration-test` = 结合测试任务 | 需重新规划 |
 | `ui` | 是否改动界面；true 时 report 要附截图 | 需重新规划 |
 | `kandev_task_id` | 创建后回填 | 是 |
-| `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged`（合并步骤的 REPORT 到达后）/ `dropped` / `failed` | 是 |
+| `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged`（合并步骤的 REPORT 到达后）/ `dropped` / `failed`（含被拆分取代，note 写取代它的任务） | 是 |
 | `passes` | 验收被退回时，模块 agent 按 acceptance.md 回写；验收通过后模块随即结束，以 acceptance.md 最后一轮为准（验收者不写 tasks.json） | 是 |
 | `review_rounds` | 审核轮数 | 是 |
 | `note` | 一行备注 | 是 |

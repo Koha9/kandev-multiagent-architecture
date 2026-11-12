@@ -5,6 +5,7 @@
   "_status_values": "planned | creating | held（在「待开发」等前置） | todo（已进入「开发」） | merged | dropped | failed",
   "_kind_values": "任务可选字段 kind：省略=开发任务 | integration-test=结合测试任务（只在 kind: integration 的模块中）",
   "_contract_fields": "tests=可直接执行的测试命令列表，创建开发子任务前必须非空 | boundaries=本任务涉及的 charter 跨模块边界编号（如 B-1），可为空。创建子任务前运行 tools/check_tasks.py 检查",
+  "_shared_field": "任务可选字段 shared：多个任务都可以改的共享文件路径列表（依赖清单、路由注册等；必须是具体文件，不能是目录；不能同时是别的任务的 owns）。每个任务只追加自己的条目，check_owns.py 会把落在 shared 上的改动单独列出供审核核对",
   "tasks": [
     {
       "id": "auth-01",

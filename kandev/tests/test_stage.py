@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from datetime import timedelta
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -26,13 +27,14 @@ def main():
     assert cats["core-04"] == "排队", cats
     assert cats["core-05"] == "等人：权限请求", cats
     assert cats["mod:core"] == "常驻", cats
-    assert alerts == [("idle_no_signal", PM)], alerts
+    assert alerts == [], alerts                              # W1 的 pm 在「立项规划」空闲：只写 stage.md，不告警
+    assert cats["pm"] == "等人：空闲未推进", cats
 
     cats, alerts, st = run(st, "2026-11-09T05:15:00+00:00")
     assert alerts == [("hold_ready", MOD)], alerts           # pm 的告警 60 分钟内不重复
 
     cats, alerts, st = run(st, "2026-11-09T06:05:00+00:00")
-    assert ("pm_unresponsive", PM) in alerts, alerts         # pm 60 分钟后仍未推进
+    assert not any(a[0] == "pm_unresponsive" for a in alerts), alerts   # pm 不在常驻步骤：不移到刷新
     assert ("running_stale", MOD) in alerts, alerts
     assert ("hold_ready", MOD) not in alerts, alerts         # 距上次告警 50 分钟，去重
     test_grouping()
@@ -41,6 +43,8 @@ def main():
     test_limit_resume()
     test_should_disable()
     test_steps_v32()
+    test_pm_unresponsive()
+    test_w1_idle_and_decision()
     print("OK test_stage")
 
 
@@ -126,8 +130,8 @@ def test_steps_v32():
     now = ts("2026-11-09T05:00:00Z")
     idle = [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]   # 空闲 60 分钟
     cases = [
-        ("项目管理", "环境基线", idle, "等上级：空闲未推进"),      # v3.1 旧 workflow 中的任务仍要能分类
-        ("项目管理", "模块下发", idle, "等上级：空闲未推进"),
+        ("项目管理", "环境基线", idle, "等人：空闲未推进"),      # v3.1 旧 workflow 中的任务仍要能分类
+        ("项目管理", "模块下发", idle, "等人：空闲未推进"),
         ("项目管理", "调度", idle, "常驻"),
         ("项目管理", "人工终审", idle, "等人：人工终审"),
         ("项目管理", "某个未来的步骤", idle, "运行中"),            # 不认识的步骤名不报错
@@ -146,6 +150,51 @@ def test_steps_v32():
     rows, _, _ = evaluate(tasks, now, {}, uid(1))
     for (wf, step, _, want), r in zip(cases, rows):
         assert r["category"].startswith(want), (wf, step, r["category"], want)
+
+
+def test_pm_unresponsive():
+    """pm_unresponsive 只对常驻步骤（调度）触发，并带 return_step；其他步骤到期后重发原信号。"""
+    for step, escalates in (("调度", True), ("项目验收", False), ("收尾合并", False)):
+        pm = task(1, "项目管理", step, "[TASK v1]\nmgmt_root: D:/p1-mgmt")
+        pm["sessions"] = [{"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z"}]    # RUNNING 但很久没更新
+        rows, alerts, st = evaluate([pm], ts("2026-11-09T05:00:00Z"), {}, uid(1))
+        assert [(a["signal"], a["to_task"]) for a in alerts] == [("running_stale", uid(1))], (step, alerts)
+        rows, alerts, st = evaluate([pm], ts("2026-11-09T05:30:00Z"), st, uid(1))
+        assert alerts == [], alerts                                                       # 60 分钟内去重
+        rows, alerts, st = evaluate([pm], ts("2026-11-09T06:05:00Z"), st, uid(1))
+        assert len(alerts) == 1, alerts
+        if escalates:
+            assert alerts[0]["signal"] == "pm_unresponsive" and alerts[0]["return_step"] == step, alerts
+        else:
+            assert alerts[0]["signal"] == "running_stale" and "return_step" not in alerts[0], (step, alerts)
+
+
+def test_w1_idle_and_decision():
+    now = ts("2026-11-09T05:00:00Z")
+    idle = [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]
+    # W1 在要求完成信号的步骤空闲：只体现在 stage.md，不告警（评审者 / 机械 agent 的会话，发给 pm 没人处理）
+    for step in ("立项规划", "立项评审", "模块下发", "项目验收", "收尾合并"):
+        pm = task(1, "项目管理", step, "")
+        pm["sessions"] = [dict(s) for s in idle]
+        rows, alerts, _ = evaluate([pm], now, {}, uid(1))
+        assert alerts == [] and rows[0]["category"] == "等人：空闲未推进", (step, rows, alerts)
+        assert step in rows[0]["value"] and "60" in rows[0]["value"], rows
+    # W2 / W3 的规则不变
+    mod = task(11, "模块管理", "模块规划", f"pm: task {uid(1)}")
+    dev = task(21, "开发", "开发", f"parent: mod:a @ task {uid(11)}")
+    for t in (mod, dev):
+        t["sessions"] = [dict(s) for s in idle]
+    rows, alerts, _ = evaluate([task(1, "项目管理", "调度", ""), mod, dev], now, {}, uid(1))
+    assert {(a["signal"], a["to_task"]) for a in alerts} == {("idle_no_signal", uid(1)), ("idle_no_signal", uid(11))}, alerts
+    # 开发任务在「等待决策」：不是 idle_no_signal；停留 ≥10 分钟向模块 agent 告警一次，60 分钟内不重复
+    d = task(22, "开发", "等待决策", f"parent: mod:a @ task {uid(11)}")
+    d["sessions"] = [dict(s) for s in idle]
+    rows, alerts, st = evaluate([d], now, {}, uid(1))
+    assert rows[0]["category"] == "等上级：等待决策" and alerts == [], (rows, alerts)    # 刚进入
+    rows, alerts, st = evaluate([d], now + timedelta(minutes=12), st, uid(1))
+    assert [(a["signal"], a["to_task"]) for a in alerts] == [("decision_pending", uid(11))], alerts
+    rows, alerts, st = evaluate([d], now + timedelta(minutes=40), st, uid(1))
+    assert alerts == [], alerts
 
 
 def uid(n):

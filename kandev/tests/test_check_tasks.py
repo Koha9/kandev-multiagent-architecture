@@ -79,6 +79,18 @@ def main():
     code, out = run([task("a"), task("b", status="dropped", boundaries=["B-1"])], "--boundaries", "B-1")
     assert code == 1 and has(out, "B-1"), out
 
+    # shared：不参与 owns 重叠；必须是文件；不能同时是别的任务的 owns
+    code, out = run([task("a", shared=["requirements.txt", "src/routes.py"]), task("b", shared=["requirements.txt"])])
+    assert code == 0, out
+    code, out = run([task("a", shared=["src/shared/"])])
+    assert code == 1 and has(out, "a", "shared", "目录"), out
+    code, out = run([task("a", owns=["requirements.txt"]), task("b", shared=["./requirements.txt"])])
+    assert code == 1 and has(out, "a 的 owns", "b 的 shared"), out
+    code, out = run([task("a", owns=["src/a/"]), task("b", shared=["src/a/routes.py"])])      # owns 目录覆盖了别人的 shared
+    assert code == 1 and has(out, "a 的 owns", "b 的 shared"), out
+    code, out = run([task("a", owns=["src/a/"], shared=["src/a/routes.py"])])                  # 自己的 owns 和 shared 不冲突
+    assert code == 0, out
+
     assert run("[]")[0] == 2                                                              # 没有 tasks 键
     assert run("不是对象")[0] == 2                                                         # 顶层不是对象
     r = subprocess.run([sys.executable, TOOL, "--tasks", os.path.join(tempfile.gettempdir(), "no-such-tasks.json")],

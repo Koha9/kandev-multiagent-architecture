@@ -50,6 +50,8 @@ The scripts under `tools/` use only the Python standard library and are copied w
 - The merge method is written into environment.md "Merge method (合并方式)": local (default; after passing the merge gate the Merge step fast-forwards `mod/<module>` itself), or PR (base=`mod/<module>`) + required checks.
 - Module branches are cut from `mod/baseline` and the integration branch from the baseline branch; the user's baseline branch is not touched before Final merge (「收尾合并」).
 - By default merges are local only, with no push to remotes. To push or open PRs, this must be explicitly agreed in conventions and environment.md, and the push ban in section 2 adjusted accordingly.
+- When pushing is disabled, the baseline module first records each remote's original push URL in environment.md "约束落实" (constraint enforcement); Final merge (「收尾合并」) restores them from that record (the repository goes back to the user when the project ends).
+- environment.md "共享文件" (Shared files) lists files that several modules and tasks append entries to (dependency manifests, route registration, the app shell, etc.) and says where each module appends. A task's `shared` in tasks.json lists the shared files it touches: several tasks may change them, but each only appends its own entries; the owns check accepts owns + shared.
 
 ## 6. Environment
 

@@ -67,7 +67,7 @@ R1 is backed by **idempotency**:
 │   ├─ charter.md            verbatim requirements R-n, goals, scope, modules, module boundaries B-n, PA  PM
 │   ├─ attention.md          items for the user (with recommended answers)  PM
 │   ├─ conventions.md        collaboration conventions, constraint list  PM
-│   ├─ environment.md        environment, commands, smoke test, merge gate  baseline module agent
+│   ├─ environment.md        environment, commands, smoke test, merge gate, shared files  baseline module agent (or mod:baseline-fix-<n>)
 │   ├─ registry.json         ownership registry (who owns what, task ids)  PM
 │   ├─ status.json           global status snapshot           PM
 │   ├─ final-report.md       project acceptance report        Project acceptance step (auditor); the "收尾" (wrap-up) section is written by the Final merge step
@@ -152,7 +152,7 @@ ID rules:
 
 | Object | Format | Example |
 |---|---|---|
-| scope | `pm` / `mod:<module>` / `mod-audit:<module>` / `dev:<task id>` / `rev:<task id>` / `guard` | `dev:auth-02` |
+| scope | `pm` / `audit` (project acceptance) / `mod:<module>` (fix module `mod:<module>-fix-<n>`) / `mod-audit:<module>` / `dev:<task id>` / `rev:<task id>` / `guard` | `dev:auth-02` |
 | module boundary | `B-<n>` | `B-2` |
 | fix item / defect | `F-<n>` (within one round of acceptance.md or the final-report) / `D-<n>` (within an integration-test report) | `acceptance.md round 2 F-1` |
 | module | lowercase English | `auth` |
@@ -203,10 +203,11 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 | `refs` | requirement sources (R numbers in the charter) | requires replanning |
 | `tests` | list of directly runnable test commands (the contract's test commands match it) | requires replanning |
 | `boundaries` | the B-n this task implements (this module is the provider); may be empty | requires replanning |
+| `shared` | optional; files from environment.md "共享文件" (Shared files) this task appends entries to (several tasks may share them; each only appends its own entries; not counted as owns overlap) | requires replanning |
 | `kind` | optional; `integration-test` = integration-test task | requires replanning |
 | `ui` | whether the UI changes; when true the report must include screenshots | requires replanning |
 | `kandev_task_id` | filled in after creation | yes |
-| `status` | `planned` / `creating` / `held` (waiting on prerequisites in Queued (待开发)) / `todo` / `merged` (after the Merge step's REPORT arrives) / `dropped` / `failed` | yes |
+| `status` | `planned` / `creating` / `held` (waiting on prerequisites in Queued (待开发)) / `todo` / `merged` (after the Merge step's REPORT arrives) / `dropped` / `failed` (including replaced by a split; note names the replacing tasks) | yes |
 | `passes` | written back by the module agent from acceptance.md when acceptance sends the module back; once acceptance passes the module ends and the last round of acceptance.md is authoritative (the auditor does not write tasks.json) | yes |
 | `review_rounds` | number of review rounds | yes |
 | `note` | one-line note | yes |
