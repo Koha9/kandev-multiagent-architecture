@@ -2,7 +2,7 @@
 
 [中文](README.md) | **English**
 
-A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.1.
+A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.2.
 
 > Chinese is the primary language of this repository. The English docs cover the human-facing parts; the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), the role cards and templates, and the research reports are in Chinese. The Kandev workflow and step names are Chinese too, so the English docs give each step's Chinese name next to its English one.
 
@@ -29,7 +29,8 @@ The full research and comparisons are in [reports/](reports/) and [research_note
 
 ## Core design
 
-- **Three layers**: project management (1 task) → module management (1 task per module, in parallel) → development (1 isolated worktree per task). Managers only plan, delegate and verify; they never write code.
+- **Three layers, split along knowledge boundaries**: project management (1 task; holds only the requirements, the module list and module boundaries, and the project acceptance criteria) → module management (1 task per module, in parallel; holds only its own spec, interfaces and tasks) → development (1 isolated worktree per task; needs only a self-contained contract). Managers only plan and delegate and never write code; the environment and skeleton are built by the baseline module, which runs first, through development tasks.
+- **Independent verifiers**: plan review, module acceptance, project acceptance and review all switch profile and open a fresh session, apply the criteria written by the level above, and write failures as fix items that can be dispatched as is; long-running sessions only route.
 - **Tests are the judge**: every development task has a machine-checkable done condition. Review uses a different profile in a fresh session, reruns the tests as-is, and writes down the evidence it personally checked for each acceptance criterion.
 - **State lives in files; sessions are disposable**: each project has a management directory (requirements, ownership registry, progress, decision records). After any session reset, work resumes by following the recovery protocol.
 - **Verbatim requirements all the way through**: each user requirement is numbered R-n, and both planning and acceptance check against them one by one, so nothing drifts in paraphrase.
@@ -40,7 +41,7 @@ The full research and comparisons are in [reports/](reports/) and [research_note
 
 ![Architecture: three layers (W1 project management, W2 module management, W3 development) plus the management directory and the guard](docs/architecture.en.svg)
 
-Yellow steps are human gates. Plan approval (立项确认) only stops in attended or plan_only mode, while final human review (人工终审) always needs a person's approval. What each step does, how tasks move, and how sessions are managed: [docs/workflow.en.md](docs/workflow.en.md). More detailed diagrams, including which agent interactions are allowed: [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md).
+(The diagram shows v3.1; the step tables in [docs/workflow.en.md](docs/workflow.en.md) are authoritative: v3.2 removed the Environment baseline step, whose work is now done by the baseline module.) Yellow steps are human gates. Plan approval (立项确认) only stops in attended or plan_only mode, while final human review (人工终审) always needs a person's approval. What each step does, how tasks move, and how sessions are managed: [docs/workflow.en.md](docs/workflow.en.md). More detailed diagrams, including which agent interactions are allowed: [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md).
 
 ## Usage
 
@@ -48,10 +49,11 @@ Yellow steps are human gates. Plan approval (立项确认) only stops in attende
 
 - Kandev running on your machine with its external MCP available (default `http://localhost:38429/mcp`).
 - Python 3 (the scripts use only the standard library).
-- Five agent profiles:
+- Five required agent profiles:
   - `pm`, and `auditor` (different from pm)
   - `developer`, and `reviewer` (different from developer, ideally from another vendor)
-  - `mechanical` (a cheap model is fine)
+  - `mechanical` (runs the merge gate; a coding model)
+- Optional: `plan_auditor` (plan review, the strongest model; defaults to auditor), `module` (defaults to pm), `module_auditor` (different from module; defaults to auditor)
 
 ### Option 1: hand it to an agent (recommended)
 
@@ -106,7 +108,7 @@ To see what the workflows look like first: [kandev/export/](kandev/export/README
 | Topic | Where |
 |---|---|
 | Overall design: roles, steps, gates, concurrency, known limitations, rejected designs | [docs/workflow.en.md](docs/workflow.en.md) |
-| Diagrams | [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md) |
+| Diagrams | [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md) (diagrams show v3.1; the step tables in workflow.en.md are authoritative) |
 | Full prompt and configuration of every step | [docs/prompts.md](docs/prompts.md) (Chinese, generated by `kandev/build_workflows.py`) |
 | Structure of the management directory and its doc formats | [docs/mgmt-workspace.en.md](docs/mgmt-workspace.en.md) |
 | How agents message each other | [mgmt-template/protocol/message.md](mgmt-template/protocol/message.md) (Chinese) |

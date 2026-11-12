@@ -4,7 +4,7 @@
 
 > 本文件讲多 agent 架构本身：角色、workflow、步骤、通信、状态与恢复、门禁、并发。
 > 配套文档：
-> - [workflow-diagrams.md](workflow-diagrams.md)：流程图
+> - [workflow-diagrams.md](workflow-diagrams.md)：流程图（图为 v3.1，步骤以本文件的表格为准）
 > - [prompts.md](prompts.md)：各步骤 prompt 与配置，由脚本生成
 > - [mgmt-workspace.md](mgmt-workspace.md)：管理目录的构造
 > - [project-conventions.md](project-conventions.md)：被开发项目一侧的约定（额度、副作用、约束清单、测试、截图、合并与推送）
@@ -49,10 +49,10 @@
 - **baseline 模块**：模块清单第一个固定是 `baseline`（`kind: baseline`），走普通的 W2 + W3，契约是原「环境基线」步骤的要求（environment.md、AGENTS.md、冒烟测试、检查脚本、共享骨架、显式开关、约束落实、结合测试工具）。环境和骨架因此也经过审核和验收。其他模块都依赖它，分支从 `mod/baseline`（或所依赖的功能模块的分支）切出。
 - **结合测试模块**（`integration_test` 不是 off 时）：模块清单最后一个模块 `integration-test`，依赖全部其他模块。其他模块完成后它自动启动，把所有模块分支合并到集成分支，对组装起来的产品写并运行自动化结合测试；测出的缺陷经 pm 交给担当模块的修复模块任务。见第 4–6 节。
 - **常驻会话只做路由**：W1「调度」和 W2「等待开发」不论对话历史是否还在，都以 NOW 和文件为准，按事件转交；调查、验收、写代码都在一次性会话里做，结果写成文件。
-- **合并冲突也是修复项**：只涉及 environment.md「共享文件」的冲突就地解决（保留双方追加的条目，生成文件按命令重新生成）。涉及其他文件的，结合测试模块、多依赖的模块规划、重新合并、项目验收都不自行解决：`merge --abort`，写成修复项（冲突的文件、两个模块，担当 = 后合入的模块），由 pm 建修复模块任务（owns = 冲突文件列表，合入担当模块的分支并解决冲突）。
+- **合并冲突也是修复项**：只涉及 environment.md「共享文件」的冲突就地解决（保留双方追加的条目，生成文件按命令重新生成）。涉及其他文件的，结合测试模块、多依赖的模块规划、重新合并、项目验收都不自行解决：`merge --abort`，写成修复项（冲突的文件、两个模块，担当 = 后合入的模块），由 pm 建修复模块任务（owns = 担当模块在 charter 模块清单里的源码路径 + 冲突文件，合入担当模块的分支并解决冲突）。
 - **每个模块只有一个当前分支**：registry.json 的 `current_branch` 记录原分支或最新的修复分支；所有"合并各模块分支"的地方只合当前分支，同一个冲突不会因为先合旧分支再合修复分支而重复出现。修复模块完成后，pm 更新 `current_branch`，并给依赖该模块且仍在进行中的模块发 NOTICE，它们在「等待开发」把修复分支合进自己的模块分支。
 - **修复模块做轻**：scope `mod:<模块>-fix-<n>`，用自己的 `modules/<模块>-fix-<n>/`，原模块目录只读；通常一个任务；验收只复跑修复项对应的失败测试和合并门禁。认为缺陷归属判错（不归本模块或是测试写错）时带证据报 misrouted 并自己移到「完成」；pm 在 status.json 把它标为 dropped。来源是结合测试缺陷的转回结合测试模块，由报告缺陷的测试任务重新判断，这一轮不计入修复轮数；来源是项目验收修复项的记入 status.json，留给下一轮项目验收判断。
-- **已知问题**：pm 用 DECISION + ADR 接受某个结合测试缺陷为已知问题后，结合测试模块把测试任务移回「开发」，把对应的失败用例标成预期失败并引用 ADR 编号后正常上报；审核不把它算作弱化测试，验收者记 unverified(已知问题，ADR)。
+- **已知问题**：pm 用 DECISION + ADR 接受某个结合测试缺陷为已知问题后，结合测试模块把测试任务移回「开发」，把对应的失败用例标成预期失败并引用 ADR 编号后正常上报；审核不把它算作弱化测试，模块验收和项目验收都记 unverified(已知问题，ADR)，列入「需要用户处理」，不判 fail。
 - **修复项与路由备注**：验证者（审核、模块验收、项目验收）把每个不通过项写成可直接下发的修复项（编号、担当模块或任务、复现步骤、期望、实际、疑似位置、对应的失败测试或验收条目）；与本步骤无关的 KMSG 不处理，原文记入本轮记录的「转交」节。常驻会话和 pm 下发修复时，契约 = 指向原修复项或缺陷的指针（文件 + 编号）+ 不超过两句的备注，不改写、不追加要求。
 
 ### 角色与 profile
@@ -152,7 +152,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 ## 8. 并发与 WIP
 
 - 「开发」步骤的 WIP 是所有模块共用的全局上限（默认 4），用来控制本机同时运行的 agent 数量。
-- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**，前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置的 REPORT 已到、且它的提交已在 `mod/<模块>` 上（`git merge-base --is-ancestor`）时，模块 agent 把它移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
+- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**，前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置在 tasks.json 中都是 merged（REPORT 已到，且用 `git merge-base --is-ancestor` 核对提交已在 `mod/<模块>` 上）或 dropped 时，模块 agent 把它移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
 - 依赖链仍建议尽量浅，必须串行的工作合并成一个任务。
 - 所有模块都 blocked_by baseline；其余模块之间有依赖关系的用 blocked_by（并从依赖模块的分支切出），能在骨架上并行的不设依赖。
 - 等模块 agent 决定的开发任务（blocked / dropped / 缺陷上报）移到不计 WIP 的「等待决策」，不占「开发」的名额。
@@ -166,6 +166,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 - 「模块下发」从基线分支建立 `mod/baseline`；没有功能依赖的模块分支从 `mod/baseline` 切出，依赖其他功能模块的从所依赖的模块分支切出（多个依赖时 base 写其中一个，其余在模块规划第 1 步合并进来），这样界面模块能对着真实的后端代码开发。用户的基线分支在「收尾合并」之前不被改动。
 - 合并冲突（模块规划、结合测试模块、项目验收）不自行解决，写成修复项交 pm，见第 2 节。
+- 创建 W2 任务时 `base_branch` 一律传 `mod/baseline`（baseline 模块传基线分支），它只决定模块 agent 自己的 worktree；模块分支真正的起点只写在 [TASK v1] 头的 branch 行，由模块规划第 1 步用 git 建立。
 - 开发子任务通过 `base_branch=mod/<模块>` 从模块分支切出。合并步骤 rebase 到最新模块分支、通过合并门禁后，自己快进合入（`git fetch . HEAD:mod/<模块>`，只允许快进；失败说明别的任务先合入，重新 rebase）。`mod/*` 只存在于本地，baseline 又默认禁用推送，所以这一层不支持 PR。
 - 结合测试模块在规划时建立 integration 分支（从基线分支切出），合并所有其他模块的当前分支（`current_branch`，包括 `mod/baseline`），`mod/integration-test` 从 integration 切出。
 - 修复模块任务（`mod/<模块>-fix-<n>`）从集成分支切出；集成分支还不存在时（开发期间的接口变更、多依赖合并冲突、`integration_test: off`）从担当模块的当前分支切出。修完后成为该模块的 `current_branch`，由结合测试模块（或项目验收）合并进集成分支。
@@ -235,6 +236,17 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - 「待开发」依赖两点 Kandev 行为，部署后要先验证（见 [AGENTS.md](../AGENTS.md)「验收部署」）：`create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在该步骤、不启动会话；从无 agent 步骤移到「开发」会触发 on_enter 的 auto_start。
 - 合并步骤发 REPORT 后才调用 step_complete_kandev，所以放行的条件是"前置的 REPORT 已到且提交已在模块分支上"，不等 Kandev 状态；待开发任务不设 blocked_by，移动不受平台依赖检查影响。
 - 「等待开发」和「验收调查」交替时，模块 agent 的会话（profile `module`）和验收者的会话（profile `module_auditor`）在同一个 Kandev 任务里轮换；等待开发以 NOW 和文件为准，不依赖之前的对话。
+
+### 部署后需要实测的平台行为
+
+下面几条是设计依赖、但还没有在本机 Kandev 上实测的行为；每条写明测不通时的退路。
+
+- a. 把任务从「待开发」移到「开发」会触发自动启动（on_enter auto_start）。退路：有前置的任务等前置合并后，由模块 agent 直接创建到「开发」。
+- b. agent 把自己移到「等待决策」后开发会话保留，移回时沿用。退路：移回的 instructions 里写明先读任务文档 now 和 report（已写）。
+- c. on_children_completed 在新一批修复子任务全部完成后能再次触发。退路：把模块自己移到「验收调查」的条件放宽为"子任务全部终态"。
+- d. 多会话任务里不带 session_id 的消息投给当前步骤的会话；同一任务上的多个移动按发出顺序执行。退路：发消息时带 registry 登记的 session_id，守护的告警兜底。
+- e. 所有 worktree 共享本地的 `mod/*` 分支。退路：改为推送到一个本地 bare 远端。
+- f. 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达。退路：`agents/guard/stage.md` 会显示这些状态，由用户手动操作。
 
 ## 13. 已否决的设计
 

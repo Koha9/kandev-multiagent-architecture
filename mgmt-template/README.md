@@ -42,24 +42,12 @@
 
 ## 任务文档存储
 
-任务文档 `now`、`report`、`review`、`charter-review` 是对应 Kandev 任务计划中的命名章节：`## task-doc: <名称>`。先读完整计划及版本；无计划则创建，已有则精确修改所属章节或追加新章节，保留其他角色章节及用户内容。冲突重读合并，分片不得覆盖整份计划。保存后读回；refs / handoff 包含 task_id 与章节名。开发写 now/report，审核写 review，立项评审写 charter-review；模块通过子任务 task_id 读取交付章节。`task-docs/` 仍是章节内容模板。
+任务文档 `now`、`report`、`review`、`charter-review` 是 Kandev 任务计划中的命名章节 `## task-doc: <名称>`：先读完整计划及版本，只改或追加自己的章节，保留其他章节和用户内容，冲突重读合并，保存后读回；refs / handoff 写 task_id 与章节名。开发写 now/report，审核写 review，立项评审写 charter-review；读子任务的交付物用它的 task_id。`task-docs/` 是章节内容模板。
 
-## 单写者
+## 单写者与找担当者
 
-每个文件只有上表写明的写者。想改别人的文件，就给它的担当者发消息。
-
-## 找担当者（谁担当就问谁）
-
-1. 模块级、项目级：查 `project/registry.json` 的 `owns`。
-2. 任务级：查 `modules/<模块>/tasks.json` 的 `owns`。
-3. 查不到：问自己的上级"这归谁"，不要猜。
-
-## 当前阶段
-
-见 `project/status.json` 的 `phase`。运行模式（attended / unattended）见 pm 任务描述的 `[TASK v1]` 头。
+每个文件只有上表写明的写者；想改别人的文件，给它的担当者发消息。找担当者：模块级、项目级查 `project/registry.json` 的 `owns`，任务级查 `modules/<模块>/tasks.json` 的 `owns`；查不到就问上级"这归谁"，不要猜。
 
 ## 记录约定
 
-时间戳取自系统时钟；管理目录如果用 git 管理，只 `git add` 自己担当的路径，提交时设置 `MGMT_SCOPE`（钩子见 `tools/mgmt_precommit.py`）；临时资源登记到自己的 NOW，用完清理。
-
-需要用户处理的事看 `project/attention.md`；系统现在在等谁看 `agents/guard/stage.md`。
+当前阶段见 `project/status.json` 的 `phase`，运行模式见 pm 任务描述的 `[TASK v1]` 头。时间戳取自系统时钟；管理目录如果用 git 管理，只 `git add` 自己担当的路径，提交时设置 `MGMT_SCOPE`（钩子见 `tools/mgmt_precommit.py`）；临时资源登记到自己的 NOW，用完清理。需要用户处理的事看 `project/attention.md`；系统现在在等谁看 `agents/guard/stage.md`。

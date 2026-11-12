@@ -210,10 +210,10 @@ BASELINE_CONTRACT = """职责：把 charter「约束」和 conventions 中的技
 def fix_module_task(w2_id, w2_plan_step):
     """修复模块任务的创建参数：W1「模块下发」和「调度」共用。"""
     return (f"修复模块任务：create_task_kandev（workflow_id=\"{w2_id}\"，workflow_step_id=\"{w2_plan_step}\"，"
-            "external_id=mod-<模块>-fix-<n>，不设 parent 和 blocked_by，repository_id=本任务的仓库，base_branch=<base>，"
+            "external_id=mod-<模块>-fix-<n>，不设 parent 和 blocked_by，repository_id=本任务的仓库，base_branch=mod/baseline，"
             "title=mod:<模块>-fix-<n> <简称>）；prompt=[TASK v1] 头（role=module，scope=mod:<模块>-fix-<n>，mode、mgmt_root 同本任务，"
             "parent=pm @ task {task_id}，pm=task {task_id}，branch: mod/<模块>-fix-<n> base <base>）+ 契约（按【路由备注】）；"
-            "base=集成分支，还不存在时为担当模块的当前分支（registry.json 的 current_branch）；登记到 registry.json 和 status.json。")
+            "base=集成分支，还不存在时为担当模块的当前分支（registry.json 的 current_branch），由修复模块规划时用 git 建立；登记到 registry.json 和 status.json。")
 
 
 # ================================================================== step helpers
@@ -344,7 +344,7 @@ def w2(w3_id, w3_dev_step, w3_hold_step):
 6. 用 KMSG NOTICE 告知依赖本模块的其他模块：对外接口已定义（refs: interfaces.md）。
 
 kind: baseline（基线模块，最先运行）：project/environment.md 由你写（MGMT_SCOPE=mod:baseline），仓库文件由开发子任务完成，契约中写明由模块 agent 执行的动作你自己做并记入 journal；此时还没有冒烟测试和合并门禁，tasks 要写全（包括 owns 检查命令）。
-scope 是 mod:<模块>-fix-<n>（修复模块）：用自己的 modules/<模块>-fix-<n>/ 和 agents/mod-<模块>-fix-<n>/，原模块的 modules/<模块>/ 只读（接口有变更时在自己目录写增量并通知 pm）；通常只拆一个任务，AC 是修复项本身（合并冲突的 owns = 冲突文件列表）。有证据认为缺陷不归本模块或其实是测试写错 → 带证据向 pm 发 ESCALATE（misrouted），不建任务，move_task_kandev 把本任务移到「完成」。
+scope 是 mod:<模块>-fix-<n>（修复模块）：用自己的 modules/<模块>-fix-<n>/ 和 agents/mod-<模块>-fix-<n>/，原模块的 modules/<模块>/ 只读（接口有变更时在自己目录写增量并通知 pm）；通常只拆一个任务，AC 是修复项本身（合并冲突的 owns = 担当模块在 charter 模块清单里的源码路径 + 冲突文件）。有证据认为缺陷不归本模块或其实是测试写错 → 带证据向 pm 发 ESCALATE（misrouted），不建任务，move_task_kandev 把本任务移到「完成」。
 kind: integration（结合测试模块，其他模块全部完成后才启动）：
 - 第 1 步：在自己的任务 worktree 中检出集成分支（名称见 environment.md「合并方式」，不存在时从基线分支切出），逐个合并 registry.json 中其他模块的当前分支（current_branch；已合入的跳过；冲突同上处理）；合并后运行冒烟测试，再 `git branch mod/<模块> <集成分支>`，把 worktree 切回原分支。
 - 第 2 步：MA 写成跨模块的用户场景（操作 → 用户可见的结果 → 数据状态），从 charter 的 R / PA、「模块边界」和各模块的 interfaces.md、acceptance.md 导出，也覆盖受影响的已有功能。
@@ -366,7 +366,7 @@ kind: integration（结合测试模块，其他模块全部完成后才启动）
 - 结合测试任务（在「等待决策」）报告缺陷：不修复、不自行确认：向 pm 发 KMSG ESCALATE（refs: 该任务 report 的 defects）。pm 通知修复完成后，在自己的任务 worktree 中把修复分支合并进集成分支和 mod/<模块>（冲突同「模块规划」第 1 步），再 move_task_kandev 把该任务移回「开发」，instructions="rebase 到 mod/<模块> 重跑"；pm 转来 misrouted 时同样移回「开发」，instructions=原话，让它重新判断（改测试，或改担当模块后重新上报）。
 - pm 的 DECISION / INSTRUCT：执行，更新本模块文件（接受为已知问题的写进 spec 变更记录），通知受影响的子任务；结合测试缺陷被接受为已知问题时，把「等待决策」中的测试任务移回「开发」，instructions=把对应的失败用例标成预期失败并引用 ADR 编号，然后正常上报。
 - 守护 ALERT：子任务会话过长 → 让它写检查点后移到「等待决策」再移回「开发」并带 reset_context（或拆分）；子任务 session_failed → 移到「等待决策」再移回「开发」，instructions="从任务文档 now 继续"；前置 FAILED/CANCELLED → 改契约或拆分；自己过长 → 按【刷新】规则移到「刷新」。
-- 放行（每次被唤醒都检查）：held 任务的前置都已发来 REPORT 且其提交已在 mod/<模块> 上（`git merge-base --is-ancestor`）→ move_task_kandev 到「开发」，status=todo。
+- 放行（每次被唤醒都检查）：held 任务的前置在 tasks.json 中都是 merged（已用 `git merge-base --is-ancestor` 核对提交在 mod/<模块> 上）或 dropped → move_task_kandev 到「开发」，status=todo。
 - 其他模块的 QUESTION：只答事实，给出文件指针；涉及变更 → 转给 pm。
 自己移到「验收调查」只在两种情况下：带验收退回的说明进入、处理后没有非终态子任务；或处理完 pm 的 DECISION 后子任务全部终态、没有 held。先确认本任务仍在「等待开发」，instructions 写明已知问题和 ADR。其他情况等 on_children_completed。一轮结束前刷新 NOW.md。
 """ + RESIDENT_RULE
@@ -452,7 +452,7 @@ def w1(w2_id, w2_plan_step):
 
 【步骤：模块下发】按状态处理，不按进入次数：先做第 1 步，再做第 2 步。
 0. 首次进入：用 list_workflow_steps_kandev 核对下面的工作流与步骤 ID，写入 registry.json（kandev_ids）；charter-review 中未解决的阻塞问题登记到 attention.md。
-1. charter 模块清单中在 registry.json 里还没有 kandev_task_id 的模块，按依赖顺序逐个创建（先写后做，幂等键 mod-<模块>）：create_task_kandev：workflow_id="{w2_id}"，workflow_step_id="{w2_plan_step}"（「模块规划」），external_id=mod-<模块>，blocked_by=依赖模块的 task id，不设 parent，repository_id=本任务的仓库（list_repositories_kandev），base_branch=头里的 base，title=mod:<模块> <简称>；prompt=[TASK v1] 头（role=module，scope=mod:<模块>，mode、mgmt_root 同本任务，parent=pm @ task {{task_id}}，pm=task {{task_id}}，kind、branch 见下）+ 模块契约（职责、意图、范围、验收要点、与本模块有关的 B-n（原文，标明提供方 / 使用方）、covers: R / PA；怎么拆、怎么做由模块 agent 决定）。返回的 task id 回填 registry.json 与 status.json，journal 记一行。恢复时看到未确认的创建意图，用相同 external_id 重调。
+1. charter 模块清单中在 registry.json 里还没有 kandev_task_id 的模块，按依赖顺序逐个创建（先写后做，幂等键 mod-<模块>）：create_task_kandev：workflow_id="{w2_id}"，workflow_step_id="{w2_plan_step}"（「模块规划」），external_id=mod-<模块>，blocked_by=依赖模块的 task id，不设 parent，repository_id=本任务的仓库（list_repositories_kandev），base_branch=mod/baseline（只决定模块 agent 自己的 worktree；baseline 模块传基线分支；模块真正的起点只写在头里的 branch 行），title=mod:<模块> <简称>；prompt=[TASK v1] 头（role=module，scope=mod:<模块>，mode、mgmt_root 同本任务，parent=pm @ task {{task_id}}，pm=task {{task_id}}，kind、branch 见下）+ 模块契约（职责、意图、范围、验收要点、与本模块有关的 B-n（原文，标明提供方 / 使用方）、covers: R / PA；怎么拆、怎么做由模块 agent 决定）。返回的 task id 回填 registry.json 与 status.json，journal 记一行。恢复时看到未确认的创建意图，用相同 external_id 重调。
    - baseline：最先创建。先 `git -C <repo> branch mod/baseline <基线分支>`（已存在则跳过）；头里写 kind: baseline、branch: mod/baseline base <基线分支>；契约 = 下面【baseline 模块契约】的原文（<> 换成本项目的值，可补充本项目特有的环境要求）。
    - 其他模块：blocked_by 包含 baseline。依赖其他功能模块的，branch: mod/<模块> base mod/<依赖模块>（多个依赖时 base 写其中一个，契约写明其余要合并的分支）；没有功能依赖的 base mod/baseline。用户的基线分支在「收尾合并」之前不被改动。
    - integration-test（kind: integration）：最后创建，blocked_by=全部其他模块；branch: mod/integration-test base <集成分支>（它在规划时从基线分支建立集成分支）；契约写 charter 中的关键用户场景。
@@ -488,7 +488,7 @@ def w1(w2_id, w2_plan_step):
 1. 读 project/charter.md 的 R-n、PA-n 和「模块边界」、status.json（含 misrouted 记录，按证据重新判断担当）、attention.md、各模块 acceptance.md 最后一节。
 2. 建立或更新集成分支（environment.md「合并方式」，默认 integration，从基线分支切出），合并 registry.json 中每个模块的当前分支（current_branch；已合入的跳过）。""" + CONFLICT_RULE + """写进 final-report「待修复」，跳到第 8 步按 fail 处理。
 3. 在集成分支上运行全量测试与集成测试（需要真实调用的 PA 复用模块验收的结果）；有「结合测试」时一并运行。优先用自动化工具，覆盖不了的才手动操作产品，并写明原因。
-4. 逐条 PA-n 判定 pass / fail / unverified(原因) 并附证据；再逐条 R-n 对照需求原文和「产品意图」判定是否满足（必要时以用户身份用一遍产品），达不到意图的判"部分满足"并写明差距。在 project/final-report.md 写本轮一节（首轮替换模板占位节；写明 workflow 版本）。
+4. 逐条 PA-n 判定 pass / fail / unverified(原因) 并附证据（attention.md 中已由 ADR 接受为已知问题的记 unverified(已知问题，ADR 编号)，列入「需要用户处理」）；再逐条 R-n 对照需求原文和「产品意图」判定是否满足（必要时以用户身份用一遍产品），达不到意图的判"部分满足"并写明差距。在 project/final-report.md 写本轮一节（首轮替换模板占位节；写明 workflow 版本）。
 5. 按 environment.md「约束落实」中的命令读额度账本（例如 `python <mgmt_root>/tools/quota.py --ledger <mgmt_root>/quota/ledger.json show`），用量与上限写进 final-report。
 6. 写「终审运行方式」：如何在本机启动和试用（命令、端口、目录）；有界面的汇总关键页面在各视口的截图路径（复用 evidence/，缺的补拍）。「临时资源」列出验收用的临时目录 / worktree / 端口，标明留给终审还是已清理。
 7. 「需要用户处理」：unverified 项、未满足或不做的 R、attention.md 中仍未确认的项，按 attention.md 的格式汇总（每项附推荐答案）。这一节开头写回复方式："在本任务的 pm 会话标签里，把修改意见和对各项的答复一条发完；发消息即退回修改，把任务拖到「收尾合并」即批准。"本步骤结束时的总结里也写上这句。

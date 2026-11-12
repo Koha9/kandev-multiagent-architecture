@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.1。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.2。
 
 ## 简介
 
@@ -27,7 +27,8 @@
 
 ## 核心设计
 
-- **三层分工**：项目管理（1 个）→ 模块管理（每模块 1 个，可并行）→ 开发（每任务 1 个独立 worktree）。管理者只规划、委派、验收，不写代码。
+- **三层分工，按知识边界划分**：项目管理（1 个，只持有需求、模块清单与模块边界、项目验收标准）→ 模块管理（每模块 1 个，可并行，只持有本模块的规格、接口、任务）→ 开发（每任务 1 个独立 worktree，只需要一份自包含的契约）。管理者只规划、委派，不写代码；环境与骨架由最先运行的 baseline 模块经开发任务完成。
+- **验证者独立**：立项评审、模块验收、项目验收、审核都换 profile、开新会话，执行上一层写好的标准，把不通过项写成可直接下发的修复项；常驻会话只做路由。
 - **测试是裁判**：每个开发任务都有机器可判定的完成条件；审核换一个 profile、开新会话，原样重跑测试，每条验收标准写出亲自确认的证据。
 - **状态存文件，会话可抛弃**：每个项目有一个管理目录（需求、担当表、进度、决策记录），任何会话被重置后都能按恢复协议接着做。
 - **需求原文贯穿到底**：用户需求逐条编号为 R-n，规划、验收都逐条对照，防止转述中走样。
@@ -38,7 +39,7 @@
 
 ![架构图：W1 项目管理、W2 模块管理、W3 开发三层，加上管理目录和守护](docs/architecture.svg)
 
-黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；更详细的流程图（包括 agent 之间允许哪些交互）见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
+（图为 v3.1，步骤以 [docs/workflow.md](docs/workflow.md) 的表格为准：v3.2 去掉了「环境基线」步骤，改由 baseline 模块完成。）黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；更详细的流程图（包括 agent 之间允许哪些交互）见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
 
 ## 怎么使用
 
@@ -46,7 +47,7 @@
 
 - 本机运行着 Kandev，外部 MCP 可用（默认 `http://localhost:38429/mcp`）。
 - Python 3（脚本只用标准库）。
-- 5 个 agent profile：`pm`、`auditor`（与 pm 不同）、`developer`、`reviewer`（与 developer 不同，最好换厂商）、`mechanical`（便宜模型即可）。
+- 5 个必填 agent profile：`pm`、`auditor`（与 pm 不同）、`developer`、`reviewer`（与 developer 不同，最好换厂商）、`mechanical`（合并门禁，编码模型）。可选 `plan_auditor`（立项评审，最强模型，缺省 = auditor）、`module`（缺省 = pm）、`module_auditor`（与 module 不同，缺省 = auditor）。
 
 ### 方式一：交给 agent（推荐）
 
@@ -101,7 +102,7 @@
 | 想了解 | 看哪里 |
 |---|---|
 | 整体设计：角色、步骤、门禁、并发、已知限制、已否决的设计 | [docs/workflow.md](docs/workflow.md) |
-| 流程图 | [docs/workflow-diagrams.md](docs/workflow-diagrams.md)（也可以用浏览器打开 `docs/workflow-diagrams.html`） |
+| 流程图 | [docs/workflow-diagrams.md](docs/workflow-diagrams.md)（也可以用浏览器打开 `docs/workflow-diagrams.html`；图为 v3.1，步骤以 workflow.md 的表格为准） |
 | 各步骤的完整 prompt 与配置 | [docs/prompts.md](docs/prompts.md)（由 `kandev/build_workflows.py` 生成） |
 | 管理目录的构造与文档格式 | [docs/mgmt-workspace.md](docs/mgmt-workspace.md) |
 | agent 之间怎么通信 | [mgmt-template/protocol/message.md](mgmt-template/protocol/message.md) |
