@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 责任分工图</title>
+<style>
+:root{
+  --bg:#f7f6f3; --panel:#ffffff; --ink:#1c1917; --muted:#5f5a55; --line:#d6d3d1; --lane:#efede8; --lane-ink:#44403c;
+  --pm:#6d28d9; --pm-bg:#ede9fe;
+  --auditor:#047857; --auditor-bg:#d1fae5;
+  --developer:#1d4ed8; --developer-bg:#dbeafe;
+  --reviewer:#a16207; --reviewer-bg:#fef3c7;
+  --mechanical:#475569; --mechanical-bg:#e2e8f0;
+  --human:#be185d; --human-bg:#fce7f3;
+  --guard:#0e7490; --guard-bg:#cffafe;
+  --none:#78716c; --none-bg:#f5f5f4;
+  --flow:#8a847e; --ret:#dc2626; --esc:#ea580c; --query:#4338ca;
+  --chg:#eab308; --chg-bg:#fef9c3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1a19; --panel:#252422; --ink:#f3f2f0; --muted:#aaa49e; --line:#3f3c39; --lane:#22211f; --lane-ink:#d6d3d1;
+    --pm:#c4b5fd; --pm-bg:#2f2160;
+    --auditor:#6ee7b7; --auditor-bg:#0f3b2e;
+    --developer:#93c5fd; --developer-bg:#172e57;
+    --reviewer:#fcd34d; --reviewer-bg:#3d2f0a;
+    --mechanical:#cbd5e1; --mechanical-bg:#2a313b;
+    --human:#f9a8d4; --human-bg:#4a1631;
+    --guard:#67e8f9; --guard-bg:#0c3540;
+    --none:#a8a29e; --none-bg:#2a2927;
+    --flow:#9c958f; --ret:#f87171; --esc:#fb923c; --query:#a5b4fc;
+    --chg:#facc15; --chg-bg:#4a3d06;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1a19; --panel:#252422; --ink:#f3f2f0; --muted:#aaa49e; --line:#3f3c39; --lane:#22211f; --lane-ink:#d6d3d1;
+  --pm:#c4b5fd; --pm-bg:#2f2160;
+  --auditor:#6ee7b7; --auditor-bg:#0f3b2e;
+  --developer:#93c5fd; --developer-bg:#172e57;
+  --reviewer:#fcd34d; --reviewer-bg:#3d2f0a;
+  --mechanical:#cbd5e1; --mechanical-bg:#2a313b;
+  --human:#f9a8d4; --human-bg:#4a1631;
+  --guard:#67e8f9; --guard-bg:#0c3540;
+  --none:#a8a29e; --none-bg:#2a2927;
+  --flow:#9c958f; --ret:#f87171; --esc:#fb923c; --query:#a5b4fc;
+  --chg:#facc15; --chg-bg:#4a3d06;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;font-size:14px;line-height:1.5}
+.wrap{max-width:1290px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:22px;margin:0 0 4px}
+.lede{color:var(--muted);margin:0 0 14px}
+h2{font-size:16px;margin:26px 0 8px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{font:inherit;border:0;background:transparent;color:var(--ink);padding:6px 16px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.hint{color:var(--muted);font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 22px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-bottom:12px}
+.legend .grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.legend .gt{font-weight:600;font-size:13px;margin-right:2px}
+.legend .it{display:inline-flex;align-items:center;gap:5px;font-size:12.5px}
+.sw{width:14px;height:14px;border-radius:3px;border:2px solid;display:inline-block}
+.scroll{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+#map{display:block;width:100%;min-width:1120px;height:auto}
+.changes{display:none;background:var(--chg-bg);color:var(--ink);border:1px solid var(--chg);border-radius:10px;padding:10px 14px;margin-bottom:12px}
+.changes.on{display:block}
+.changes ol,.changes ul{margin:4px 0 0;padding-left:20px}
+.changes li{margin:2px 0}
+.changes .rules{margin:2px 0 6px}
+table{border-collapse:collapse;width:100%;background:var(--panel);border:1px solid var(--line);font-size:13px}
+th,td{border-bottom:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--lane);font-weight:600;white-space:nowrap}
+th.grp{text-align:center;border-left:2px solid var(--line)}
+td.gl,th.gl{border-left:2px solid var(--line)}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.bc{white-space:nowrap}
+tr.sub td:first-child{padding-left:26px;color:var(--muted)}
+tr.ov td{background:var(--lane)}
+.delta{color:var(--muted);font-size:11.5px;margin-left:3px}
+.barc{display:inline-block;height:9px;border-radius:2px;background:var(--ret);vertical-align:middle;margin-right:6px}
+.tblwrap{overflow-x:auto;border-radius:10px}
+.kind{display:inline-block;font-size:11.5px;padding:0 6px;border-radius:4px;border:1px solid;white-space:nowrap}
+.kind.ret{color:var(--ret);border-color:var(--ret)}
+.kind.esc{color:var(--esc);border-color:var(--esc)}
+.kind.alert{color:var(--guard);border-color:var(--guard)}
+.kind.query{color:var(--query);border-color:var(--query)}
+.wt{display:inline-block;font-size:11.5px;padding:0 6px;border-radius:4px;white-space:nowrap}
+.wt.h{background:var(--ret);color:var(--panel)}
+.wt.l{border:1px solid var(--muted);color:var(--muted)}
+.tg{display:inline-block;font-size:11px;padding:0 5px;border-radius:4px;background:var(--chg);color:#1c1917;margin-left:4px;white-space:nowrap}
+tr.removed td{color:var(--muted);text-decoration:line-through}
+tr.removed td.keep{text-decoration:none}
+tr.changed td{background:var(--chg-bg)}
+.note{color:var(--muted);font-size:12.5px;margin-top:6px}
+.concl{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin-top:10px}
+.concl p{margin:4px 0}
+.who{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.who i{width:10px;height:10px;border-radius:2px;display:inline-block}
+
+/* SVG */
+svg text{font-family:inherit}
+.laneb{fill:var(--lane)}
+.laneh{font-size:13.5px;font-weight:600;fill:var(--lane-ink)}
+.laned{font-size:12px;fill:var(--muted)}
+.r-pm{--rc:var(--pm);--rf:var(--pm-bg)}
+.r-auditor{--rc:var(--auditor);--rf:var(--auditor-bg)}
+.r-developer{--rc:var(--developer);--rf:var(--developer-bg)}
+.r-reviewer{--rc:var(--reviewer);--rf:var(--reviewer-bg)}
+.r-mechanical{--rc:var(--mechanical);--rf:var(--mechanical-bg)}
+.r-human{--rc:var(--human);--rf:var(--human-bg)}
+.r-guard{--rc:var(--guard);--rf:var(--guard-bg)}
+.r-none{--rc:var(--none);--rf:var(--none-bg)}
+.nbox{fill:var(--rf);stroke:var(--rc)}
+.s-new .nbox{stroke-width:2.8}
+.s-cont .nbox{stroke-width:1.2}
+.s-reset .nbox{stroke-width:1.8;stroke-dasharray:6 3}
+.s-entry .nbox{stroke-width:2.2;stroke-dasharray:14 3 3 3}
+.s-none .nbox{stroke-width:1.4;stroke-dasharray:1.5 3}
+.nt{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.nr{font-size:11px;fill:var(--rc);font-weight:600}
+.ns{font-size:10px;fill:var(--muted)}
+.tag{stroke:var(--rc);stroke-width:1}
+.tag-new{fill:var(--rc)}
+.tag-cont{fill:var(--panel)}
+.tag-reset{fill:var(--panel);stroke-dasharray:2.5 1.5}
+.tag-entry{fill:var(--rf);stroke-width:1.6}
+.tagt{font-size:9.5px;font-weight:700;fill:var(--rc)}
+.tag-new + .tagt{fill:var(--panel)}
+.ghost{opacity:.4}
+.halo{fill:none;stroke:var(--chg);stroke-width:3}
+.chgb{fill:var(--chg)}
+.chgt{font-size:10px;font-weight:700;fill:#1c1917}
+.badge{fill:var(--guard-bg);stroke:var(--guard);stroke-width:1}
+.badget{font-size:9.5px;font-weight:600;fill:var(--guard)}
+.itbox{fill:none;stroke:var(--pm);stroke-width:1.2;stroke-dasharray:4 3;opacity:.8}
+.itbox.new{stroke:var(--chg);stroke-width:2.4;opacity:1}
+.itt{font-size:11.5px;font-weight:600;fill:var(--pm)}
+.itd{font-size:10.5px;fill:var(--muted)}
+.notet{font-size:10.5px;fill:var(--muted)}
+.qt{font-size:11px;font-weight:600;fill:var(--query)}
+.e{fill:none}
+.e-flow{stroke:var(--flow);stroke-width:1.3}
+.e-create{stroke:var(--flow);stroke-width:1.3;stroke-dasharray:2 3}
+.e-ret{stroke:var(--ret);stroke-width:2.2;stroke-dasharray:7 4}
+.e-esc{stroke:var(--esc);stroke-width:2.2;stroke-dasharray:12 4 2 4}
+.e-link{stroke:var(--esc);stroke-width:1.4;stroke-dasharray:2 3}
+.e-alert{stroke:var(--guard);stroke-width:1.6;stroke-dasharray:2 3}
+.e-query{stroke:var(--query);stroke-width:1.6;stroke-dasharray:5 2 1 2 1 2}
+.mk-flow,.mk-create{fill:var(--flow)}
+.mk-ret{fill:var(--ret)}
+.mk-esc,.mk-link{fill:var(--esc)}
+.mk-alert{fill:var(--guard)}
+.mk-query{fill:none;stroke:var(--query);stroke-width:1.5}
+.lbr{fill:var(--panel);stroke-width:1}
+.lb.k-ret .lbr{stroke:var(--ret)}
+.lb.k-esc .lbr{stroke:var(--esc)}
+.lb.k-query .lbr{stroke:var(--query)}
+.lb.k-link .lbr{stroke:none}
+.lb.k-alert .lbr{stroke:var(--guard)}
+.lb.k-flow .lbr,.lb.k-create .lbr{stroke:none}
+.lb.chg .lbr{fill:var(--chg-bg);stroke:var(--chg);stroke-width:1.6}
+.lbt{font-size:11px;fill:var(--ink)}
+.lb.k-flow .lbt,.lb.k-create .lbt,.lb.k-link .lbt{fill:var(--muted);font-size:10.5px}
+.chip{stroke-width:1.2}
+.chipt{font-size:11px;fill:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent 责任分工图</h1>
+  <p class="lede">三套 workflow 的每个步骤由谁负责、会话怎么开，以及每条打回 / 升级路径的落点（落点即承担返工的角色）。</p>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="视图">
+      <button data-v="cur" aria-pressed="true">现状</button>
+      <button data-v="a" aria-pressed="false">方案 A（换 profile）</button>
+      <button data-v="b" aria-pressed="false">方案 B（按知识边界）</button>
+      <button data-v="c" aria-pressed="false">方案 C（B + 借鉴）</button>
+    </div>
+    <span class="hint" id="viewhint"></span>
+  </div>
+
+  <div class="changes" id="ch-a">
+    <strong>方案 A 相对现状的变化</strong>（图中黄色描边 / 「改」角标 / ★ 标签为变化处）
+    <ol>
+      <li>W2「验收调查」改由 <b>auditor</b> 负责，每次新会话；只判定并写验收记录，有问题带意见退回「等待开发」（⑩），由模块 agent（pm）建修复任务。</li>
+      <li>结合测试测出的缺陷改为上报 W1 调度（㉒）→ pm 为担当模块建修复模块任务（㉓，一轮 W2 + W3）→ 修复合入后结合测试模块重新合并并重跑（㉔）；上限 2 轮，仍不通过交给用户（㉕）。取消 ⑲ ⑳ ㉑ 和结合测试模块内的修复子任务。</li>
+      <li>立项评审新增检查：模块过大或职责过多时退回立项规划拆分（②）。</li>
+    </ol>
+  </div>
+  <div class="changes" id="ch-b">
+    <strong>方案 B 的两条规则</strong>
+    <ol class="rules">
+      <li>一个 agent 只持有一层知识：项目层（pm）、模块层（模块 agent）、任务层（开发）。</li>
+      <li>常驻会话只做路由，重活放进用完即弃的新会话；验证者的结论写成「可直接下发的修复项」（复现步骤、期望、实际、疑似位置、担当模块、失败的测试）。</li>
+    </ol>
+    <strong>相对现状的变化</strong>（图中黄色描边 / 「改」角标 / ★ 标签为变化处）
+    <ol>
+      <li>W1 去掉「环境基线」（共 11 步，后续步骤顺次编号）。原基线工作（骨架、冒烟测试、检查脚本、结合测试工具）由新增的 <b>baseline 模块</b>经 W2 + W3 完成，因此有审核和验收；它最先执行，其他模块都依赖它（W3 泳道左侧黄色虚线框）。④ ⑤ 不再存在。</li>
+      <li>W1「调度」与 W2「等待开发」仍常驻，但<b>进入时重置上下文</b>，只做路由。</li>
+      <li>W2「验收调查」改由 <b>auditor</b> 新会话负责：写好修复项，模块 agent 只建修复子任务（⑩ 轻）；第 3 次仍不过或涉及其他模块，由 auditor 直接升级给调度（⑪）。</li>
+      <li>项目验收有 fail 时 auditor 已写好修复项和担当模块，pm 只建修复模块任务（⑥ 轻）。立项评审的阻塞问题与模块过大共用 ≤2 次（①）。</li>
+      <li>结合测试：结合测试模块 agent 先确认是产品缺陷并写明担当模块（⑲），再上报调度（㉖ 轻）→ pm 建修复模块任务（㉓）→ 重新合并并重跑（㉔），≤2 轮后交用户（㉕）。</li>
+      <li>W3 开发契约自包含（模块 agent 摘入相关接口片段和需求原话）；新增跨模块查询（靛蓝点划线，不计入返工）。</li>
+      <li>守护把无响应的 pm 移到「刷新」这条保留：进入时重置只清掉进入之前的历史，常驻步骤长时间停留仍会累积上下文，会话卡死也要靠它恢复。</li>
+      <li><b>缺口：</b>结合测试缺陷的确认与归属由结合测试模块 agent（常驻「等待开发」实例）自己做，与规则 2 冲突——见方案 C。</li>
+    </ol>
+  </div>
+  <div class="changes" id="ch-c">
+    <strong>方案 C = 方案 B + 下面 6 项。</strong>方案 C 不新增角色和步骤，只把机械性的工作从常驻会话移给脚本和一次性会话。
+    <ol>
+      <li><b>C1 缺陷归属由发现它的测试任务完成</b>（修正 B 的缺口）：结合测试任务（developer，一次性会话）在 defects 里直接写明担当模块和疑似位置，审核核对；结合测试模块 agent 只转交（⑲ 改为轻）。</li>
+      <li><b>C2 路由备注规则</b>（借鉴 dsh-superagent：主会话只转发原始内容加不超过 30 词的备注，不添加要求）：常驻会话下发修复时只给指向原修复项的指针和一句备注，不改写（㉓ 改为轻；⑥ ⑩ 在 B 中已是轻）。</li>
+      <li><b>C3 合并门禁</b>（借鉴 Anthropic C 编译器项目和 OpenAI harness：共享分支上的无回归门禁，机械强制优于文字规则）：「合并」在 rebase 后运行完整本地检查脚本（lint + 全量测试 + 构建，有结合测试套件时一并运行）。失败直接退回「开发」（㉘，developer 原会话，≤2 次），超过再升级模块 agent（㉙）。取代 ㉗。</li>
+      <li><b>C4 合并下沉</b>（借鉴 Cursor：去掉 integrator 角色，worker 自己处理合并）：门禁通过后「合并」步骤自己合入模块分支并移到完成；模块 agent 不再合并，只在收到 REPORT 时放行后续任务。</li>
+      <li><b>C5 契约检查脚本</b>（借鉴 MAST：约 44% 的失败来自规格和系统设计；OpenAI：机械强制）：模块 agent 创建子任务前运行确定性脚本，检查 owns 不重叠、每个任务有 AC 和测试命令、每条跨模块边界都落到某个任务、依赖无环。不是新的评审步骤。</li>
+      <li><b>C7 验收标准的覆盖核对</b>（借鉴 Anthropic 长任务 harness：验收标准要明确、不可随意改动；MAST：验证只做表面检查是常见失败）：auditor 做模块验收时，先核对模块 agent 写的 MA 是否覆盖了 pm 模块契约里的每条验收要点和 charter「模块边界」中与本模块有关的每一行（做法同立项评审的需求覆盖表），有缺口即判不通过。原因：MA 是被验收方自己写的，且开工前没有独立评审。不新增路径，不改变落点数字。</li>
+      <li><b>C6 其余保留 B</b>：知识分层、常驻步骤进入时重置、验收调查由 auditor 做、baseline 模块、跨模块查询；守护移到「刷新」同样保留。</li>
+    </ol>
+    <strong>考虑过但不采用</strong>
+    <div class="tblwrap" style="margin-top:6px"><table>
+      <tr><th>设计</th><th>来源</th><th>不采用的原因</th></tr>
+      <tr><td>开工前由评审者和开发协商「完成的定义」（sprint contract）</td><td>Anthropic 长任务 harness</td><td>每个模块多一轮强模型会话；同一来源也指出评审环节只在任务超出模型能力时才值得，结构应逐项去掉非必要的；改用 C5 的脚本检查</td></tr>
+      <tr><td>常驻路由步骤换便宜模型，决策另开一次性会话</td><td>Cursor / Anthropic 的按角色选模型</td><td>剩下落在常驻会话上的都是需要判断的决策；要多加中转步骤，收益没有实测数据</td></tr>
+      <tr><td>无管理者的平级 agent + 锁文件</td><td>Anthropic C 编译器</td><td>依赖近乎完美的测试作为裁判，普通项目不具备</td></tr>
+      <tr><td>子 agent 之间共享完整对话记录</td><td>Cognition 2025</td><td>与减少上下文的目标相反；改用自包含契约和单写者</td></tr>
+      <tr><td>多 agent 辩论或投票</td><td>多项研究显示不优于自一致性</td><td>成本高，证据弱</td></tr>
+    </table></div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="scroll"><svg id="map" width="1250" height="910" viewBox="0 0 1250 910" role="img" aria-label="三条泳道的责任分工与打回路径图"></svg></div>
+
+  <h2>当前视图：按角色统计</h2>
+  <div class="tblwrap"><table id="sum"></table></div>
+  <p class="note" id="sumnote"></p>
+
+  <h2>四个视图对比</h2>
+  <div class="tblwrap"><table id="cmp"></table></div>
+  <div class="concl" id="cmpnote"></div>
+
+  <h2>验收标准从哪来</h2>
+  <p class="note" style="margin-top:0">验证者不自己制定标准，只执行上一层事先写好的标准。</p>
+  <div class="tblwrap"><table>
+    <tr><th>验证者</th><th>验什么</th><th>标准由谁写</th><th>存在哪里</th><th>标准自己被谁检查过</th></tr>
+    <tr><td>reviewer（W3 审核）</td><td>单个任务</td><td>模块 agent</td><td>任务契约里的 AC 和测试命令</td><td>方案 C：契约检查脚本（只查形式）</td></tr>
+    <tr><td>auditor（W1 立项评审）</td><td>pm 的规划</td><td>用户（需求原文）+ 步骤 prompt 里固定的 6 项检查</td><td>任务描述、charter</td><td>—</td></tr>
+    <tr><td>auditor（W2 验收调查，方案 A / B / C）</td><td>一个模块</td><td>模块 agent 写 MA；pm 写模块契约的验收要点和模块边界</td><td>模块 spec、charter</td><td>方案 C：auditor 先做覆盖核对（C7）</td></tr>
+    <tr><td>结合测试任务 + reviewer</td><td>合并后的跨模块场景</td><td>结合测试模块 agent，依据需求原文、PA、各模块接口</td><td>结合测试模块的 spec</td><td>reviewer 核对测试针对真实应用</td></tr>
+    <tr><td>auditor（W1 项目验收）</td><td>整个产品</td><td>pm 写 PA；用户的需求原文 R</td><td>charter</td><td>立项评审 + 用户在立项确认时确认</td></tr>
+  </table></div>
+  <p class="note">判定只有 pass / fail / unverified（原因）三种；项目验收除了逐条核对 PA，还要对照需求原文判断意图是否达到。</p>
+  <p class="note">重 = 落点角色要自己调查、决策或重做；轻 = 拿到的是可直接下发的修复项，只需建任务或转交。常驻 = 「调度」「等待开发」这类长期停留的步骤。「新会话」列为「每次都是新会话的步骤数 / 入口步骤数」（入口 = 立项规划、模块规划、开发：首次新会话，退回时沿用）。「调查由一次性会话完成」= 发现问题的源步骤是新会话，或是 W3「开发」这类一个任务一个会话的入口步骤（含结合测试任务等 W3 实例；开发任务结束后会话即弃用）；立项规划、模块规划虽是入口但会话长期沿用，不算。㉗、㉙ 的源步骤是「合并」新会话，但问题实际由模块 agent 处理，剔除。</p>
+
+  <h2>全部打回 / 升级 / 告警 / 查询路径（当前视图）</h2>
+  <div class="tblwrap"><table id="paths"></table></div>
+  <p class="note">「落点」= 箭头终点承担返工的角色；「传导」= 落点之后返工继续落到的角色。告警和跨模块查询不计入打回 / 升级落点。「上限」写「未单列」的，表示资料里没有给这条路径单独的次数上限。</p>
+</div>
+
+<script>
+(function(){
+const NS='http://www.w3.org/2000/svg';
+const VIEWS=['cur','a','b','c'];
+const VNAME={cur:'现状',a:'方案 A（换 profile）',b:'方案 B（按知识边界）',c:'方案 C（B + 借鉴）'};
+const VHINT={cur:'现状 = 已部署的 v3.1 + 结合测试模块',a:'方案 A = 换 profile 的调整（未实施），变化处已标出',b:'方案 B = 按知识边界划分（未实施），变化处已标出',c:'方案 C = 方案 B + 6 项借鉴（未实施），变化处相对现状标出'};
+const isBC=v=>v==='b'||v==='c';
+const ROLES={
+  pm:{name:'pm',desc:'项目管理 / 模块管理'},
+  auditor:{name:'auditor',desc:'独立评审 / 验收'},
+  developer:{name:'developer',desc:'开发'},
+  reviewer:{name:'reviewer',desc:'审核'},
+  mechanical:{name:'mechanical',desc:'机械工作'},
+  human:{name:'人（用户）',desc:'门禁 / 决定'},
+  guard:{name:'守护',desc:'定时巡检，只发告警'},
+  none:{name:'无 agent',desc:'停放 / 终态'}
+};
+const SESS={new:{name:'新会话',tag:'新'},cont:{name:'沿用原会话',tag:'续'},reset:{name:'沿用但重置上下文',tag:'重置'},entry:{name:'入口：首次新会话，退回时沿用',tag:'新·续'},none:{name:'无 agent（人或停放）',tag:''}};
+
+/* ---------- 节点 ----------
+ ov: 各视图覆盖 {a:{...}, b:{...}}；字段 t 标题、role、sess、sub、changed、ghost
+ only: 只在这些视图出现；resident: 常驻步骤
+*/
+const H=56;
+const N=[];
+function S(id,lane,x,y,w,t,role,sess,sub,o){N.push(Object.assign({id,lane,x,y,w,h:H,t,role,sess,sub,kind:'step'},o||{}));}
+const Y1=150,Y2=450,Y3=740;
+const RESET_HUB={sess:'reset',sub:'常驻 · 只路由（进入时重置）',changed:true};
+// W1
+S('w1-0','W1',24,Y1,64,'0 待立项','none','none','');
+S('w1-1','W1',107,Y1,92,'1 立项规划','pm','entry','pm 长期会话起点');
+S('w1-2','W1',218,Y1,92,'2 立项评审','auditor','new','独立评审',{ov:{a:{sub:'+ 模块粒度检查',changed:true},b:{sub:'+ 模块粒度检查',changed:true}}});
+S('w1-3','W1',329,Y1,92,'3 立项确认','human','none','attended/plan_only 时停');
+S('w1-4','W1',440,Y1,92,'4 环境基线','pm','cont','',{ov:{b:{ghost:true,t:'环境基线',sub:'移入 baseline 模块'}}});
+S('w1-5','W1',551,Y1,92,'5 模块下发','pm','cont','',{ov:{b:{t:'4 模块下发'}}});
+S('w1-6','W1',662,Y1,170,'6 调度','pm','cont','常驻 · 处理上报、升级、提问',{resident:true,ov:{b:Object.assign({t:'5 调度'},RESET_HUB)}});
+S('w1-7','W1',851,Y1,92,'7 项目验收','auditor','new','',{ov:{b:{t:'6 项目验收',sub:'写可下发修复项',changed:true}}});
+S('w1-8','W1',962,Y1,92,'8 人工终审','human','none','门禁',{ov:{b:{t:'7 人工终审'}}});
+S('w1-9','W1',1073,Y1,92,'9 收尾合并','mechanical','new','',{ov:{b:{t:'8 收尾合并'}}});
+S('w1-10','W1',1184,Y1,56,'10 完成','none','none','',{ov:{b:{t:'9 完成'}}});
+S('w1-11','W1',250,236,92,'11 刷新','pm','reset','中转步骤',{ov:{b:{t:'10 刷新'}}});
+// W2
+S('w2-0','W2',551,Y2,92,'0 模块规划','pm','entry','',{ov:{c:{sub:'先跑契约检查脚本',changed:true}}});
+S('w2-1','W2',662,Y2,170,'1 等待开发','pm','cont','常驻 · 回答提问、合并子任务',{rl:'pm（模块 agent）',resident:true,ov:{b:RESET_HUB,c:{sub:'常驻 · 只路由（进入时重置）· 不再合并'}}});
+S('w2-2','W2',851,Y2,92,'2 验收调查','pm','reset','同 profile 重置',{ov:{a:{role:'auditor',sess:'new',sub:'只判定 + 写记录',changed:true},b:{role:'auditor',sess:'new',sub:'写可下发修复项',changed:true},c:{sub:'先做覆盖核对（C7）'}}});
+S('w2-3','W2',962,Y2,92,'3 完成','none','none','');
+S('w2-4','W2',1073,Y2,92,'4 刷新','pm','reset','中转步骤');
+// 结合测试模块（W2 / W3 实例，不计入步骤数）
+S('it-0','IT',30,Y2,92,'模块规划','pm','entry','合并各模块分支',{kind:'inst'});
+S('it-1','IT',160,Y2,92,'等待开发','pm','cont','建修复子任务',{kind:'inst',ov:{a:{sub:'缺陷转交调度',changed:true},b:{sess:'reset',sub:'确认缺陷 · 定担当',changed:true},c:{sub:'只转交缺陷'}}});
+S('it-t','IT',300,Y2,92,'结合测试任务','developer','entry','W3 任务',{kind:'inst',w3dev:true,ov:{c:{sub:'defects 写明担当',changed:true}}});
+S('it-f','IT',300,530,92,'修复子任务','developer','entry','W3 任务',{kind:'inst',w3dev:true,ov:{a:{ghost:true,sub:'（方案中取消）'},b:{ghost:true,sub:'（方案中取消）'}}});
+// baseline 模块（仅方案 B，W2 / W3 实例）
+S('bl-0','BL',28,712,92,'模块规划','pm','entry','最先执行',{kind:'inst',only:['b']});
+S('bl-1','BL',140,712,92,'等待开发','pm','reset','只路由',{kind:'inst',only:['b']});
+S('bl-t','BL',252,712,92,'基线任务','developer','entry','W3 · 有审核',{kind:'inst',w3dev:true,only:['b']});
+// W3
+S('w3-0','W3',452,Y3,92,'0 待开发','none','none','停放有前置的任务');
+S('w3-1','W3',600,Y3,130,'1 开发','developer','entry','一任务一会话',{w3dev:true,ov:{b:{sub:'契约自包含 · 不跨模块',changed:true}}});
+S('w3-2','W3',772,Y3,92,'2 审核','reviewer','new','每次新会话');
+S('w3-3','W3',940,Y3,92,'3 等待决策','none','none','模块 agent 处理');
+S('w3-4','W3',1076,Y3,92,'4 合并','mechanical','new','',{ov:{c:{sub:'门禁 + 自己合入',changed:true}}});
+S('w3-5','W3',1188,Y3,52,'5 完成','none','none','');
+// 用户落点、守护、跨模块查询示意
+N.push({id:'u4',kind:'pill',x:464,y:262,w:44,h:24,t:'用户',role:'human',only:['cur','a']});
+N.push({id:'u6a',kind:'pill',x:870,y:222,w:44,h:24,t:'用户',role:'human'});
+N.push({id:'u6b',kind:'pill',x:870,y:258,w:44,h:24,t:'用户',role:'human',only:['a','b']});
+N.push({id:'u9',kind:'pill',x:1097,y:262,w:44,h:24,t:'用户',role:'human'});
+N.push({id:'guard',kind:'guard',x:24,y:236,w:126,h:60,t:'守护',role:'guard'});
+N.push({id:'q1',kind:'pill',x:948,y:376,w:70,h:22,t:'模块 agent',role:'pm',only:['b'],small:true});
+N.push({id:'q2',kind:'pill',x:1150,y:376,w:86,h:22,t:'担当模块 agent',role:'pm',only:['b'],small:true});
+N.push({id:'q3',kind:'pill',x:1050,y:404,w:60,h:22,t:'pm · ADR',role:'pm',only:['b'],small:true});
+
+/* ---------- 路径 ----------
+ k: ret 打回 / esc 升级 / alert 告警 / query 跨模块查询 / flow 正常 / create 创建任务 / link 移交
+ land: pm1 项目 pm（W1）/ pm2 模块 agent（W2）/ developer / human
+ w: h 重 / l 轻（缺省 h）；src: 发现问题的源步骤；v: 出现的视图（缺省全部）；ov: 各视图覆盖
+*/
+const E=[
+ {id:1,k:'ret',src:'w1-2',from:'W1 立项评审',to:'W1 立项规划',cond:'评审发现阻塞问题',lim:'最多退回 2 次；第 3 次评审只剩非阻塞问题即放行',land:'pm1',
+  pts:[[250,150],[250,124],[175,124],[175,150]],lb:{x:212,y:124,t:['① 阻塞问题 · ≤2 次']},
+  ov:{b:{cond:'有阻塞问题，或模块过大 / 职责过多（两类共用上限）',lim:'共用 ≤2 次',t:['① 阻塞 / 模块过大 · ≤2']}}},
+ {id:2,k:'ret',v:['a'],src:'w1-2',from:'W1 立项评审',to:'W1 立项规划',cond:'模块过大或职责过多，退回拆分',lim:'未规定（是否与 ① 共用 ≤2 次待定）',land:'pm1',
+  pts:[[280,150],[280,98],[150,98],[150,150]],lb:{x:215,y:98,t:['② 模块过大/职责过多 → 拆分']}},
+ {id:3,k:'ret',src:'w1-3',from:'W1 立项确认',to:'W1 立项规划',cond:'用户发消息提意见（仅 attended 或 plan_only 时停在此步）',lim:'未单列',land:'pm1',
+  pts:[[390,150],[390,72],[125,72],[125,150]],lb:{x:257,y:72,t:['③ 用户提意见']}},
+ {id:4,k:'ret',v:['cur','a'],src:'w1-4',from:'W1 环境基线',to:'W1 环境基线（自身重试）',cond:'环境基线失败，自己重试',lim:'第 3 次仍失败转 ⑤',land:'pm1',
+  pts:[[470,150],[470,124],[505,124],[505,150]],lb:{x:487,y:108,t:['④ 失败自行重试']}},
+ {id:5,k:'esc',v:['cur','a'],src:'w1-4',from:'W1 环境基线',to:'用户',cond:'第 3 次仍失败；unattended 时写 ADR 并停下',lim:'—',land:'human',
+  pts:[[486,206],[486,262]],lb:{x:486,y:304,t:['⑤ 第 3 次仍失败']}},
+ {id:6,k:'ret',src:'w1-7',from:'W1 项目验收',to:'W1 模块下发',cond:'验收有 fail；pm 为担当模块建修复模块任务（新的 W2 任务）。没有规定修复项写到可直接下发',lim:'未单列',land:'pm1',via:['pm2','developer'],
+  pts:[[880,150],[880,120],[615,120],[615,150]],lb:{x:747,y:120,t:['⑥ 有 fail → 建修复模块任务']},
+  ov:{b:{cond:'验收有 fail；auditor 已写好修复项和担当模块，pm 只建修复模块任务',w:'l',t:['⑥ 有 fail · 修复项已写好']}}},
+ {id:7,k:'ret',src:'w1-8',from:'W1 人工终审',to:'W1 模块下发',cond:'用户发消息提意见，pm 自己分拣',lim:'未单列',land:'pm1',
+  pts:[[1000,150],[1000,94],[585,94],[585,150]],lb:{x:792,y:94,t:['⑦ 用户提意见']}},
+ {id:8,k:'esc',src:'w1-9',from:'W1 收尾合并',to:'用户',cond:'合并冲突或冒烟测试失败，停下等人',lim:'—',land:'human',
+  pts:[[1119,206],[1119,262]],lb:{x:1119,y:304,t:['⑧ 冲突 / 冒烟失败 → 停下']}},
+ {id:9,k:'esc',src:'w1-6',from:'W1 调度',to:'用户',cond:'通用升级链末端：attended 问用户；unattended 写 ADR 自行决定',lim:'—',land:'human',
+  pts:[[818,206],[818,234],[870,234]],lb:{x:922,y:234,a:'start',t:['⑨ pm 拿不准 → 用户 / ADR']}},
+ {id:10,k:'ret',src:'w2-2',from:'W2 验收调查',to:'W2 等待开发',cond:'模块内有问题；模块 agent 建修复子任务',lim:'第 3 次进入仍不通过转 ⑪',land:'pm2',via:['developer'],
+  pts:[[870,506],[870,530],[820,530],[820,506]],lb:{x:877,y:537,a:'start',t:['⑩ 模块内有问题 → 退回','建修复子任务']},
+  ov:{a:{cond:'auditor 判定不通过，带意见退回；模块 agent（pm）建修复任务（没有规定修复项写到可直接下发）',t:['⑩ auditor 带意见退回','模块 agent 建修复任务']},
+      b:{cond:'auditor 写好可直接下发的修复项；模块 agent 只建修复子任务',w:'l',t:['⑩ auditor 写好修复项','模块 agent 只建子任务']}}},
+ {id:11,k:'esc',src:'w2-2',from:'W2 验收调查',to:'W1 调度',cond:'第 3 次进入验收调查仍不通过，或问题涉及其他模块',lim:'—',land:'pm1',
+  pts:[[897,450],[897,395],[736,395],[736,206]],lb:{x:816,y:380,t:['⑪ 第 3 次仍不过 / 涉他模块']},
+  ov:{b:{cond:'第 3 次仍不通过或涉及其他模块，auditor 直接升级给调度',t:['⑪ auditor 直接升级调度']}}},
+ {id:12,k:'esc',src:'w2-1',from:'W2 等待开发（模块 agent）',to:'W1 调度',cond:'等待决策的问题涉及其他模块',lim:'—',land:'pm1',
+  pts:[[716,450],[716,206]],lb:{x:721,y:423,a:'start',t:['⑫ 等待决策','涉他模块']}},
+ {id:13,k:'ret',src:'w3-2',from:'W3 审核',to:'W3 开发',cond:'verdict=minor',lim:'≤3 轮',land:'developer',
+  pts:[[800,796],[800,822],[700,822],[700,796]],lb:{x:750,y:822,t:['⑬ minor · ≤3 轮']}},
+ {id:14,k:'esc',src:'w3-2',from:'W3 审核',to:'W3 等待决策 → 模块 agent',cond:'verdict=direction，或已审 3 次',lim:'—',land:'pm2',
+  pts:[[864,785],[940,785]],lb:{x:902,y:757,t:['⑭ direction','或已审 3 次']}},
+ {id:15,k:'ret',src:'w3-3',from:'W3 等待决策',to:'W3 开发',cond:'模块 agent 改契约后移回开发',lim:'未单列',land:'developer',
+  pts:[[960,796],[960,846],[660,846],[660,796]],lb:{x:810,y:846,t:['⑮ 改契约后移回开发']}},
+ {id:16,k:'ret',src:'w3-3',from:'W3 等待决策',to:'W3 待开发（新子任务）',cond:'模块 agent 拆分成新子任务',lim:'未单列',land:'developer',
+  pts:[[990,796],[990,870],[498,870],[498,796]],lb:{x:744,y:870,t:['⑯ 拆分成新子任务']}},
+ {id:17,k:'esc',src:'w3-1',from:'W3 开发',to:'W2 等待开发（模块 agent）',cond:'报告 blocked（做不完）或建议 dropped（无需改动）',lim:'—',land:'pm2',
+  pts:[[690,740],[690,506]],lb:{x:684,y:575,a:'end',t:['⑰ blocked（做不完）','或建议 dropped']}},
+ {id:18,k:'esc',src:'w3-4',from:'W3 合并',to:'W2 等待开发（模块 agent）',cond:'合并冲突涉及他人范围',lim:'—',land:'pm2',
+  pts:[[1130,740],[1130,660],[790,660],[790,506]],lb:{x:1000,y:660,t:['⑱ 合并冲突涉及他人范围']}},
+ {id:19,k:'esc',v:['cur','b'],src:'it-t',from:'结合测试任务（W3）',to:'结合测试模块 · 等待开发',cond:'测出产品缺陷（result=blocked + defects）上报；模块 agent 按根因建修复子任务',lim:'—',land:'pm2',via:['developer'],
+  pts:[[330,450],[330,430],[230,430],[230,450]],lb:{x:280,y:430,t:['⑲ 测出缺陷上报']},
+  ov:{b:{cond:'测出缺陷上报；结合测试模块 agent 确认是产品缺陷并写明担当模块（自己不修）',via:[]},
+      c:{cond:'结合测试任务在 defects 里写明担当模块和疑似位置（审核核对）；结合测试模块 agent 只转交',w:'l',t:['⑲ 缺陷已写明担当']}}},
+ {id:20,k:'ret',v:['cur'],src:'it-f',from:'修复子任务（W3）',to:'结合测试任务（W3）',cond:'修复合入后，报告缺陷的测试任务 rebase 重跑',lim:'同一缺陷修 2 次不过转 ㉑',land:'developer',
+  pts:[[346,530],[346,506]],lb:{x:353,y:518,a:'start',t:['⑳ 合入后 rebase 重跑']}},
+ {id:21,k:'esc',v:['cur'],src:'it-1',from:'结合测试模块 · 等待开发',to:'W1 调度',cond:'同一缺陷修复 2 次仍未通过，或需要改需求 / 设计',lim:'—',land:'pm1',
+  pts:[[180,450],[180,380],[696,380],[696,206]],lb:{x:470,y:380,t:['㉑ 同一缺陷 2 次不过 / 需改设计']}},
+ {id:22,k:'esc',v:['a'],src:'it-t',from:'结合测试任务（W3）',to:'W1 调度',cond:'测出产品缺陷，直接上报 pm（没有规定写到可直接下发）',lim:'见 ㉕',land:'pm1',
+  pts:[[370,450],[370,380],[696,380],[696,206]],lb:{x:480,y:380,t:['㉒ 测出缺陷 → 上报调度']}},
+ {id:26,k:'esc',v:['b'],src:'it-1',from:'结合测试模块 · 等待开发',to:'W1 调度',cond:'上报已确认、带担当模块的缺陷；pm 只路由',lim:'见 ㉕',land:'pm1',w:'l',
+  pts:[[180,450],[180,380],[696,380],[696,206]],lb:{x:470,y:380,t:['㉖ 带担当模块上报缺陷']}},
+ {id:23,k:'ret',v:['a','b'],src:'w1-6',from:'W1 调度',to:'担当模块 · W2 模块规划（新的修复模块任务）',cond:'pm 为担当模块建修复模块任务（一轮 W2 + W3）；担当模块 agent 要自己规划修复',lim:'≤2 轮（见 ㉕）',land:'pm2',via:['developer'],
+  pts:[[676,206],[676,365],[625,365],[625,450]],lb:{x:670,y:318,a:'end',t:['㉓ 为担当模块建','修复模块任务']},
+  ov:{c:{cond:'pm 只给指向原修复项的指针和一句备注，不改写；担当模块 agent 拿到现成修复项，直接生成任务',w:'l',t:['㉓ 指针 + 备注','担当模块直接建']}}},
+ {id:24,k:'ret',v:['a','b'],src:'w2-3',from:'担当模块 · W2 完成',to:'结合测试模块 · 模块规划',cond:'修复合入后，结合测试模块重新合并全部模块分支并重跑',lim:'≤2 轮（见 ㉕）',land:'pm2',via:['developer'],w:'l',
+  pts:[[1020,506],[1020,604],[76,604],[76,506]],lb:{x:1027,y:548,a:'start',t:['㉔ 修复合入 →','结合测试重新合并、重跑']}},
+ {id:25,k:'esc',v:['a','b'],src:'w1-6',from:'W1 调度',to:'用户',cond:'结合测试修复 2 轮仍不通过',lim:'2 轮',land:'human',
+  pts:[[800,206],[800,270],[870,270]],lb:{x:922,y:270,a:'start',t:['㉕ 结合测试 2 轮仍不过']}},
+ {id:27,k:'esc',v:['cur','a','b'],xv:['c'],src:'w3-4',noInv:true,from:'W3 合并',to:'W2 等待开发（模块 agent）',cond:'测试失败或基线异常：mechanical 停下、不发完成信号；10 分钟后守护发 idle_no_signal 告警给模块 agent 处理',lim:'无',land:'pm2',
+  pts:[[1145,740],[1145,640],[800,640],[800,506]],lb:{x:975,y:640,t:['㉗ 合并测试失败 → 守护 idle_no_signal']}},
+ {id:28,k:'ret',v:['c'],src:'w3-4',from:'W3 合并',to:'W3 开发（原会话）',cond:'合并门禁失败：rebase 后完整本地检查（lint + 全量测试 + 构建；有结合测试套件时一并运行）',lim:'≤2 次，超过转 ㉙',land:'developer',
+  pts:[[1162,740],[1162,706],[745,706],[745,752],[730,752]],lb:{x:900,y:706,t:['㉘ 合并门禁失败 · ≤2 次']}},
+ {id:29,k:'esc',v:['c'],src:'w3-4',noInv:true,from:'W3 合并',to:'W2 等待开发（模块 agent）',cond:'合并门禁失败超过 2 次',lim:'—',land:'pm2',
+  pts:[[1145,740],[1145,640],[800,640],[800,506]],lb:{x:975,y:640,t:['㉙ 门禁失败超过 2 次 → 模块 agent']}},
+ // 跨模块查询（仅方案 B，不计入返工）
+ {id:'Q1',k:'query',v:['b'],from:'模块 agent',to:'担当模块 agent',cond:'公开接口文档和 charter「模块边界」表不够用时发 QUESTION，只问事实，回答给文件指针',lim:'—',land:'pm2',
+  pts:[[1018,387],[1150,387]],lb:{x:1084,y:386,t:['QUESTION · 只问事实','回答给文件指针']}},
+ {id:'Q2',k:'query',v:['b'],from:'模块 agent',to:'W1 调度（pm）',cond:'要变更接口：经 pm 决定并写 ADR',lim:'—',land:'pm1',
+  pts:[[983,398],[983,415],[1050,415]],lb:{x:1016,y:415,t:['改接口']}},
+ {id:'Q3',k:'query',v:['b'],from:'W1 调度（pm）',to:'提供方模块 agent',cond:'ADR 写好后交给提供方模块实施',lim:'—',land:'pm2',
+  pts:[[1110,415],[1193,415],[1193,398]],lb:{x:1151,y:415,t:['交提供方']}},
+ // 告警
+ {id:'G1',k:'alert',from:'守护',to:'W1 调度（pm）',cond:'巡检发现卡住 / 异常，发告警',lim:'每 20 分钟一次巡检',land:'pm1',badge:'w1-6'},
+ {id:'G2',k:'alert',from:'守护',to:'W2 等待开发（模块 agent）',cond:'巡检发现卡住 / 异常，发告警',lim:'每 20 分钟一次巡检',land:'pm2',badge:'w2-1'},
+ {id:'G3',k:'alert',from:'守护',to:'W1 刷新',cond:'pm 无响应时，把它移到「刷新」（重置上下文后回原步骤）',lim:'—',land:'pm1',
+  pts:[[150,266],[250,266]],lb:{x:200,y:252,t:['pm 无响应 → 移入']}},
+ // 正常流转 / 创建 / 移交（不计数）
+ ...[0,1,2,3,4,5,6,7,8,9].map(i=>({k:'flow',a:'w1-'+i,b:'w1-'+(i+1),y:178})),
+ {k:'flow',a:'w2-0',b:'w2-1',y:478},{k:'flow',a:'w2-1',b:'w2-2',y:478},{k:'flow',a:'w2-2',b:'w2-3',y:478},
+ {k:'flow',a:'it-0',b:'it-1',y:478},{k:'create',a:'it-1',b:'it-t',y:478},
+ {k:'flow',v:['b'],a:'bl-0',b:'bl-1',y:740},{k:'create',v:['b'],a:'bl-1',b:'bl-t',y:740},
+ {k:'flow',a:'w3-0',b:'w3-1',y:768},{k:'flow',a:'w3-1',b:'w3-2',y:768},{k:'flow',a:'w3-4',b:'w3-5',y:768},
+ {k:'flow',pts:[[840,740],[840,720],[1095,720],[1095,740]],lb:{x:1040,y:720,t:['通过']}},
+ {k:'create',pts:[[570,206],[570,450]],lb:{x:564,y:250,a:'end',t:['建模块任务']}},
+ {k:'create',pts:[[708,506],[708,740]],lb:{x:712,y:545,a:'start',t:['建子任务']}},
+ {k:'create',v:['cur'],pts:[[206,506],[206,558],[300,558]],lb:{x:253,y:558,t:['建修复子任务']}},
+ {k:'link',pts:[[985,740],[985,680],[760,680],[760,506]],lb:{x:872,y:680,t:['等待决策由模块 agent 处理']}}
+];
+const NUM={1:'①',2:'②',3:'③',4:'④',5:'⑤',6:'⑥',7:'⑦',8:'⑧',9:'⑨',10:'⑩',11:'⑪',12:'⑫',13:'⑬',14:'⑭',15:'⑮',16:'⑯',17:'⑰',18:'⑱',19:'⑲',20:'⑳',21:'㉑',22:'㉒',23:'㉓',24:'㉔',25:'㉕',26:'㉖',27:'㉗',28:'㉘',29:'㉙'};
+const byId=Object.fromEntries(N.map(n=>[n.id,n]));
+const COUNTED=e=>e.k==='ret'||e.k==='esc';
+
+// 方案 C 继承方案 B：出现范围和覆盖都先取 B，再叠加 C
+function inList(list,v){return list.includes(v)||(v==='c'&&list.includes('b'));}
+function inView(o,v){if(o.xv&&o.xv.includes(v))return false;return !o.v||inList(o.v,v);}
+function nOnly(n,v){return !n.only||inList(n.only,v);}
+function ovChain(o,v){if(!o.ov||v==='cur')return [];return v==='c'?[o.ov.b,o.ov.c].filter(Boolean):[o.ov[v]].filter(Boolean);}
+function nodeState(n,v){
+  if(!nOnly(n,v)) return null;
+  const s={t:n.t,role:n.role,sess:n.sess,sub:n.sub,changed:false,ghost:false};
+  ovChain(n,v).forEach(o=>Object.assign(s,o));
+  return s;
+}
+function edgeState(e,v){
+  const s={cond:e.cond,lim:e.lim,t:e.lb&&e.lb.t,w:e.w||'h',via:e.via||[]};
+  ovChain(e,v).forEach(o=>Object.assign(s,o));
+  return s;
+}
+function isChanged(e,v){return v!=='cur'&&(!inView(e,'cur')||ovChain(e,v).length>0);}
+function pmScope(n){return n.lane==='W1'?'pm1':'pm2';}
+
+/* ---------- SVG 工具 ---------- */
+function el(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(parent)parent.appendChild(e);return e;}
+function txt(parent,x,y,s,cls,anchor){const t=el('text',{x,y,class:cls,'text-anchor':anchor||'middle'},parent);t.textContent=s;return t;}
+function fit(t,lim){if(t.getComputedTextLength()>lim){t.setAttribute('textLength',lim);t.setAttribute('lengthAdjust','spacingAndGlyphs');}}
+function rp(pts,r){r=r||6;let d=`M${pts[0][0]},${pts[0][1]}`;for(let i=1;i<pts.length-1;i++){const[x0,y0]=pts[i-1],[x1,y1]=pts[i],[x2,y2]=pts[i+1];const d1=Math.hypot(x1-x0,y1-y0),d2=Math.hypot(x2-x1,y2-y1);const rr=Math.min(r,d1/2,d2/2);d+=` L${x1+(x0-x1)/d1*rr},${y1+(y0-y1)/d1*rr} Q${x1},${y1} ${x1+(x2-x1)/d2*rr},${y1+(y2-y1)/d2*rr}`;}const l=pts[pts.length-1];return d+` L${l[0]},${l[1]}`;}
+function defs(svg){
+  const d=el('defs',{},svg);
+  ['flow','create','ret','esc','link','alert','query'].forEach(k=>{
+    const big=k==='ret'||k==='esc';
+    const m=el('marker',{id:'mk-'+k,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:big?10:8,markerHeight:big?10:8,markerUnits:'userSpaceOnUse',orient:'auto-start-reverse'},d);
+    el('path',{d:k==='query'?'M1,1 L9,5 L1,9':'M0,0 L10,5 L0,10 z',class:'mk-'+k},m);
+  });
+}
+
+function drawNode(g,n,s){
+  const special=n.kind==='pill'||n.kind==='guard';
+  const cls=special?`node r-${n.role} s-cont`:`node r-${s.role} s-${s.sess}${s.ghost?' ghost':''}`;
+  const ng=el('g',{class:cls,'data-box':'node','data-id':n.id},g);
+  if(s.ghost) ng.setAttribute('data-ghost','1');
+  if(n.kind==='pill'){
+    el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:n.h/2,class:'nbox','stroke-width':1.6},ng);
+    const t=txt(ng,n.x+n.w/2,n.y+n.h/2+(n.small?4:4.5),n.t,n.small?'chipt':'nt');fit(t,n.w-8);return ng;
+  }
+  if(n.kind==='guard'){
+    el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:6,class:'nbox','stroke-width':1.4},ng);
+    txt(ng,n.x+n.w/2,n.y+18,'守护','nt');
+    txt(ng,n.x+n.w/2,n.y+35,'定时巡检 · 只发告警','nr');
+    txt(ng,n.x+n.w/2,n.y+50,'每 20 分钟','ns');return ng;
+  }
+  if(s.changed) el('rect',{x:n.x-4,y:n.y-4,width:n.w+8,height:n.h+8,rx:9,class:'halo'},ng);
+  el('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:6,class:'nbox'},ng);
+  txt(ng,n.x+n.w/2,n.y+18,s.t,'nt');
+  const rl=s.role==='none'?'无 agent':s.role==='human'?'人（用户）':(s.role===n.role&&n.rl?n.rl:ROLES[s.role].name);
+  if(SESS[s.sess].tag){
+    const r=txt(ng,n.x+8,n.y+35,rl,'nr','start');
+    const tw=s.sess==='reset'?26:s.sess==='entry'?30:16;
+    fit(r,n.w-tw-18);
+    el('rect',{x:n.x+n.w-7-tw,y:n.y+25,width:tw,height:14,rx:7,class:'tag tag-'+s.sess},ng);
+    txt(ng,n.x+n.w-7-tw/2,n.y+35.5,SESS[s.sess].tag,'tagt');
+  }else fit(txt(ng,n.x+n.w/2,n.y+35,rl,'nr'),n.w-8);
+  if(s.sub) fit(txt(ng,n.x+n.w/2,n.y+49,s.sub,'ns'),n.w-8);
+  if(s.changed){
+    el('rect',{x:n.x+n.w-14,y:n.y-9,width:22,height:16,rx:4,class:'chgb'},ng);
+    txt(ng,n.x+n.w-3,n.y+3,'改','chgt');
+  }
+  return ng;
+}
+
+function drawLabel(g,lb,k,chg,key){
+  const lg=el('g',{class:`lb k-${k}${chg?' chg':''}`,'data-box':'label','data-edge':key},g);
+  const lines=lb.t.slice();
+  if(chg) lines[0]='★ '+lines[0];
+  const lh=13,n=lines.length;
+  const t=el('text',{x:lb.x,y:lb.y-(n-1)*lh/2+4,class:'lbt','text-anchor':lb.a||'middle'},lg);
+  lines.forEach((s,i)=>{const sp=el('tspan',{x:lb.x,dy:i?lh:0},t);sp.textContent=s;});
+  const b=t.getBBox();
+  const r=el('rect',{x:b.x-4,y:b.y-2,width:b.width+8,height:b.height+4,rx:3,class:'lbr'},lg);
+  lg.insertBefore(r,t);
+  return lg;
+}
+
+function render(v){
+  const svg=document.getElementById('map');
+  svg.innerHTML='';defs(svg);
+  const gL=el('g',{},svg),gE=el('g',{},svg),gN=el('g',{},svg),gB=el('g',{},svg);
+  // 泳道
+  const w1d=isBC(v)?'根任务 · 每个项目 1 个 · 11 步':'根任务 · 每个项目 1 个 · 12 步';
+  [[4,334,'W1 项目管理',w1d],[346,272,'W2 模块管理',v==='cur'?'每个模块 1 个任务 · 全部步骤用 pm profile':'每个模块 1 个任务 · 验收调查外用 pm profile'],[626,280,'W3 开发','每个开发任务 1 个 · 独立 worktree']].forEach(([y,h,a,b])=>{
+    el('rect',{x:4,y,width:1242,height:h,rx:8,class:'laneb'},gL);
+    const t=el('text',{x:16,y:y+22,class:'laneh','data-box':'header'},gL);
+    const s1=el('tspan',{},t);s1.textContent=a+'　';const s2=el('tspan',{class:'laned'},t);s2.textContent=b;
+  });
+  // 结合测试模块框
+  el('rect',{x:16,y:392,width:532,height:220,rx:8,class:'itbox'},gL);
+  const itg=el('g',{'data-box':'note'},gL);
+  txt(itg,540,410,'结合测试模块','itt','end');
+  txt(itg,540,424,'integration-test','itd','end');
+  txt(itg,540,438,isBC(v)?'最后执行 · 依赖全部其他模块':'依赖全部其他模块','itd','end');
+  // baseline 模块框（方案 B）
+  if(isBC(v)){
+    el('rect',{x:16,y:668,width:424,height:132,rx:8,class:'itbox new'},gL);
+    const bg=el('g',{'data-box':'note'},gL);
+    txt(bg,432,686,'★ baseline 模块（新增）','itt','end');
+    txt(bg,432,700,'最先执行 · 其他模块都依赖它','itd','end');
+    txt(el('g',{'data-box':'note'},gL),28,788,'原「环境基线」：骨架、冒烟、检查脚本、结合测试工具 → 经审核与验收','notet','start');
+    // 跨模块查询示意
+    const qg=el('g',{'data-box':'note'},gL);
+    txt(qg,948,365,'★ 跨模块查询（不计入返工）','qt','start');
+    const qf=el('g',{'data-box':'note'},gL);
+    txt(qf,956,441,'先直接读他模块公开接口文档、charter「模块边界」表','notet','start');
+  }
+  const nt=el('g',{'data-box':'note'},gL);txt(nt,250,316,'任意 pm 步骤可移入；重置后回原步骤','notet','start');
+  if(isBC(v)) txt(nt,250,330,'进入时重置后仍保留：常驻久留会累积上下文，卡死也靠它恢复','notet','start');
+  // 通用升级链
+  const ch=el('g',{},gL);
+  txt(ch,24,818,'通用升级链','laneh','start').setAttribute('data-box','header');
+  const chips=[[24,104,'developer / reviewer','developer'],[148,96,'模块 agent（pm）','pm'],[264,70,'项目 pm','pm'],[354,86,'用户 / ADR','human']];
+  chips.forEach(([x,w,s,r],i)=>{
+    const cg=el('g',{class:'r-'+r,'data-box':'node'},ch);
+    el('rect',{x,y:826,width:w,height:22,rx:5,class:'nbox chip'},cg);
+    txt(cg,x+w/2,841,s,'chipt');
+    if(i<chips.length-1) el('path',{d:`M${x+w+2},837 L${chips[i+1][0]-2},837`,class:'e e-esc','marker-end':'url(#mk-esc)'},ch);
+  });
+  const c2=el('g',{'data-box':'note'},ch);
+  txt(c2,24,866,'attended：交给用户决定；unattended：写 ADR 自行决定。','notet','start');
+  txt(c2,24,880,'守护只向模块 agent / pm 发告警；pm 无响应时把它移到「刷新」。','notet','start');
+  txt(c2,24,894,'虚线框内为特殊模块的 W2 / W3 实例，不重复计入步骤数。','notet','start');
+
+  // 边
+  const labels=[];
+  E.forEach((e,i)=>{
+    if(!inView(e,v)||e.badge) return;
+    if(e.a&&(!nOnly(byId[e.a],v)||!nOnly(byId[e.b],v))) return;
+    const key=e.id!=null?String(e.id):'f'+i;
+    let pts=e.pts;
+    if(!pts){const a=byId[e.a],b=byId[e.b];pts=[[a.x+a.w,e.y],[b.x,e.y]];}
+    const chg=isChanged(e,v)&&e.id!=null&&e.k!=='query'; // 查询整组已在标题处标 ★
+    el('path',{d:rp(pts),class:'e e-'+e.k,'marker-end':`url(#mk-${e.k})`,'data-edge':key,'data-pts':JSON.stringify(pts)},gE);
+    if(e.lb){
+      const lb=Object.assign({},e.lb,{t:edgeState(e,v).t});
+      labels.push([lb,e.k,chg,key]);
+    }
+  });
+  // 节点
+  N.forEach(n=>{const s=nodeState(n,v);if(s===null)return;drawNode(gN,n,s);});
+  // 告警角标
+  E.filter(e=>e.badge).forEach(e=>{
+    const n=byId[e.badge];const bg=el('g',{'data-box':'badge'},gB);
+    el('rect',{x:n.x+4,y:n.y-19,width:30,height:14,rx:3,class:'badge'},bg);
+    txt(bg,n.x+19,n.y-8.5,'告警','badget');
+  });
+  labels.forEach(([lb,k,chg,key])=>drawLabel(gB,lb,k,chg,key));
+}
+
+/* ---------- 统计 ---------- */
+// 调查由一次性会话完成：源步骤是新会话，或是 W3「开发」类入口步骤；noInv 的路径（合并失败实际由模块 agent 处理）剔除
+function invOnce(e,v){
+  if(e.noInv) return false;
+  const src=byId[e.src];const ss=src&&nodeState(src,v);
+  return !!ss&&(ss.sess==='new'||(ss.sess==='entry'&&!!src.w3dev));
+}
+const RK=['pm','pm1','pm2','auditor','developer','reviewer','mechanical','human','guard','none'];
+function stats(v){
+  const r=Object.fromEntries(RK.map(k=>[k,{steps:0,ret:0,esc:0,h:0,l:0,via:0,alert:0,res:0,resReset:0,newS:0,entryS:0}]));
+  const lanes={W1:0,W2:0,W3:0};
+  const add=(k,f)=>{r[k][f]++;if(k==='pm1'||k==='pm2')r.pm[f]++;};
+  N.forEach(n=>{
+    if(n.kind!=='step') return;
+    const s=nodeState(n,v);if(!s||s.ghost) return;
+    lanes[n.lane]++;
+    const k=s.role==='pm'?pmScope(n):s.role;
+    add(k,'steps');
+    if(s.sess==='new') add(k,'newS');
+    if(s.sess==='entry') add(k,'entryS');
+    if(n.resident){add(k,'res');if(s.sess==='reset')add(k,'resReset');}
+  });
+  const tot={paths:0,inv:0,query:0,h:0,l:0};
+  E.forEach(e=>{
+    if(e.id==null||!inView(e,v)) return;
+    const s=edgeState(e,v);
+    if(e.k==='alert'){add(e.land,'alert');return;}
+    if(e.k==='query'){tot.query++;return;}
+    if(!COUNTED(e)) return;
+    add(e.land,e.k);add(e.land,s.w);
+    s.via.forEach(x=>add(x,'via'));
+    tot.paths++;tot[s.w]++;
+    if(invOnce(e,v)) tot.inv++;
+  });
+  r._tot=tot;r._lanes=lanes;
+  return r;
+}
+const ST={cur:stats('cur'),a:stats('a'),b:stats('b'),c:stats('c')};
+const ROWS=[['pm','pm',''],['pm1','└ 项目 pm（W1）','sub'],['pm2','└ 模块 agent（W2）','sub'],['auditor','auditor',''],['developer','developer',''],['reviewer','reviewer',''],['mechanical','mechanical',''],['human','人（用户）',''],['guard','守护',''],['none','无 agent（停放 / 终态）','']];
+const colOf=k=>k==='pm1'||k==='pm2'?'pm':k;
+function renderSummary(v){
+  const s=ST[v],c=ST.cur;
+  const maxL=Math.max(...VIEWS.flatMap(x=>['pm','auditor','developer','reviewer','mechanical','human'].map(k=>ST[x][k].ret+ST[x][k].esc)));
+  const d=(k,f)=>{if(v==='cur')return '';const a=f(s[k])-f(c[k]);return a?`<span class="delta">${a>0?'+':''}${a}</span>`:'';};
+  let h='<tr><th>角色</th><th>负责步骤数</th><th>打回落点</th><th>升级落点</th><th>落点合计</th><th>其中重 / 轻</th><th>传导返工</th><th>告警落点</th></tr>';
+  ROWS.forEach(([k,name,cls])=>{
+    const x=s[k],tot=x.ret+x.esc;
+    const bar=cls?'':`<span class="barc" style="width:${maxL?Math.round(tot/maxL*120):0}px"></span>`;
+    h+=`<tr class="${cls}"><td><span class="who"><i style="background:var(--${colOf(k)})"></i>${name}</span></td><td class="n">${x.steps}${d(k,y=>y.steps)}</td>`+
+      (k==='none'?'<td class="n">—</td><td class="n">—</td><td>—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td>':
+      `<td class="n">${x.ret}${d(k,y=>y.ret)}</td><td class="n">${x.esc}${d(k,y=>y.esc)}</td><td class="bc">${bar}<b>${tot}</b>${d(k,y=>y.ret+y.esc)}</td><td class="n">${x.h} / ${x.l}</td><td class="n">${x.via}${d(k,y=>y.via)}</td><td class="n">${x.alert}</td>`)+'</tr>';
+  });
+  document.getElementById('sum').innerHTML=h;
+  const L=s._lanes,T=s._tot,steps=L.W1+L.W2+L.W3;
+  document.getElementById('sumnote').textContent=
+    `${VNAME[v]}：共 ${steps} 个 workflow 步骤（W1 ${L.W1} / W2 ${L.W2} / W3 ${L.W3}），pm 负责 ${s.pm.steps} 个，auditor ${s.auditor.steps} 个；共 ${T.paths} 条打回 / 升级路径（重 ${T.h} / 轻 ${T.l}），pm 是其中 ${s.pm.ret+s.pm.esc} 条的落点，auditor ${s.auditor.ret+s.auditor.esc} 条。`+
+    `步骤数按 workflow 定义计（特殊模块复用 W2 / W3 步骤，不重复计）；落点按箭头终点计，一条路径计一次。${v!=='cur'?'小字为相对现状的变化。':''}`;
+}
+function renderCompare(){
+  let h='<tr><th rowspan="2">角色</th>'+VIEWS.map(v=>`<th class="grp" colspan="4">${VNAME[v]}</th>`).join('')+'</tr><tr>'+
+    VIEWS.map(()=>'<th class="gl">步骤</th><th>落点 重 / 轻</th><th>常驻（重置）</th><th>新会话 / 入口</th>').join('')+'</tr>';
+  ROWS.forEach(([k,name,cls])=>{
+    h+=`<tr class="${cls}"><td><span class="who"><i style="background:var(--${colOf(k)})"></i>${name}</span></td>`+VIEWS.map(v=>{
+      const x=ST[v][k];
+      const land=k==='none'?'—':`<b>${x.h+x.l}</b>（${x.h} / ${x.l}）`;
+      return `<td class="n gl">${x.steps}</td><td class="n">${land}</td><td class="n">${x.res}（${x.resReset}）</td><td class="n">${x.newS} / ${x.entryS}</td>`;
+    }).join('')+'</tr>';
+  });
+  const ov=(name,f)=>`<tr class="ov"><td>${name}</td>`+VIEWS.map(v=>`<td class="n gl" colspan="4">${f(ST[v]._tot,ST[v])}</td>`).join('')+'</tr>';
+  h+=ov('打回 + 升级路径',(t)=>`${t.paths} 条（重 ${t.h} / 轻 ${t.l}）`);
+  h+=ov('其中调查由一次性会话完成',(t)=>`${t.inv} 条（${Math.round(t.inv/t.paths*100)}%）`);
+  h+=ov('跨模块查询路径（不计入返工）',(t)=>`${t.query} 条`);
+  document.getElementById('cmp').innerHTML=h;
+
+  const c=ST.cur,a=ST.a,b=ST.b,cc=ST.c;
+  const L=x=>x.ret+x.esc;
+  const four=f=>[c,a,b,cc].map(f).join(' / ');
+  const chg=(x,y)=>y===x?'持平':y>x?`增加 ${y-x}`:`减少 ${x-y}`;
+  const newS=x=>{const f=g=>RK.filter(k=>k!=='pm1'&&k!=='pm2').reduce((s,k)=>s+x[k][g],0);return `${f('newS')}+${f('entryS')}`;};
+  const heavyList=land=>E.filter(e=>e.id!=null&&COUNTED(e)&&e.land===land&&inView(e,'c')&&edgeState(e,'c').w==='h').map(e=>`${NUM[e.id]} ${e.from} → ${e.to}`).join('；');
+  const p=[];
+  p.push(`下列数字依次为 现状 / 方案 A / 方案 B / 方案 C。<b>pm 仍是落点最多的角色</b>：落点合计 ${four(x=>L(x.pm))}，其中重 ${four(x=>x.pm.h)}。`+
+    `拆开看，项目 pm（W1）重 ${four(x=>x.pm1.h)}，模块 agent（W2）重 ${four(x=>x.pm2.h)}。方案 C 相对 B：项目 pm 重落点${chg(b.pm1.h,cc.pm1.h)}，模块 agent 重落点${chg(b.pm2.h,cc.pm2.h)}，pm 落点总数${chg(L(b.pm),L(cc.pm))}。`);
+  p.push(`<b>developer 在方案 C 中变重</b>：落点 ${four(x=>L(x.developer))}（全部为重）。方案 C 相对 B ${chg(L(b.developer),L(cc.developer))}，即合并门禁失败直接退回开发（㉘），换掉了原来落在模块 agent 上的 ㉗。用户落点 ${four(x=>L(x.human))}，C 相对 B ${chg(L(b.human),L(cc.human))}。`+
+    `auditor 步骤 ${four(x=>x.auditor.steps)}，作为返工落点 ${four(x=>L(x.auditor))}，四个视图都不承担返工。`);
+  p.push(`打回 + 升级路径 ${four(x=>x._tot.paths)} 条，其中轻 ${four(x=>x._tot.l)} 条，调查由一次性会话完成 ${four(x=>x._tot.inv)} 条。常驻步骤 ${four(x=>x.pm.res)} 个（都是 pm），进入时重置的 ${four(x=>x.pm.resReset)} 个；每次新会话 + 入口步骤 ${four(newS)} 个。方案 B / C 另有 ${cc._tot.query} 条跨模块查询，未计入落点。`);
+  p.push(`<b>方案 C 下剩余的「重」落点</b>——项目 pm：${heavyList('pm1')}。模块 agent：${heavyList('pm2')}。`);
+  document.getElementById('cmpnote').innerHTML=p.map(x=>`<p>${x}</p>`).join('');
+}
+function renderPaths(v){
+  const landName={pm1:'项目 pm',pm2:'模块 agent（pm）',developer:'developer',human:'用户',auditor:'auditor',reviewer:'reviewer',mechanical:'mechanical'};
+  const kindName={ret:'打回',esc:'升级',alert:'告警',query:'查询'};
+  let h='<tr><th>#</th><th>从</th><th>到</th><th>类型</th><th>触发条件</th><th>上限</th><th>落点</th><th>重 / 轻</th><th>一次性会话调查</th><th>传导</th></tr>';
+  E.filter(e=>e.id!=null).forEach(e=>{
+    const vis=inView(e,v);
+    const removed=v!=='cur'&&!vis&&inView(e,'cur');
+    if(!vis&&!removed) return;
+    const s=edgeState(e,vis?v:'cur');
+    const chg=vis&&isChanged(e,v);
+    const tag=removed?'<span class="tg">取消</span>':chg?(!inView(e,'cur')?'<span class="tg">新</span>':'<span class="tg">改</span>'):'';
+    const num=NUM[e.id]||e.id;
+    const counted=COUNTED(e);
+    const wt=counted?`<span class="wt ${s.w}">${s.w==='h'?'重':'轻'}</span>`:'—（不计）';
+    let inv='—';
+    if(counted) inv=invOnce(e,vis?v:'cur')?'是':(e.noInv?'否（实际由模块 agent 处理）':'否');
+    h+=`<tr class="${removed?'removed':chg?'changed':''}"><td class="keep">${num}${tag}</td><td>${e.from}</td><td>${e.to}</td><td><span class="kind ${e.k}">${kindName[e.k]}</span></td><td>${s.cond}</td><td>${s.lim}</td>`+
+      `<td><span class="who"><i style="background:var(--${colOf(e.land)})"></i>${landName[e.land]}</span></td><td>${wt}</td><td>${inv}</td><td>${s.via.map(x=>landName[x]).join('、')||'—'}</td></tr>`;
+  });
+  document.getElementById('paths').innerHTML=h;
+}
+
+/* ---------- 图例 ---------- */
+function legend(){
+  const L=document.getElementById('legend');
+  let h='<div class="grp"><span class="gt">角色</span>';
+  ['pm','auditor','developer','reviewer','mechanical','human','guard','none'].forEach(k=>{h+=`<span class="it"><span class="sw" style="border-color:var(--${k});background:var(--${k}-bg)"></span>${ROLES[k].name}<span class="hint">${ROLES[k].desc}</span></span>`;});
+  const SL=[['new','新会话（粗实线框）'],['cont','沿用原会话（细实线框）'],['reset','沿用但重置上下文（虚线框）'],['entry','入口：首次新会话，退回时沿用（长短划线框）'],['none','无 agent：人或停放（点线框）']];
+  const EL=[['flow','正常流转'],['create','建任务'],['ret','打回（返工）'],['esc','升级（交上级 / 人）'],['link','移交'],['alert','告警'],['query','跨模块查询（方案 B / C）']];
+  h+='</div><div class="grp"><span class="gt">会话</span>'+SL.map((_,i)=>`<span class="it"><svg class="lg-s" data-i="${i}" width="44" height="30"></svg>${SL[i][1]}</span>`).join('')+'</div>';
+  h+='<div class="grp"><span class="gt">路径</span>'+EL.map((_,i)=>`<span class="it"><svg class="lg-e" data-i="${i}" width="40" height="16"></svg>${EL[i][1]}</span>`).join('')+'</div>';
+  h+='<div class="grp"><span class="gt">标记</span><span class="it"><span class="tg" style="margin:0">改</span> / 黄色描边 / ★ = 相对现状的变化处</span><span class="it"><span class="kind alert">告警</span> 守护告警的接收方</span><span class="it">淡化节点 = 方案中取消</span></div>';
+  L.innerHTML=h;
+  L.querySelectorAll('svg.lg-s').forEach(s=>{
+    const k=SL[+s.dataset.i][0];const g=el('g',{class:`r-${k==='none'?'none':'pm'} s-${k}`},s);
+    el('rect',{x:2,y:2,width:40,height:26,rx:5,class:'nbox'},g);
+    if(SESS[k].tag){const tw=k==='reset'?26:k==='entry'?30:16;el('rect',{x:22-tw/2,y:8,width:tw,height:14,rx:7,class:'tag tag-'+k},g);txt(g,22,18.5,SESS[k].tag,'tagt');}
+  });
+  L.querySelectorAll('svg.lg-e').forEach(s=>{
+    const k=EL[+s.dataset.i][0];defs(s);
+    el('path',{d:'M2,8 L36,8',class:'e e-'+k,'marker-end':`url(#mk-${k})`},s);
+  });
+}
+
+/* ---------- 布局自检（控制台调用 checkLayout()） ---------- */
+window.checkLayout=function(){
+  const svg=document.getElementById('map');const out=[];
+  const boxes=[];
+  svg.querySelectorAll('[data-box]').forEach(g=>{
+    const type=g.getAttribute('data-box'),id=g.getAttribute('data-id')||g.getAttribute('data-edge')||g.textContent.slice(0,14);
+    // 节点按外框和「改」角标分别计，避免用整组包围盒造成误报
+    const parts=type==='node'&&g.querySelector('.nbox')?[g.querySelector('.nbox'),g.querySelector('.chgb')].filter(Boolean):[g];
+    parts.forEach(p=>{const b=p.getBBox();boxes.push({type,id,x:b.x,y:b.y,w:b.width,h:b.height});});
+  });
+  const hit=(a,b)=>a.x<b.x+b.w-0.5&&b.x<a.x+a.w-0.5&&a.y<b.y+b.h-0.5&&b.y<a.y+a.h-0.5;
+  for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++){const a=boxes[i],b=boxes[j];if(a.type===b.type&&a.id===b.id)continue;if(hit(a,b))out.push(`box: ${a.type}[${a.id}] × ${b.type}[${b.id}]`);}
+  const segs=[];svg.querySelectorAll('path[data-pts]').forEach(p=>{const pts=JSON.parse(p.getAttribute('data-pts'));for(let i=1;i<pts.length;i++)segs.push({e:p.getAttribute('data-edge'),a:pts[i-1],b:pts[i]});});
+  const segHit=(s,r)=>{const x1=Math.min(s.a[0],s.b[0]),x2=Math.max(s.a[0],s.b[0]),y1=Math.min(s.a[1],s.b[1]),y2=Math.max(s.a[1],s.b[1]);return x1<r.x+r.w-1&&x2>r.x+1&&y1<r.y+r.h-1&&y2>r.y+1;};
+  boxes.forEach(bx=>{
+    if(bx.type==='node') return;
+    segs.forEach(s=>{if(bx.type==='label'&&s.e===bx.id) return;if(segHit(s,bx)) out.push(`seg[${s.e}] 穿过 ${bx.type}[${bx.id}]`);});
+  });
+  svg.querySelectorAll('[data-box="node"][data-id]').forEach(g=>{
+    if(g.getAttribute('data-ghost')) return; // 淡化节点（取消的步骤）允许流程线穿过
+    const b=g.querySelector('.nbox').getBBox();const r={x:b.x+3,y:b.y+3,w:b.width-6,h:b.height-6};
+    segs.forEach(s=>{if(segHit(s,r))out.push(`seg[${s.e}] 穿过节点 ${g.getAttribute('data-id')}`);});
+  });
+  return out;
+};
+
+/* ---------- 视图切换 ---------- */
+const btns=[...document.querySelectorAll('.seg button')];
+function setView(v){
+  btns.forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===v));
+  document.getElementById('viewhint').textContent=VHINT[v];
+  document.getElementById('ch-a').classList.toggle('on',v==='a');
+  document.getElementById('ch-b').classList.toggle('on',v==='b');
+  document.getElementById('ch-c').classList.toggle('on',v==='c');
+  render(v);renderSummary(v);renderPaths(v);
+}
+btns.forEach(b=>b.onclick=()=>setView(b.dataset.v));
+window.setView=setView;
+legend();renderCompare();setView('cur');
+})();
+</script>
+</body>
+</html>
