@@ -23,6 +23,14 @@
       "status": "active"
     },
     {
+      "scope": "mod:baseline",
+      "role": "module",
+      "kandev_task_id": null,
+      "owns": ["modules/baseline/*", "project/environment.md", "仓库骨架、冒烟测试、检查脚本、约束落实"],
+      "branch": "mod/baseline",
+      "status": "active"
+    },
+    {
       "scope": "mod:auth",
       "role": "module",
       "kandev_task_id": null,

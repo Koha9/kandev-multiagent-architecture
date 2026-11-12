@@ -10,29 +10,36 @@
 
 各 scope 允许提交的路径（相对管理目录根）：
   pm-init    全部（只用于立项规划首次复制模板后的那一次提交）
-  pm         README.md、.gitignore、project/、agents/pm/、quota/
-  mod:<m>    modules/<m>/、agents/mod-<m>/
-  dev:<id>   evidence/<id>/
-  guard      agents/guard/
+  pm              README.md、.gitignore、project/（environment.md 除外）、agents/pm/、quota/
+  mod:<m>         modules/<m>/（acceptance.md 除外）、agents/mod-<m>/；mod:baseline 另加 project/environment.md
+  mod-audit:<m>   modules/<m>/acceptance.md（模块验收者）
+  dev:<id>        evidence/<id>/
+  guard           agents/guard/
 没有 MGMT_SCOPE 或有越界文件时拒绝提交。只用标准库。
 """
 import os
 import subprocess
 import sys
 
+ENVIRONMENT = "project/environment.md"
+
 
 def allowed_prefixes(scope):
+    """返回 (允许的前缀, 排除的路径)；scope 无效时返回 None。"""
     if scope == "pm-init":
-        return [""]
+        return [""], []
     if scope == "pm":
-        return ["README.md", ".gitignore", "project/", "agents/pm/", "quota/"]
+        return ["README.md", ".gitignore", "project/", "agents/pm/", "quota/"], [ENVIRONMENT]
     if scope == "guard":
-        return ["agents/guard/"]
+        return ["agents/guard/"], []
+    if scope.startswith("mod-audit:"):
+        return [f"modules/{scope[10:]}/acceptance.md"], []
     if scope.startswith("mod:"):
         m = scope[4:]
-        return [f"modules/{m}/", f"agents/mod-{m}/"]
+        extra = [ENVIRONMENT] if m == "baseline" else []
+        return [f"modules/{m}/", f"agents/mod-{m}/"] + extra, [f"modules/{m}/acceptance.md"]
     if scope.startswith("dev:"):
-        return [f"evidence/{scope[4:]}/"]
+        return [f"evidence/{scope[4:]}/"], []
     return None
 
 
@@ -43,11 +50,13 @@ def staged_files():
 
 def check():
     scope = os.environ.get("MGMT_SCOPE", "").strip()
-    prefixes = allowed_prefixes(scope) if scope else None
-    if prefixes is None:
+    rule = allowed_prefixes(scope) if scope else None
+    if rule is None:
         print(f"[mgmt pre-commit] 拒绝：需要用 MGMT_SCOPE 声明 scope（当前：{scope or '未设置'}）。见 tools/mgmt_precommit.py。")
         return 1
-    bad = [f for f in staged_files() if not any(f == p or f.startswith(p) for p in prefixes)]
+    prefixes, excluded = rule
+    bad = [f for f in staged_files()
+           if f in excluded or not any(f == p or f.startswith(p) for p in prefixes)]
     if bad:
         print(f"[mgmt pre-commit] 拒绝：scope={scope} 不能提交以下文件（它们由别人担当）：")
         for f in bad:

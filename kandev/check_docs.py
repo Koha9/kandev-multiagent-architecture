@@ -7,6 +7,7 @@
   4. prompt 中引用的 <mgmt_root>/... 路径在 mgmt-template 中存在（运行时生成的路径除外）
   5. docs/workflow.md 标题中的版本号与 VERSION 一致
   6. stage.py 的离线回归测试通过
+  7. check_tasks.py（tasks.json 契约检查）的测试通过
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
 """
 import contextlib
@@ -121,10 +122,17 @@ def check_stage_test():
     return [] if r.returncode == 0 else [f"stage.py 回归测试失败：{(r.stdout + r.stderr).strip()[-500:]}"]
 
 
+def check_tasks_test():
+    r = subprocess.run([sys.executable, os.path.join(HERE, "tests", "test_check_tasks.py")],
+                       capture_output=True, text=True, encoding="utf-8")
+    return [] if r.returncode == 0 else [f"check_tasks.py 测试失败：{(r.stdout + r.stderr).strip()[-500:]}"]
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     checks = [("prompts.md", check_prompts), ("链接", check_links), ("步骤名", check_steps),
-              ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test)]
+              ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test),
+              ("check_tasks 测试", check_tasks_test)]
     failed = 0
     for name, fn in checks:
         problems = fn()

@@ -4,6 +4,7 @@
   "updated": "2026-11-09 10:00",
   "_status_values": "planned | creating | held（在「待开发」等前置） | todo（已进入「开发」） | merged | dropped | failed",
   "_kind_values": "任务可选字段 kind：省略=开发任务 | integration-test=结合测试任务（只在 kind: integration 的模块中）",
+  "_contract_fields": "tests=可直接执行的测试命令列表，创建开发子任务前必须非空 | boundaries=本任务涉及的 charter 跨模块边界编号（如 B-1），可为空。创建子任务前运行 tools/check_tasks.py 检查",
   "tasks": [
     {
       "id": "auth-01",
@@ -13,6 +14,8 @@
       "acceptance": ["AC-1 密码以 argon2 哈希存储 · covers: MA-1", "AC-2 用户名唯一约束 · covers: MA-2"],
       "refs": ["R-1"],
       "ui": false,
+      "tests": ["pytest tests/auth/test_models.py -q"],
+      "boundaries": ["B-1"],
       "kandev_task_id": null,
       "status": "planned",
       "passes": false,
@@ -27,6 +30,8 @@
       "acceptance": ["AC-1 正确凭据返回 token · covers: MA-3", "AC-2 错误凭据返回 401 BAD_CREDENTIALS · covers: MA-3"],
       "refs": ["R-1"],
       "ui": false,
+      "tests": ["pytest tests/auth/test_login.py -q"],
+      "boundaries": [],
       "kandev_task_id": null,
       "status": "planned",
       "passes": false,

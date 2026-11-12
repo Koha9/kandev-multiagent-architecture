@@ -1,4 +1,4 @@
-# Multi-Agent Development Workflow (v3.1)
+# Multi-Agent Development Workflow (v3.2)
 
 [中文](workflow.md) | **English**
 
@@ -15,9 +15,9 @@
 
 1. **Single writer**: for any piece of code or any file, only one agent writes at a time. Parallelism happens only between independent tasks, and each task has its own worktree.
 2. **Tests are the referee**: every task has a machine-checkable completion condition (tests, lint, build). An agent's self-assessment does not count.
-3. **Reviewers have a clean context**: review, plan review and project acceptance all switch profile and open a new session, and look only at the deliverables and the acceptance criteria.
+3. **Reviewers have a clean context**: review, plan review, module acceptance and project acceptance all switch profile and open a new session, and look only at the deliverables and the acceptance criteria. Verifiers do not set their own criteria: they apply the criteria written by the level above, and write every failure as a fix item that can be dispatched as is.
 4. **State lives in files; sessions are disposable**: any session can be reset at any time and recovers from the management directory and the task docs (recovery protocol).
-5. **Managers do not write code**: the project manager and module managers only plan, delegate, verify and record.
+5. **Managers do not write code**: the project manager and module managers only plan, delegate and record; even the environment and skeleton are built by the baseline module through development tasks.
 6. **Every loop has a cap**: send-backs, review rounds and message rounds all have hard caps; beyond them, the issue goes to the level above or to a human.
 7. **Gates live inside the workflow**: when unattended, an independent review step passes the gate in place of a human gate, instead of relying on polling by an external guard.
 8. **Operations with side effects are off by default**: operations that consume quota or affect the outside world can only be turned on by an explicit switch; which ones exist and how to turn them on is defined by each project according to the [project conventions](project-conventions.en.md).
@@ -25,29 +25,45 @@
 10. **Constraints that can be enforced in code are not left only in the prompt**: every constraint is labeled with how it is enforced (enforced in code / check script / prompt only); when blocked by code, stop and report — do not work around it.
 11. **Honest conclusions**: an acceptance verdict is only pass / fail / unverified(reason); partial completion is written as partial; if no change is needed it can honestly be dropped. Everything the user needs to handle is collected in one place, each item with a recommended answer.
 12. **Hard boundaries, loose approach**: the boundaries (owns, single writer, quota switches, reporting rules) govern *where* an agent may change things, not *how* it does the work. Prompts state only boundaries, deliverables and completion conditions; planning and approach are left to the agent's judgment. Requirements and AC are the floor; do the work well according to their intent. The charter states its reading of the requirements in "Product intent", and contracts state intent.
+13. **Split work along knowledge boundaries**: the project level (pm) holds only the verbatim requirements, product intent, the module list, the boundaries between modules (B-n), the project acceptance criteria and decisions; the module level holds its own spec, interfaces, tasks and code, and sees other modules only through their public interfaces; a development task needs only a self-contained contract and its own owns. Long-running sessions (Coordination, Waiting on development) only route; investigation, acceptance and coding happen in one-off sessions whose results are written to files.
 
 ## 2. Overall structure
 
 ```
 Project management task (W1, root task, 1)
- ├─ creates → module management tasks (W2, independent tasks, can run in parallel; blocked_by when there are dependencies)
+ ├─ creates → module management tasks (W2, independent tasks; baseline first, the others blocked_by baseline and able to run in parallel)
  │          └─ subtasks → development tasks (W3, own worktree, base_branch=mod/<module>)
  └─ guard (Kandev automation, scheduled read-only patrol, alerts the upstream manager)
 ```
 
 - Module tasks are **not nested** under the project task. Subtasks on a regular Kandev board are only one level deep, so modules report to the pm with `message_task_kandev`.
-- **Integration-test module** (when `integration_test` is not off): the last module in the list, `integration-test`, is also a W2 task and depends on all other modules. It starts automatically once they are done, merges every module branch into the integration branch, writes and runs automated integration tests against the assembled product, and creates fix subtasks for the defects it finds. See sections 5 and 6.
+- **Knowledge layers**:
+
+  | Level | Knowledge it holds | Does not touch |
+  |---|---|---|
+  | Project (pm) | Verbatim requirements, product intent, module list, module boundaries (charter "模块边界", B-n), project acceptance criteria, decisions | Module internals, task details, code |
+  | Module (module agent) | Its own spec, interfaces, tasks, code | Internals of other modules (public interfaces only) |
+  | Task (developer) | A self-contained contract (interface excerpts and verbatim requirements included) and its own owns | Other tasks |
+
+  Cross-module information is obtained in order: ① read the other module's `interfaces.md` and the charter "模块边界" (Module boundaries); ② not enough → send a QUESTION to the owning module, facts only; the answer gives a file pointer and the asker records it in the "依赖" (Dependencies) section of its own spec; ③ the other module is done → read its `acceptance.md` and the code on its module branch, then ask the pm if still unclear; ④ interface changes only go through the pm (ESCALATE → DECISION + ADR).
+- **Baseline module**: the first module in the list is always `baseline` (`kind: baseline`). It goes through the normal W2 + W3; its contract is what the former Environment baseline (「环境基线」) step required (environment.md, AGENTS.md, smoke tests, check scripts, shared skeleton, explicit switches, constraint enforcement, integration-test tool). The environment and skeleton are therefore reviewed and accepted too. Every other module depends on it and branches off `mod/baseline`.
+- **Integration-test module** (when `integration_test` is not off): the last module in the list, `integration-test`, depends on all other modules. It starts automatically once they are done, merges every module branch into the integration branch, and writes and runs automated integration tests against the assembled product; the defects it finds go through the pm to fix-module tasks of the owning modules. See sections 4–6.
+- **Long-running sessions only route**: W1 Coordination (「调度」) and W2 Waiting on development (「等待开发」) reset context on entry, read only management files and hand events on; investigation, acceptance and coding happen in one-off sessions whose results are written to files.
+- **Fix items and routing notes**: verifiers (review, module acceptance, project acceptance) write each failure as a fix item that can be dispatched as is (number, owning module or task, reproduction steps, expected, actual, suspected location, the failing test or acceptance item). When long-running sessions and the pm dispatch fixes, the contract = a pointer to the original fix item or defect (file + number) + a note of at most two sentences; nothing is rewritten or added.
 - **Small-project variant**: with no more than 3 modules and no more than 2 tasks per module, W2 can be dropped; the pm creates development subtasks directly, and module acceptance is folded into project acceptance.
 
 ### Roles and profiles
 
 | Role (key in profiles.json) | Used in | Suggested model | Session |
 |---|---|---|---|
-| `pm` | W1 Project planning (立项规划) / Environment baseline (环境基线) / Module dispatch (模块下发) / Coordination (调度) / Refresh (刷新); all agent steps of W2 | Strong model | Long-lived, can be refreshed |
-| `auditor` | W1 Plan review (立项评审), Project acceptance (项目验收) | Strong model; the profile must differ from pm | New session every time |
+| `pm` | W1 Project planning (立项规划) / Module dispatch (模块下发) / Coordination (调度) / Refresh (刷新) | Strong model | Long-lived; Coordination resets context on entry |
+| `plan_auditor` (optional, defaults to auditor) | W1 Plan review (立项评审) | Small context, biggest impact: the strongest model fits; the profile must differ from pm | New session every time |
+| `auditor` | W1 Project acceptance (项目验收) | Strong model; the profile must differ from pm | New session every time |
+| `module` (optional, defaults to pm) | W2 Module planning (模块规划) / Waiting on development (等待开发) / Refresh (刷新) | Strong model | One session per module; Waiting on development resets context on entry |
+| `module_auditor` (optional, defaults to auditor) | W2 Acceptance check (验收调查) | Strong model; the profile must differ from module | New session every time |
 | `developer` | W3 Develop (开发) | Main coding model | One session per task, reused when sent back |
 | `reviewer` | W3 Review (审核) | The profile must differ from developer, ideally from a different vendor | New session every time |
-| `mechanical` | W3 Merge (合并), W1 Final merge (收尾合并) | A cheap model is fine | New session every time |
+| `mechanical` | W3 Merge (合并, merge gate), W1 Final merge (收尾合并) | A coding model (it must read failure output and resolve conflicts within its own scope) | New session every time |
 | guard | Kandev automation; decisions are made by `kandev/stage.py` | Cheap model | One new session per run |
 
 ## 3. Run modes
@@ -56,12 +72,12 @@ The `[TASK v1]` header in the pm task description sets `mode: attended | unatten
 
 | | attended (default) | unattended |
 |---|---|---|
-| Plan approval (立项确认) | After plan review passes, wait for the user to approve | After plan review passes, go straight to Environment baseline |
+| Plan approval (立项确认) | After plan review passes, wait for the user to approve | After plan review passes, go straight to Module dispatch |
 | Asking the user | Allowed, batched into a single question round (each question with a recommended answer) | No questions. Decide on its own, write an ADR, and log it in `project/attention.md` |
-| The environment needs user configuration (e.g. Copy files) | Ask the user to configure it | Pick an approach that does not depend on user configuration, and write an ADR |
+| The environment needs user configuration (e.g. Copy files) | The baseline module escalates to the pm, who asks the user | Pick an approach that does not depend on user configuration; the pm writes an ADR |
 | Final human review (人工终审) | The user | The user (handled when they come back) |
 
-**plan_only** (`plan_only: true` in the `[TASK v1]` header): regardless of mode, the task stops at Plan approval (「立项确认」) after plan review passes. The user first checks the charter and the requirement coverage table, and once satisfied drags the task to Environment baseline (「环境基线」) to continue, before committing development quota.
+**plan_only** (`plan_only: true` in the `[TASK v1]` header): regardless of mode, the task stops at Plan approval (「立项确认」) after plan review passes. The user first checks the charter and the requirement coverage table, and once satisfied drags the task to Module dispatch (「模块下发」) to continue, before committing development quota.
 
 **integration_test** (`integration_test: auto | off` in the `[TASK v1]` header, default auto): with auto, the pm adds the integration-test module to the charter and integration testing starts automatically once all other modules are done; with off it is not added, and module branches are merged for the first time in Project acceptance.
 
@@ -72,55 +88,59 @@ The user only needs to watch two places: `project/attention.md` (things the user
 | # | Step | Role | What it does | Transition |
 |---|---|---|---|---|
 | 0 | Not started (待立项) | — | Parking | Send a message → Project planning |
-| 1 | **Project planning (立项规划)** | pm | Initialize the management directory; write the charter (verbatim requirements R-n, modules including the integration-test module, PAs and their covers), conventions, ADRs, attention | Completion signal → Plan review |
-| 2 | Plan review (立项评审) | auditor | Independently review the charter: requirement coverage table (one row per R) + one verdict line per check, written to the task doc `charter-review` | Send back → Project planning (≤2 times); pass: plan_only or attended → Plan approval, unattended → Environment baseline |
-| 3 | Plan approval (立项确认) | human (session bound to pm) | Gate (attended or plan_only) | Drag to Environment baseline = approve; send a message in the pm session = back to Project planning with comments |
-| 4 | Environment baseline (环境基线) | pm | Following the project conventions, set up the environment, skeleton, smoke tests and check scripts; implement the constraint list; specify the merge method; choose the integration-test tool and add one minimal passing case | Completion signal → Module dispatch |
-| 5 | Module dispatch (模块下发) | pm | Create module tasks (the integration-test module last, blocked_by all other modules); on re-entry, handle items to fix and final-review comments (collected from the move instructions, `feedback.md`, the task plan and all of the task's sessions) | Completion signal → Coordination |
-| 6 | Coordination (调度) | pm | Long-running; handles reports, escalations, questions, alerts | Once all modules are done, the agent moves itself to Project acceptance |
-| 7 | Project acceptance (项目验收) | auditor | Create or update the integration branch, run the full tests and the integration tests, verify the PAs, check each R one by one; write the final-report (including quota usage, how to run the final review, things the user needs to handle, temporary resources) | No fail → Final human review; any fail → Module dispatch |
-| 8 | Final human review (人工终审) | human (session bound to pm) | Gate | **Drag to Final merge = approve**; send a message in the pm session = back to Module dispatch with comments |
-| 9 | Final merge (收尾合并) | mechanical | Merge the integration branch into the baseline branch, run smoke tests, clean up temporary resources, set status to done | Completion signal → Done |
-| 10 | Done (完成) | — | Task complete | — |
-| 11 | Refresh (刷新) | pm | After resetting context, move back to the original step recorded in NOW | The agent moves itself |
+| 1 | **Project planning (立项规划)** | pm | Initialize the management directory; write the charter (verbatim requirements R-n, module list with baseline first and the integration-test module last, module boundaries B-n, PAs and their covers), conventions, ADRs, attention; no code | Completion signal → Plan review |
+| 2 | Plan review (立项评审) | plan_auditor | Independently review the charter: requirement coverage table (one row per R) + one verdict line for each of checks 1–6 (including module size, boundary coverage and the baseline module), written to the task doc `charter-review` | Send back → Project planning (≤2 times); pass: plan_only or attended → Plan approval, unattended → Module dispatch |
+| 3 | Plan approval (立项确认) | human (session bound to pm) | Gate (attended or plan_only) | Drag to Module dispatch = approve; send a message in the pm session = back to Project planning with comments |
+| 4 | Module dispatch (模块下发) | pm | Create the `mod/baseline` branch and the baseline module task first (its contract is fixed text in the script); the other modules are blocked_by baseline and branch off `mod/baseline`; the integration-test module last. On re-entry, dispatch items to fix and final-review comments as fix-module tasks by pointer | Completion signal → Coordination |
+| 5 | Coordination (调度) | pm | Long-running, routing only (context reset on entry): reports, escalations, questions, alerts; integration-test defects → fix-module task for the owning module, then tell the integration-test module to re-run | Once all modules are done, the agent moves itself to Project acceptance |
+| 6 | Project acceptance (项目验收) | auditor | Create or update the integration branch (cut from the baseline branch), merge all module branches, run the full tests and the integration tests, verify the PAs, check each R one by one; write the final-report (including quota usage, how to run the final review, things the user needs to handle, temporary resources); failures written as fix items | No fail → Final human review; any fail → Module dispatch |
+| 7 | Final human review (人工终审) | human (session bound to pm) | Gate | **Drag to Final merge = approve**; send a message in the pm session = back to Module dispatch with comments |
+| 8 | Final merge (收尾合并) | mechanical | Merge the integration branch into the baseline branch, run smoke tests, clean up temporary resources, set status to done | Completion signal → Done |
+| 9 | Done (完成) | — | Task complete | — |
+| 10 | Refresh (刷新) | pm | After resetting context, move back to the original step recorded in NOW | The agent moves itself |
 
 ## 5. W2 Module management
 
 | # | Step | Role | What it does | Transition |
 |---|---|---|---|---|
-| 0 | **Module planning (模块规划)** | pm | Write spec (MAs and their covers) / interfaces / tasks.json; create development subtasks (base_branch=mod/<module>, autopilot): those without prerequisites go to Develop (「开发」), those with prerequisites go to Queued (「待开发」) | Completion signal → Waiting on development |
-| 1 | Waiting on development (等待开发) | pm | Long-running: answer subtask questions, handle review escalations and dropped / blocked, merge subtask branches locally, release Queued tasks whose prerequisites are done | All subtasks in a terminal state (on_children_completed) → Acceptance check |
-| 2 | Acceptance check (验收调查) | pm | Reset context; first check FAILED / CANCELLED subtasks; run module tests, check each MA one by one; report to the pm | Completion signal → Done; problems → Waiting on development |
+| 0 | **Module planning (模块规划)** | module | Write spec (MAs and their covers, covering the contract's acceptance points and related B-n) / interfaces (implementing the B-n this module provides) / tasks.json (each task with `tests` and `boundaries`); run `tools/check_tasks.py`; create development subtasks with self-contained contracts: those without prerequisites go to Develop (「开发」), those with prerequisites go to Queued (「待开发」) | Completion signal → Waiting on development |
+| 1 | Waiting on development (等待开发) | module | Long-running, routing only (context reset on entry): answer subtask questions, handle review / merge-gate escalations and dropped / blocked, update tasks.json when a REPORT arrives, release Queued tasks whose prerequisites are merged, create fix subtasks from the auditor's fix items | All subtasks in a terminal state (on_children_completed) → Acceptance check |
+| 2 | Acceptance check (验收调查) | module_auditor | Independent module auditor (new session): check subtask status first; coverage check; run module tests and judge each MA; write this round in acceptance.md with fix items | Pass → REPORT to the pm, Done; any fail → Waiting on development (round 3, or other modules involved: ESCALATE to the pm first) |
 | 3 | Done (完成) | — | | |
-| 4 | Refresh (刷新) | pm | After resetting context, move back to the original step; if all subtasks are already in a terminal state, go straight to Acceptance check | The agent moves itself |
+| 4 | Refresh (刷新) | module | After resetting context, move back to the original step; if all subtasks are already in a terminal state, go straight to Acceptance check | The agent moves itself |
+
+The auditor does not write tasks.json (single writer): on a send-back the module agent writes `passes` back from acceptance.md; once acceptance passes the module ends, and the last round of acceptance.md is authoritative.
+
+**Baseline module** (task header has `kind: baseline`): the module agent writes `project/environment.md` (commands and results taken from the subtasks' reports) and performs the non-code enforcement actions (`git remote set-url --push`, initializing the quota ledger); files in the repository are written by development subtasks and go through review and the merge gate. When user configuration (Copy files) is needed it escalates to the pm. The auditor runs the smoke tests and check scripts in a fresh worktree.
 
 The **integration-test module** (task header has `kind: integration`) goes through the same steps with different content:
 
 | Step | What differs |
 |---|---|
 | Module planning | First creates or updates the integration branch in its own task worktree, merging the branches of all other modules, then cuts `mod/integration-test` from it (so it gets the latest code of every module). MAs are cross-module user scenarios; subtasks are integration-test tasks (`kind: integration-test`, owns inside the integration-test directory) |
-| Waiting on development | When an integration-test task reports defects, it creates fix subtasks grouped by root cause, whose owns are the faulty product code paths. All other modules are done by then, so the single-writer rule still holds. After a fix is merged, the reporting task rebases and re-runs. Changes to requirements or design, or a defect still failing after 2 fixes, are escalated to the pm |
+| Waiting on development | When an integration-test task reports defects (each naming its owning module), it neither fixes nor confirms them itself: it ESCALATEs to the pm and replies "reported, waiting for the fix". When the pm reports the fix is done, it re-merges the fix branch into the integration branch and `mod/integration-test`, and has the task rebase and re-run |
 | Acceptance check | Runs the full tests and the integration-test command, checking each scenario |
 
 ## 6. W3 Development
 
 | # | Step | Role | What it does | Transition |
 |---|---|---|---|---|
-| 0 | Queued (待开发) | — | Parks subtasks that have prerequisites (does not count toward WIP, does not start a session) | Once prerequisites are done, the module agent moves it to Develop |
-| 1 | **Develop (开发)** (WIP 4) | developer | Smoke test → implement → tests + owns check → write report → commit; no change needed → suggest dropped; cannot finish → blocked | Completion signal → Review; dropped / blocked → ESCALATE to the module agent |
+| 0 | Queued (待开发) | — | Parks subtasks that have prerequisites (does not count toward WIP, does not start a session) | Once prerequisites are merged, the module agent moves it to Develop |
+| 1 | **Develop (开发)** (WIP 4) | developer | Smoke test (skipped when none exists yet) → implement the self-contained contract → tests + owns check → write report → commit; no change needed → suggest dropped; cannot finish → blocked | Completion signal → Review; dropped / blocked → ESCALATE to the module agent |
 | 2 | Review (审核) | reviewer | Re-run the tests and owns check exactly as given; for each AC write the evidence it personally confirmed (write unverified for what it cannot confirm), spot-check at least 1 edge case; write review | pass → Merge; minor → Develop (≤3 rounds); direction → Awaiting decision and ESCALATE |
 | 3 | Awaiting decision (等待决策) | — | Handled by the module agent | The module agent moves it |
-| 4 | Merge (合并) | mechanical | First check whether it is already merged; rebase, test; open a PR, or hand off to the module agent for a local merge; either way send a REPORT to the module agent | PR merged → Done; with a local merge, the module agent moves it to Done |
+| 4 | Merge (合并) | mechanical | Merge gate: first check whether it is already merged; rebase onto the latest module branch; run environment.md "合并门禁" (Merge gate) commands and the owns check; on pass, with the local method fast-forward the module branch itself, with the PR method open a PR; either way send a REPORT to the module agent | Merged locally → Done; PR merged → Done; gate failed → Develop (3rd time: ESCALATE to the module agent) |
 | 5 | Done (完成) | — | | |
 
-**Integration-test tasks** (contract marked `kind: integration-test`): the developer writes automated tests against the really assembled application, using the tool in environment.md "结合测试" (Integration tests), and asserts user-visible results and data state; only scenarios the tool cannot cover are checked by operating the product manually, with the reason and evidence recorded. When a test fails because of a product defect, the failing case is kept, the report says `result=blocked` with `defects`, and the module agent is notified — assertions are not changed, no mocks are added, nothing is skipped. The reviewer checks that the tests run against the real application and that nothing was mocked, skipped or loosened to make them pass.
+**Integration-test tasks** (contract marked `kind: integration-test`): the developer writes automated tests against the really assembled application, using the tool in environment.md "结合测试" (Integration tests), and asserts user-visible results and data state; only scenarios the tool cannot cover are checked by operating the product manually, with the reason and evidence recorded. When a test fails because of a product defect, the failing case is kept, the report says `result=blocked` with `defects` (each naming the owning module and the suspected location), and the module agent is notified — assertions are not changed, no mocks are added, nothing is skipped. The reviewer checks that the tests run against the real application and that nothing was mocked, skipped or loosened to make them pass.
 
 For the specific requirements on development and review regarding tests, screenshots and so on, see the [project conventions](project-conventions.en.md).
 
 ## 7. Context and continuity
 
-- **Prevention**: one session per task; information is passed across steps through handoffs, task docs and the management directory; resident context is kept very small (AGENTS.md ≤150 lines, stable prompts with no timestamps, which helps cache hits).
-- **Refresh**: when the session of a long-running step (Coordination, Waiting on development) gets too long, the agent first writes `刷新返回：<step>` into NOW, then moves to the Refresh (「刷新」) step. The Refresh step resets context on entry, then moves back to the original step. Kandev does not allow moving a task to its current step, so it has to go through this relay step.
+- **Prevention**: work is split along knowledge boundaries, and each agent reads only the files its level needs; one session per task; information is passed across steps through handoffs, task docs and the management directory; resident context is kept very small (AGENTS.md ≤150 lines, stable prompts with no timestamps, which helps cache hits).
+- **Long-running steps reset on entry**: the on_enter of Coordination (「调度」) and Waiting on development (「等待开发」) includes reset_agent_context, so every entry starts from the recovery protocol.
+- **Refresh**: when the session of a long-running step gets too long, the agent first writes `刷新返回：<step>` into NOW, then moves to the Refresh (「刷新」) step. The Refresh step resets context on entry, then moves back to the original step. Kandev does not allow moving a task to its current step, so it has to go through this relay step.
 - **Guard**: one Kandev automation per workspace, running every 15–20 minutes; it discovers all in-progress projects on its own, patrols read-only, and sends ALERTs to the upstream manager. `kandev/stage.py` decides who each task is "waiting on" using a fixed rule table (the first matching rule wins); the guard only executes the alerts the script produces, and generates `agents/guard/stage.md` for the user. The rules are in "阶段分类" (Stage classification) of `mgmt-template/roles/guard.md` (Chinese).
 - **On recovery, check external state first**: before re-creating tasks, merging, pushing, making real calls or deleting resources, check the actual state; anything that has already taken effect is not redone. The Refresh step first checks "未确认的意图" (unconfirmed intents) in NOW.
 
@@ -129,20 +149,22 @@ For the specific requirements on development and review regarding tests, screens
 - The WIP of the Develop step is a global cap shared by all modules (default 4), used to limit how many agents run on the machine at once.
 - Kandev counts WIP as "tasks in this step", so tasks blocked by blocked_by also take up slots, and the dependency chain drags parallel work into serial work. That is why W3 has a Queued (「待开发」) step that does not count toward WIP: tasks with prerequisites are created there with `start_agent=false`, `start_when_unblocked=false`, and once the prerequisites are merged the module agent moves them to Develop.
 - Dependency chains are still best kept shallow; work that must be serial is merged into a single task.
-- Use blocked_by between modules that depend on each other; modules that can run in parallel on the shared skeleton get no dependency.
+- Every module is blocked_by baseline; between the other modules, use blocked_by where they depend on each other, and none where they can run in parallel on the skeleton.
 
 ## 9. Branches and merging
 
 ```
-baseline branch ← Final merge ← integration ← Project acceptance ← mod/<module> ← module agent / PR ← development worktree branch
+baseline branch ← Final merge ← integration ← Project acceptance ← mod/<module> ← merge gate (fast-forward) / PR ← development worktree branch
+                                                                     ↑ cut from mod/baseline (mod/baseline is cut from the baseline branch)
 ```
 
-- Environment baseline merges the skeleton into the baseline branch; module branches are cut from the baseline branch.
-- Development subtasks are cut from the module branch via `base_branch=mod/<module>` and merged back into the module branch when done.
-- The integration-test module creates the integration branch during planning and merges the branches of all other modules into it; `mod/integration-test` is cut from integration (tests and fixes are committed there).
-- Project acceptance updates the integration branch and merges all module branches into it (including `mod/integration-test`); without an integration-test module, Project acceptance creates it.
-- After the user approves in Final human review, Final merge (「收尾合并」) merges integration into the baseline branch.
-- The merge method (local or PR) and whether to push to the remote are defined by each project's environment.md; see the [project conventions](project-conventions.en.md).
+- Module dispatch creates `mod/baseline` from the baseline branch; the other module branches are cut from `mod/baseline`. The user's baseline branch is not touched before Final merge (「收尾合并」).
+- Development subtasks are cut from the module branch via `base_branch=mod/<module>`. The Merge step rebases onto the latest module branch and, after passing the merge gate, fast-forwards the module branch itself with the local method (e.g. `git fetch . HEAD:mod/<module>`, fast-forward only; a failure means another task merged first, so rebase again), or opens a PR with the PR method.
+- The integration-test module creates the integration branch (cut from the baseline branch) during planning and merges the branches of all other modules into it (including `mod/baseline`); `mod/integration-test` is cut from integration.
+- Fix-module tasks (`mod/<module>-fix-<n>`) are cut from the integration branch; once fixed they are merged into the integration branch by the integration-test module (or by Project acceptance).
+- Project acceptance updates the integration branch and merges all module branches in the registry; without an integration-test module, Project acceptance creates it.
+- After the user approves in Final human review, Final merge merges integration into the baseline branch.
+- The merge method (local or PR), the merge-gate commands and whether to push to the remote are defined by each project's environment.md; see the [project conventions](project-conventions.en.md).
 
 ## 10. Boundary with the project being developed
 
@@ -150,8 +172,8 @@ The architecture only defines **who, at which step, and how** project convention
 
 | Defined by the architecture | Where |
 |---|---|
-| Project planning writes the conventions into the project's conventions; Environment baseline implements the enforceable constraints as code | W1 Project planning, Environment baseline |
-| Run the check scripts before Develop reports and during Review; re-run tests exactly as written in environment.md | W3 Develop, Review |
+| Project planning writes the conventions into the project's conventions; the baseline module implements the enforceable constraints as code | W1 Project planning; baseline module (W2 + W3) |
+| Run the check scripts before Develop reports and during Review; run the merge gate before merging; re-run tests exactly as written in environment.md | W3 Develop, Review, Merge |
 | When blocked by a constraint enforced in code, stop and report — do not work around it; constraints that cannot be enforced are labeled "prompt only" | 【通用规则】 (general rules) in every prompt |
 | Project acceptance reports quota usage | W1 Project acceptance |
 
@@ -177,7 +199,23 @@ parent: user
 pm: self
 branch: <auto> base <baseline branch>
 ---
-<project goal, requirements (sorted by importance, one per line; the pm will excerpt each as R-n), constraints, environment and limitations, quota agreement (see the project conventions)>
+<project goal, requirements (sorted by importance, one per line; the pm will excerpt each as R-n), constraints, tech stack and environment requirements (handed to the baseline module), quota agreement (see the project conventions)>
+```
+
+Header of a module task created by the pm (baseline / regular module):
+
+```
+[TASK v1]
+role: module
+scope: mod:baseline            # regular module: mod:<module>
+kind: baseline                 # omitted for regular modules; integration-test module: integration
+mode: <same as pm>
+mgmt_root: <same as pm>
+parent: pm @ task <pm task id>
+pm: task <pm task id>
+branch: mod/baseline base <baseline branch>   # regular module: mod/<module> base mod/baseline
+---
+<module contract>
 ```
 
 ## 12. Known limitations
@@ -188,6 +226,8 @@ branch: <auto> base <baseline branch>
 - Exported workflow files record profiles only by model / mode. With several profiles on the same model they may be matched incorrectly, so deployment uses `build_workflows.py`, which binds by ID.
 - A user message in a gate is delivered to the session tab the user is in, not to the next step's session, and a move triggered by a user message does not reliably deliver the next step's prompt. So: gate steps are bound to the pm profile (entering the gate closes the reviewer session and makes the pm session current); when the pm receives a direct user message it works out which step it is in and handles it (【用户直接消息】); if a reviewer session receives one anyway, it forwards it to the pm session (`kandev_session_id` in the registry); and on re-entering Project planning or Module dispatch the pm collects comments from several sources. If the pm still does not start, move the task to the gate and back to that step, with the comments verbatim in the move instructions.
 - Queued (「待开发」) relies on two Kandev behaviors that must be verified after deployment (see "B. 验收部署" (Verify the deployment) in [AGENTS.md](../AGENTS.md)): when `create_task_kandev` is called with `workflow_step_id`, `start_agent=false`, `start_when_unblocked=false`, the task stays in that step without starting a session, and is not auto-started when its prerequisites complete; moving from a step with no agent to Develop (「开发」) triggers the on_enter auto_start. With the PR method, the module agent is not woken by the PR-merged event; release relies on the guard's `hold_ready` alert.
+- The Merge step sends its REPORT before calling step_complete_kandev, so when the REPORT wakes the module agent the prerequisite may not be in Done yet; it is then not released, and the next wake-up (another event or the guard's `hold_ready`) catches up.
+- When Waiting on development and Acceptance check alternate, the module agent's session (profile `module`) and the auditor's session (profile `module_auditor`) take turns within the same Kandev task; Waiting on development resets context on entry and does not rely on the earlier conversation.
 
 ## 13. Rejected designs
 
@@ -208,5 +248,9 @@ Approaches that were tried or evaluated and then abandoned, with the reasons, so
 | Have the guard use an LLM to read signals and decide | Not reproducible, hard to test | `stage.py` rule table + regression tests |
 | Create a separate guard automation for each project | Requires manual configuration every time a project starts, and cleanup when it ends | One guard per workspace, which discovers projects on its own from the pm task's `[TASK v1]` header |
 | Infer "is it waiting on a human" from conversation text or free-text reports | Needs structured facts | Use only Kandev state, pending questions and permission requests |
-| Merge module branches for the first time in Project acceptance, which only runs existing tests | No task was responsible for writing cross-module tests, and the auditor cannot write code; every module passed, yet an item deleted in the UI was still shown and could not be deleted (observed) | Integration-test module: after the other modules are done, merge, write automated integration tests, fix defects |
+| Merge module branches for the first time in Project acceptance, which only runs existing tests | No task was responsible for writing cross-module tests, and the auditor cannot write code; every module passed, yet an item deleted in the UI was still shown and could not be deleted (observed) | Integration-test module: after the other modules are done, merge and write automated integration tests |
 | Have the pm dispatch the integration-test task from Coordination after all modules are done | Re-entry of Module dispatch is already used for items to fix and final-review comments; it would need another entry reason and another W1 loop | Create it at first dispatch, blocked_by all other modules; its branch is only created when it starts, so it still gets the latest code |
+| The pm builds the environment baseline itself (the W1 「环境基线」 step) | The pm has to write code, the skeleton and scripts get no review or acceptance, and the pm's context fills up with environment details | The baseline module goes through W2 + W3, with review, the merge gate and module acceptance |
+| The module agent accepts its own module | The planner verifying its own plan tends to check only the MAs it wrote, missing contract points and module boundaries; the long-running context also keeps growing | Acceptance check (「验收调查」) is done by an independent module auditor (module_auditor, new session), starting with a coverage check |
+| The module agent merges subtask branches one by one | The long-running session has to read diffs, run tests and handle conflicts; its context swells and it becomes a serial bottleneck | The Merge step runs the merge gate and fast-forwards itself; the module agent only updates tasks.json |
+| The integration-test module fixes defects itself | It does not hold other modules' knowledge, so fixing means reading other modules' internals, breaking the knowledge boundary | Defects name the owning module and go through the pm to that module's fix-module task |

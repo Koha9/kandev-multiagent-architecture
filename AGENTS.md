@@ -32,15 +32,17 @@
 前提：本仓库已克隆到运行 Kandev 的那台机器上（守护每 20 分钟要在本机运行 `kandev/stage.py`，它读本地的 `kandev_ids.json`）。
 
 1. **确认 Kandev**：调用 `list_workspaces_kandev`。连不上就停下，请用户启动 Kandev 或给出 MCP 地址（脚本都支持 `--url`）。有多个 workspace 时问用户用哪个。
-2. **选 profile**：调用 `list_agent_profiles_kandev`，为 5 个角色各选一个 profile，规则见 [docs/workflow.md](docs/workflow.md)「角色与 profile」：
+2. **选 profile**：调用 `list_agent_profiles_kandev`，为 5 个必填角色各选一个 profile，3 个可选角色按需要选（不填时用括号中的缺省），规则见 [docs/workflow.md](docs/workflow.md)「角色与 profile」：
    - `pm`、`auditor`：强模型，**两者必须是不同的 profile**
+   - `plan_auditor`（缺省 = auditor）：立项评审，上下文小、影响最大，适合最强模型；**必须与 pm 不同**
+   - `module`（缺省 = pm）：模块管理，强模型；`module_auditor`（缺省 = auditor）：模块验收，强模型，**必须与 module 不同**
    - `developer`：主力编码模型；`reviewer`：**与 developer 不同的 profile**，最好不同厂商
-   - `mechanical`：便宜模型即可
+   - `mechanical`：合并门禁和收尾合并，编码模型
    - mode 应能无人值守执行（不会每步都等权限确认）
 
    把你的选择列成表交给用户确认，然后写进 `kandev/profiles.local.json`（格式见 `kandev/profiles.example.json`）。缺合适的 profile 时，告诉用户需要新建什么样的 profile，不要自己创建。
 3. **检查同名 workflow**：`list_workflows_kandev` 中已有「多Agent · 项目管理 / 模块管理 / 开发」时：
-   - description 里带同一版本号（例如 `[v3.1]`）：直接 `apply` 只会同步 prompt 和 profile。
+   - description 里带同一版本号（例如 `[v3.2]`）：直接 `apply` 只会同步 prompt 和 profile。
    - 其他版本：要加 `--retire-existing`（旧版改名为"(旧)"，任务保留）。先征得用户同意。
 4. **部署**（在 `kandev/` 下）：
    ```
@@ -48,7 +50,7 @@
    python build_workflows.py apply --workspace <workspace_id> --profiles profiles.local.json
    python verify_export.py
    ```
-   `check_docs.py` 必须 6 项全部 OK 才继续。`apply` 会写出 `kandev_ids.json`。
+   `check_docs.py` 必须全部 OK 才继续。`apply` 会写出 `kandev_ids.json`。
 5. **守护 automation**（每个 workspace 一个）：复制 `kandev/handoff/guard-automation.md` 为 `kandev/handoff/guard-automation.local.md`，把所有 `{大写占位}` 填好（`{GUARD_PROFILE_ID}` 用 `mechanical` 的 profile）。
    - 你在 Kandev 内部运行、有 `create_automation_kandev`：经用户同意后，按副本中的「交接 prompt」执行。
    - 没有这个工具（外部 MCP 没有）：把副本路径交给用户，请用户在任一 Kandev 任务里把「交接 prompt」交给 agent，或在 Kandev 设置 → Automations 手动建。
@@ -58,12 +60,12 @@
 
 逐项核对，最后用一张表汇报每项 pass / fail / unverified（附原因）。
 
-1. **自检**：`python kandev/check_docs.py` 6 项 OK；`python kandev/tests/test_stage.py` 输出 `OK test_stage`。
+1. **自检**：`python kandev/check_docs.py` 全部 OK；`python kandev/tests/test_stage.py` 输出 `OK test_stage`。
 2. **结构**：`python kandev/verify_export.py` 的输出中：
-   - W1 有 12 个步骤（0 待立项 … 10 完成、11 刷新），「立项规划」start=True；立项评审、项目验收、收尾合并的会话策略是 `new/complete`。
-   - W2 有 5 个步骤，「等待开发」的事件含 `on_children_completed: move_to_next`。
-   - W3：`0 待开发`（无 prompt、无事件、wip=0）、`1 开发`（start=True，wip=4）、`2 审核` 的 on_turn_complete 是 `move_to_step {'step_position': 4}`、`4 合并` 的 on_pr_merged 是 `move_to_step {'step_position': 5}`。
-   - 所有 agent 步骤的 profile 是第 A2 步确认的那几个模型，不是 `-`。
+   - W1 有 11 个步骤（0 待立项 … 9 完成、10 刷新，没有「环境基线」），「立项规划」start=True；立项评审、项目验收、收尾合并的会话策略是 `new/complete`；`5 调度` 的 on_enter 是 reset_agent_context + auto_start_agent；`3 立项确认` 的 on_turn_start 是 `move_to_step {'step_position': 1}`，`7 人工终审` 的是 `move_to_step {'step_position': 4}`。
+   - W2 有 5 个步骤，「等待开发」的事件含 reset_agent_context + auto_start_agent 和 `on_children_completed: move_to_next`；「验收调查」的会话策略是 `new/complete`。
+   - W3：`0 待开发`（无 prompt、无事件、wip=0）、`1 开发`（start=True，wip=4）、`2 审核` 的 on_turn_complete 是 `move_to_step {'step_position': 4}`、`4 合并` 的 on_turn_complete 和 on_pr_merged 都是 `move_to_step {'step_position': 5}`。
+   - 所有 agent 步骤的 profile 是第 A2 步确认的那几个模型，不是 `-`（立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
    - `kandev/export/W2-module.json` 中出现 `<W3_DEV_STEP_ID>`、`<W3_HOLD_STEP_ID>`（说明部署的 prompt 里写入了真实 ID，导出时被替换回占位符）。
 3. **「待开发」行为**（会启动一次真实会话，先征得用户同意）：
    | # | 操作 | 期望 |
@@ -79,7 +81,7 @@
 
 ## C. 启动一个项目
 
-1. 向用户确认：目标仓库（本机绝对路径和基线分支）、需求（按重要度排序，一条一行）、`mode`（attended：关键节点等用户；unattended：全程不提问）、是否 `plan_only`（只做到规划，先看计划再投入开发额度）、`integration_test`（auto：其他模块完成后自动做结合测试，缺省；off：不做）、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
+1. 向用户确认：目标仓库（本机绝对路径和基线分支）、需求（按重要度排序，一条一行）、`mode`（attended：关键节点等用户；unattended：全程不提问）、是否 `plan_only`（只做到规划，先看计划再投入开发额度）、`integration_test`（auto：其他模块完成后自动做结合测试，缺省；off：不做）、技术栈与环境要求（pm 写进 charter，由 baseline 模块落实；用户的基线分支在「收尾合并」之前不会被改动）、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
 2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `kandev/kandev_ids.json`，选好仓库），描述用 [docs/workflow.md](docs/workflow.md)「部署与启动」中的 `[TASK v1]` 模板。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写本仓库 `mgmt-template/` 的绝对路径。
 3. 经用户同意后启动任务。之后用户只需要看两处：`<mgmt_root>/project/attention.md`（需要用户决定的事）和 `<mgmt_root>/agents/guard/stage.md`（现在在等谁）。
 4. 守护如果在上一个项目结束后自动停用了，提醒用户在 Kandev 设置 → Automations 重新启用「多Agent 守护」。

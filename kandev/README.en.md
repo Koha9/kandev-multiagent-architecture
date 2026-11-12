@@ -23,8 +23,9 @@ Deploys the [multi-agent development workflow](../docs/workflow.en.md) to any Ka
 
 - Kandev is running and the external MCP endpoint is reachable (default `http://localhost:38429/mcp`, change it with `--url`).
 - Python 3. The scripts use only the standard library; no dependencies to install.
-- One agent profile prepared for each of the 5 roles (see `profiles.example.json` and "Roles and profiles" in [docs/workflow.en.md](../docs/workflow.en.md)):
-  - auditor must differ from pm, and reviewer must differ from developer.
+- One agent profile prepared for each of the 5 required roles (pm, auditor, developer, reviewer, mechanical); the optional roles module, module_auditor and plan_auditor default to pm, auditor and auditor respectively (see `profiles.example.json` and "Roles and profiles" in [docs/workflow.en.md](../docs/workflow.en.md)):
+  - auditor and plan_auditor must differ from pm, module_auditor must differ from module, and reviewer must differ from developer.
+  - Plan review (plan_auditor) has a small context and the biggest impact, so the strongest model fits; mechanical runs the merge gate, so use a coding model.
   - The mode should preferably be a permission mode that can run unattended.
 
 ## Deployment
@@ -55,4 +56,4 @@ You can also create it manually in Kandev Settings → Automations: schedule `*/
 
 ## Other manual parts
 
-- **Repository settings**: Copy files, the worktree branch template, etc. are configured per project once they have been decided in the Environment baseline (环境基线) step.
+- **Repository settings**: Copy files, the worktree branch template, etc. are configured per project once they have been decided by the baseline module (raised through the pm when the user has to configure something).

@@ -9,7 +9,7 @@
 3. 读自己的 NOW：
    - 管理类：`agents/<scope>/NOW.md`（scope 里的冒号换成横线，例如 `mod:auth` 对应 `agents/mod-auth/`）
    - 开发：Kandev 任务文档 `now`
-   - 审核、守护：没有 NOW，直接从头开始
+   - 审核、评审、模块验收、守护：没有 NOW，直接从头开始
 4. 处理「未确认的意图」：用相同的幂等键重做，或确认已完成后删除。
 5. 处理「等待中」：看对话里有没有回复；超时则按 `protocol/message.md` 重发或升级。
 6. 从「下一步」第 1 条继续。
@@ -22,21 +22,22 @@
 |---|---|---|
 | `roles/` | 角色卡 | 只读 |
 | `protocol/message.md` | 消息与交接格式 | 只读 |
-| `project/charter.md` | 需求原文（R-n）、目标、范围、模块、项目验收标准 | pm |
+| `project/charter.md` | 需求原文（R-n）、目标、范围、模块、模块边界（B-n）、项目验收标准 | pm |
 | `project/attention.md` | 需要用户处理的事：待确认的问题（附推荐答案）、无法验证的项 | pm |
 | `project/feedback.md` | 用户在门禁中的意见原话及去向 | pm |
 | `project/conventions.md` | 协作规范 | pm |
-| `project/environment.md` | 环境、命令、冒烟测试 | pm |
+| `project/environment.md` | 环境、命令、冒烟测试、合并门禁 | baseline 模块 agent（mod:baseline） |
 | `project/registry.json` | 担当表：谁负责什么 | pm |
 | `project/status.json` | 全局状态 | pm |
 | `project/final-report.md` | 项目验收报告 | pm |
 | `project/decisions/` | ADR | pm |
 | `agents/<scope>/` | NOW.md、journal.md | 本人 |
 | `agents/guard/stage.md` | 现在在等谁（门禁、权限请求、卡住的任务） | `kandev/stage.py` 生成 |
-| `modules/<模块>/` | spec、interfaces、tasks.json、acceptance | 该模块 agent |
+| `modules/<模块>/` | spec、interfaces、tasks.json | 该模块 agent |
+| `modules/<模块>/acceptance.md` | 模块验收记录与修复项 | 该模块的验收者（mod-audit:<模块>） |
 | `evidence/<任务id>/` | 界面截图 | 该任务的开发 |
 | `quota/ledger.json` | 额度账本 | 只由 `tools/quota.py` 写 |
-| `tools/` | check_owns、quota、mgmt_precommit 脚本 | 只读 |
+| `tools/` | check_owns、check_tasks、quota、mgmt_precommit 脚本 | 只读 |
 | `agents/_template/`、`modules/_template/` | 复制源 | 不改 |
 
 ## 任务文档存储

@@ -30,7 +30,7 @@ deviations: []          # 与契约不一致的地方及原因
 interface_changes: []   # 对接口的任何改动（应事先获得模块 agent 同意，写明消息 id）
 fixed_findings: []      # 被退回时：逐条对应 review 中的 findings
 remaining: []           # result=blocked 时：还没做完的部分和卡住的原因
-defects: []             # 结合测试任务测出的产品缺陷（此时 result=blocked）：[{test, steps, expected, actual, suspect}]
+defects: []             # 结合测试任务测出的产品缺陷（此时 result=blocked）：[{id: D-n, owner_module, test, steps, expected, actual, suspect}]；owner_module 按 charter 的模块清单和 owns 判断
 manual_checks: []       # 结合测试任务中自动化工具做不到、改为手动验证的场景：[{scenario, why_manual, evidence}]
 drop_reason: null       # result=dropped 时：为什么不需要改动，附证据（命令输出、已覆盖它的任务或提交）
 open_questions: []

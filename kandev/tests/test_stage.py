@@ -40,6 +40,7 @@ def main():
     test_usage_limit()
     test_limit_resume()
     test_should_disable()
+    test_steps_v32()
     print("OK test_stage")
 
 
@@ -118,6 +119,33 @@ def test_should_disable():
     assert should_disable({**beat, "projects": []}, [], [done], now)[0] is False      # 本来就没有项目
     assert should_disable({**beat, "at": "2026-11-09T17:00:00+00:00"}, [], [done], now)[0] is False   # 心跳太旧
     assert should_disable({}, [], [done], now)[0] is False
+
+
+def test_steps_v32():
+    """v3.2 的步骤（无「环境基线」）与 v3.1 兼容：旧步骤名不报错，新步骤按预期分类。"""
+    now = ts("2026-11-09T05:00:00Z")
+    idle = [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]   # 空闲 60 分钟
+    cases = [
+        ("项目管理", "环境基线", idle, "等上级：空闲未推进"),      # v3.1 旧 workflow 中的任务仍要能分类
+        ("项目管理", "模块下发", idle, "等上级：空闲未推进"),
+        ("项目管理", "调度", idle, "常驻"),
+        ("项目管理", "人工终审", idle, "等人：人工终审"),
+        ("项目管理", "某个未来的步骤", idle, "运行中"),            # 不认识的步骤名不报错
+        ("模块管理", "验收调查", idle, "等上级：空闲未推进"),
+        ("模块管理", "验收调查", [], "排队"),                      # 每次新会话：还没有会话时排队
+        ("模块管理", "等待开发", idle, "常驻"),
+        ("开发", "合并", idle, "等上级：空闲未推进"),              # 合并自己完成并进入「完成」；卡住时仍要告警
+        ("开发", "合并", [], "排队"),
+        ("开发", "等待决策", idle, "等上级：等待决策"),
+    ]
+    tasks = []
+    for i, (wf, step, sessions, _) in enumerate(cases, 1):
+        t = task(i, wf, step, "")
+        t["sessions"] = [dict(s) for s in sessions]
+        tasks.append(t)
+    rows, _, _ = evaluate(tasks, now, {}, uid(1))
+    for (wf, step, _, want), r in zip(cases, rows):
+        assert r["category"].startswith(want), (wf, step, r["category"], want)
 
 
 def uid(n):

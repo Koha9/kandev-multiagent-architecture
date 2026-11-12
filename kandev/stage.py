@@ -58,8 +58,11 @@ sys.path.insert(0, HERE)
 GATES = {"立项确认", "人工终审"}
 RESIDENT = {"调度", "等待开发"}
 HOLD, DECISION, DONE = "待开发", "等待决策", "完成"
-SIGNAL_STEPS = {"立项规划", "立项评审", "环境基线", "模块下发", "项目验收", "收尾合并",
-                "模块规划", "验收调查", "开发", "审核", "合并"}
+# v3.2 删除了 W1 的「环境基线」；仍在 v3.1 旧 workflow 里运行的项目可能有任务停在这一步，按要求完成信号的步骤处理。
+# 步骤名只用于分类，不认识的步骤名落到"运行中"，不会报错。
+LEGACY_SIGNAL_STEPS = {"环境基线"}
+SIGNAL_STEPS = {"立项规划", "立项评审", "模块下发", "项目验收", "收尾合并",
+                "模块规划", "验收调查", "开发", "审核", "合并"} | LEGACY_SIGNAL_STEPS
 AGENT_STEPS = SIGNAL_STEPS | RESIDENT | {"刷新"}
 IDLE_STATES = {"WAITING_FOR_INPUT", "IDLE", "COMPLETED"}
 LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会话的状态（实测为 WAITING_FOR_INPUT）

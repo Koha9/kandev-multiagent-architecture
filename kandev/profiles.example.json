@@ -1,7 +1,10 @@
 {
-  "pm": "<agent profile id：项目管理 / 模块管理，强模型>",
-  "auditor": "<agent profile id：立项评审 / 项目验收，强模型，必须与 pm 不同>",
+  "pm": "<agent profile id：项目管理（立项规划 / 模块下发 / 调度），强模型>",
+  "auditor": "<agent profile id：项目验收，强模型，必须与 pm 不同>",
   "developer": "<agent profile id：开发，主力编码模型>",
   "reviewer": "<agent profile id：审核，必须与 developer 不同（可同模型不同 profile，最好不同厂商）>",
-  "mechanical": "<agent profile id：合并 / 收尾合并，便宜模型即可>"
+  "mechanical": "<agent profile id：合并门禁 / 收尾合并，编码模型>",
+  "module": "<可选，缺省 = pm。模块管理（模块规划 / 等待开发 / 刷新），强模型>",
+  "module_auditor": "<可选，缺省 = auditor。模块验收（验收调查），强模型，必须与 module 不同>",
+  "plan_auditor": "<可选，缺省 = auditor。立项评审，上下文小、影响最大，适合最强模型，必须与 pm 不同>"
 }

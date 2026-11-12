@@ -56,17 +56,18 @@ R1 的配套机制是**幂等**：
 ├─ roles/                    角色卡（全量规则）              只读（从模板复制）
 │   ├─ pm.md
 │   ├─ module.md
+│   ├─ module-auditor.md
 │   ├─ developer.md
 │   ├─ reviewer.md
 │   └─ guard.md
 ├─ protocol/
 │   └─ message.md            消息与交接格式                  只读（从模板复制）
-├─ tools/                    check_owns / quota / mgmt_precommit  只读（从模板复制）
+├─ tools/                    check_owns / check_tasks / quota / mgmt_precommit  只读（从模板复制）
 ├─ project/
-│   ├─ charter.md            需求原文 R-n、目标、范围、模块、PA  PM
+│   ├─ charter.md            需求原文 R-n、目标、范围、模块、模块边界 B-n、PA  PM
 │   ├─ attention.md          需要用户处理的事（附推荐答案）  PM
 │   ├─ conventions.md        协作规范、约束清单              PM
-│   ├─ environment.md        环境基线、命令、冒烟测试        PM
+│   ├─ environment.md        环境、命令、冒烟测试、合并门禁  baseline 模块 agent
 │   ├─ registry.json         担当表（谁负责什么、task id）   PM
 │   ├─ status.json           全局状态快照                    PM
 │   ├─ final-report.md       项目验收报告                    项目验收步骤（auditor）；「收尾」节由收尾合并步骤写
@@ -86,7 +87,7 @@ R1 的配套机制是**幂等**：
 │   ├─ spec.md               模块目标 + 模块验收标准         该模块 agent
 │   ├─ interfaces.md         接口契约（对外 + 任务之间）      该模块 agent
 │   ├─ tasks.json            开发任务清单                    该模块 agent
-│   └─ acceptance.md         验收记录（只追加）              该模块 agent
+│   └─ acceptance.md         验收记录与修复项（只追加）      该模块的验收者（mod-audit:<模块>）
 ├─ evidence/<任务id>/        界面截图                        该任务的开发
 └─ quota/ledger.json         额度账本                        只由 tools/quota.py 写
 ```
@@ -151,7 +152,9 @@ ID 规则：
 
 | 对象 | 格式 | 例 |
 |---|---|---|
-| scope | `pm` / `mod:<模块>` / `dev:<任务id>` / `rev:<任务id>` / `guard` | `dev:auth-02` |
+| scope | `pm` / `mod:<模块>` / `mod-audit:<模块>` / `dev:<任务id>` / `rev:<任务id>` / `guard` | `dev:auth-02` |
+| 模块边界 | `B-<n>` | `B-2` |
+| 修复项 / 缺陷 | `F-<n>`（acceptance.md、final-report 的某一轮内）/ `D-<n>`（结合测试 report 内） | `acceptance.md 第 2 轮 F-1` |
 | 模块 | 小写英文 | `auth` |
 | 开发任务 | `<模块>-<两位序号>` | `auth-02` |
 | 需求（原文摘录） | `R-<n>` | `R-4` |
@@ -184,7 +187,7 @@ ID 规则：
 
 | 字段 | 说明 |
 |---|---|
-| `phase` | `planning` / `baseline` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
+| `phase` | `planning` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
 | `modules[]` | `name`、`kandev_task_id`、`status`（`blocked` / `planning` / `developing` / `accepting` / `reported` / `done` / `failed`）、`done`、`total`、`last_report`（消息 id）、`blocked_reason` |
 | `open_escalations[]` | 待处理的升级：`msg`、`from`、`topic`、`since` |
 | `open_decisions[]` | 讨论中的 ADR 编号 |
@@ -198,10 +201,13 @@ ID 规则：
 | `blocked_by` | 前置任务 id | 需重新规划 |
 | `acceptance` | AC 列表，每条写 `covers: MA-n` | 需重新规划，并在 acceptance.md 记一笔 |
 | `refs` | 需求出处（charter 的 R 编号） | 需重新规划 |
+| `tests` | 可直接执行的测试命令列表（契约中的测试命令与它一致） | 需重新规划 |
+| `boundaries` | 本任务落实的 B-n（本模块是提供方），可为空 | 需重新规划 |
+| `kind` | 可选；`integration-test` = 结合测试任务 | 需重新规划 |
 | `ui` | 是否改动界面；true 时 report 要附截图 | 需重新规划 |
 | `kandev_task_id` | 创建后回填 | 是 |
-| `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged` / `dropped` / `failed` | 是 |
-| `passes` | 模块验收时由模块 agent 置为 true | 是 |
+| `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged`（合并步骤的 REPORT 到达后）/ `dropped` / `failed` | 是 |
+| `passes` | 验收被退回时，模块 agent 按 acceptance.md 回写；验收通过后模块随即结束，以 acceptance.md 最后一轮为准（验收者不写 tasks.json） | 是 |
 | `review_rounds` | 审核轮数 | 是 |
 | `note` | 一行备注 | 是 |
 
@@ -211,7 +217,7 @@ ID 规则：
 
 1. **用户**：在 Kandev 创建项目管理任务，任务描述写 `[TASK v1]` 头（含 `mgmt_root`、`mgmt_template`、`repo`）。
 2. **PM（立项规划）**：发现 `mgmt_root` 不存在 → 从 `mgmt-template/` 整体复制 → 回填 registry.json 中的常量和自己的 task id。
-3. **PM（模块下发）**：每创建一个模块任务，就在 registry.json 里加一个条目。
+3. **PM（模块下发）**：建 `mod/baseline` 分支，先创建 baseline 模块任务；每创建一个模块任务，就在 registry.json 里加一个条目。
 4. **模块 agent（模块规划）**：复制 `agents/_template/` → `agents/mod-<模块>/`，复制 `modules/_template/` → `modules/<模块>/`。
 5. 模板目录 `agents/_template/`、`modules/_template/` 留在原处不改，作为后续复制的来源。
 

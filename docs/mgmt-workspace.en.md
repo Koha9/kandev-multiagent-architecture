@@ -56,17 +56,18 @@ R1 is backed by **idempotency**:
 ├─ roles/                    role cards (full rules)          read-only (copied from template)
 │   ├─ pm.md
 │   ├─ module.md
+│   ├─ module-auditor.md
 │   ├─ developer.md
 │   ├─ reviewer.md
 │   └─ guard.md
 ├─ protocol/
 │   └─ message.md            message and handoff format       read-only (copied from template)
-├─ tools/                    check_owns / quota / mgmt_precommit  read-only (copied from template)
+├─ tools/                    check_owns / check_tasks / quota / mgmt_precommit  read-only (copied from template)
 ├─ project/
-│   ├─ charter.md            verbatim requirements R-n, goals, scope, modules, PA  PM
+│   ├─ charter.md            verbatim requirements R-n, goals, scope, modules, module boundaries B-n, PA  PM
 │   ├─ attention.md          items for the user (with recommended answers)  PM
 │   ├─ conventions.md        collaboration conventions, constraint list  PM
-│   ├─ environment.md        environment baseline, commands, smoke test  PM
+│   ├─ environment.md        environment, commands, smoke test, merge gate  baseline module agent
 │   ├─ registry.json         ownership registry (who owns what, task ids)  PM
 │   ├─ status.json           global status snapshot           PM
 │   ├─ final-report.md       project acceptance report        Project acceptance step (auditor); the "收尾" (wrap-up) section is written by the Final merge step
@@ -86,7 +87,7 @@ R1 is backed by **idempotency**:
 │   ├─ spec.md               module goals + module acceptance criteria  that module's agent
 │   ├─ interfaces.md         interface contracts (external + between tasks)  that module's agent
 │   ├─ tasks.json            development task list            that module's agent
-│   └─ acceptance.md         acceptance records (append-only)  that module's agent
+│   └─ acceptance.md         acceptance records and fix items (append-only)  that module's auditor (mod-audit:<module>)
 ├─ evidence/<task id>/       UI screenshots                   that task's developer
 └─ quota/ledger.json         quota ledger                     written only by tools/quota.py
 ```
@@ -151,7 +152,9 @@ ID rules:
 
 | Object | Format | Example |
 |---|---|---|
-| scope | `pm` / `mod:<module>` / `dev:<task id>` / `rev:<task id>` / `guard` | `dev:auth-02` |
+| scope | `pm` / `mod:<module>` / `mod-audit:<module>` / `dev:<task id>` / `rev:<task id>` / `guard` | `dev:auth-02` |
+| module boundary | `B-<n>` | `B-2` |
+| fix item / defect | `F-<n>` (within one round of acceptance.md or the final-report) / `D-<n>` (within an integration-test report) | `acceptance.md round 2 F-1` |
 | module | lowercase English | `auth` |
 | development task | `<module>-<two-digit number>` | `auth-02` |
 | requirement (verbatim excerpt) | `R-<n>` | `R-4` |
@@ -184,7 +187,7 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 
 | Field | Description |
 |---|---|
-| `phase` | `planning` / `baseline` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
+| `phase` | `planning` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
 | `modules[]` | `name`, `kandev_task_id`, `status` (`blocked` / `planning` / `developing` / `accepting` / `reported` / `done` / `failed`), `done`, `total`, `last_report` (message id), `blocked_reason` |
 | `open_escalations[]` | pending escalations: `msg`, `from`, `topic`, `since` |
 | `open_decisions[]` | ADR numbers under discussion |
@@ -198,10 +201,13 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 | `blocked_by` | prerequisite task ids | requires replanning |
 | `acceptance` | AC list, each with `covers: MA-n` | requires replanning, plus an entry in acceptance.md |
 | `refs` | requirement sources (R numbers in the charter) | requires replanning |
+| `tests` | list of directly runnable test commands (the contract's test commands match it) | requires replanning |
+| `boundaries` | the B-n this task implements (this module is the provider); may be empty | requires replanning |
+| `kind` | optional; `integration-test` = integration-test task | requires replanning |
 | `ui` | whether the UI changes; when true the report must include screenshots | requires replanning |
 | `kandev_task_id` | filled in after creation | yes |
-| `status` | `planned` / `creating` / `held` (waiting on prerequisites in Queued (待开发)) / `todo` / `merged` / `dropped` / `failed` | yes |
-| `passes` | set to true by the module agent during module acceptance | yes |
+| `status` | `planned` / `creating` / `held` (waiting on prerequisites in Queued (待开发)) / `todo` / `merged` (after the Merge step's REPORT arrives) / `dropped` / `failed` | yes |
+| `passes` | written back by the module agent from acceptance.md when acceptance sends the module back; once acceptance passes the module ends and the last round of acceptance.md is authoritative (the auditor does not write tasks.json) | yes |
 | `review_rounds` | number of review rounds | yes |
 | `note` | one-line note | yes |
 
@@ -211,7 +217,7 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 
 1. **The user**: creates the project management task in Kandev, with the `[TASK v1]` header in the task description (including `mgmt_root`, `mgmt_template`, `repo`).
 2. **PM (Project planning (立项规划))**: finds that `mgmt_root` does not exist → copies all of `mgmt-template/` → fills in the constants in registry.json and its own task id.
-3. **PM (Module dispatch (模块下发))**: adds an entry to registry.json for every module task it creates.
+3. **PM (Module dispatch (模块下发))**: creates the `mod/baseline` branch and the baseline module task first; adds an entry to registry.json for every module task it creates.
 4. **Module agent (Module planning (模块规划))**: copies `agents/_template/` → `agents/mod-<module>/`, and `modules/_template/` → `modules/<module>/`.
 5. The template directories `agents/_template/` and `modules/_template/` stay in place unchanged, as the source for later copies.
 

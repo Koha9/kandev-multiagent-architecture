@@ -23,8 +23,9 @@
 
 - Kandev 正在运行，外部 MCP 端点可用（默认 `http://localhost:38429/mcp`，可用 `--url` 改）。
 - Python 3。脚本只用标准库，不需要安装依赖。
-- 已为 5 个角色各准备一个 agent profile（见 `profiles.example.json` 和 [docs/workflow.md](../docs/workflow.md)「角色与 profile」）：
-  - auditor 必须与 pm 不同，reviewer 必须与 developer 不同。
+- 已为 5 个必填角色（pm、auditor、developer、reviewer、mechanical）各准备一个 agent profile；可选角色 module、module_auditor、plan_auditor 不填时分别等于 pm、auditor、auditor（见 `profiles.example.json` 和 [docs/workflow.md](../docs/workflow.md)「角色与 profile」）：
+  - auditor、plan_auditor 必须与 pm 不同，module_auditor 必须与 module 不同，reviewer 必须与 developer 不同。
+  - 立项评审（plan_auditor）上下文小、影响最大，适合最强模型；mechanical 负责合并门禁，用编码模型。
   - mode 建议设为能无人值守执行的权限模式。
 
 ## 部署
@@ -55,4 +56,4 @@ python verify_export.py
 
 ## 其他手动部分
 
-- **仓库设置**：Copy files、worktree 分支模板等，按项目在「环境基线」步骤确定后再配置。
+- **仓库设置**：Copy files、worktree 分支模板等，按项目由 baseline 模块确定（需要用户配置时经 pm 提出）后再配置。
