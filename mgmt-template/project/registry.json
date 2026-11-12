@@ -17,6 +17,7 @@
       "scope": "pm",
       "role": "pm",
       "kandev_task_id": "<uuid>",
+      "kandev_session_id": "<pm 会话 uuid；其他会话收到用户意见时转发到这里>",
       "owns": ["project/*", "跨模块决策", "项目规范", "与用户沟通"],
       "branch": null,
       "status": "active"

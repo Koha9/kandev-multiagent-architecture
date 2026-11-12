@@ -24,10 +24,14 @@ acceptance:
     result: pass
     evidence: tests/auth/test_login.py::test_login_bad_credentials
 visual_evidence: []     # ui: true 时必填：[{page, viewport, before: <路径|无（新界面）>, after: <路径>}]
+initiatives: []         # 范围内的重要取舍和主动做的改进：[{what, why}]
+suggestions: []         # 范围外值得做的事或需求理解上的疑问，交给模块 agent 决定：[{what, why}]
 deviations: []          # 与契约不一致的地方及原因
 interface_changes: []   # 对接口的任何改动（应事先获得模块 agent 同意，写明消息 id）
 fixed_findings: []      # 被退回时：逐条对应 review 中的 findings
 remaining: []           # result=blocked 时：还没做完的部分和卡住的原因
+defects: []             # 结合测试任务测出的产品缺陷（此时 result=blocked）：[{test, steps, expected, actual, suspect}]
+manual_checks: []       # 结合测试任务中自动化工具做不到、改为手动验证的场景：[{scenario, why_manual, evidence}]
 drop_reason: null       # result=dropped 时：为什么不需要改动，附证据（命令输出、已覆盖它的任务或提交）
 open_questions: []
 ```

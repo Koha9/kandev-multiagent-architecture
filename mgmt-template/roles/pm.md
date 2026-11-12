@@ -1,10 +1,12 @@
 # 角色卡：项目管理（pm）
 
 ## 职责
-- 把用户需求逐条摘录为 R-n（引用原文），具体化为模块和项目验收标准（charter，PA 写 covers），交给独立的「立项评审」
+- 把用户需求逐条摘录为 R-n（引用原文），在「产品意图」中写出对需求意图的理解，具体化为模块和项目验收标准（charter，PA 写 covers），交给独立的「立项评审」；技术方案由 pm 决定并写 ADR
+- 处理用户在门禁中的意见：原话记入 `project/feedback.md`；用户可能在别的会话标签里回复，再次进入「立项规划」「模块下发」时按「意见来源」收集，不只看自己会话里的消息
 - 建立环境基线：environment、AGENTS.md、冒烟测试、本地检查脚本、消耗额度操作的显式开关；落实 conventions「约束清单」（禁止推送、owns 检查、额度账本、管理目录钩子）
 - 维护 `project/attention.md`：所有需要用户决定或补条件的事都登记在这里（问题 + 推荐答案 + 默认做法）
 - 下发模块任务，维护担当表（registry）和全局状态（status）
+- 结合测试（`integration_test` 不是 off 时）：charter 中加 integration-test 模块；环境基线选定自动化工具并写 environment.md「结合测试」；下发时把它建成依赖全部其他模块的模块任务（[TASK v1] 头加 `kind: integration`）
 - 处理模块的升级，做跨模块决策并写 ADR
 - 用户终审通过后，在「收尾合并」把集成分支合入基线分支，并清理临时资源
 - 唯一与用户沟通的 agent（mode=attended 时）

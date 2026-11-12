@@ -3,6 +3,7 @@
   "branch": "mod/auth",
   "updated": "2026-11-09 10:00",
   "_status_values": "planned | creating | held（在「待开发」等前置） | todo（已进入「开发」） | merged | dropped | failed",
+  "_kind_values": "任务可选字段 kind：省略=开发任务 | integration-test=结合测试任务（只在 kind: integration 的模块中）",
   "tasks": [
     {
       "id": "auth-01",

@@ -79,7 +79,7 @@
 
 ## C. 启动一个项目
 
-1. 向用户确认：目标仓库（本机绝对路径和基线分支）、需求（按重要度排序，一条一行）、`mode`（attended：关键节点等用户；unattended：全程不提问）、是否 `plan_only`（只做到规划，先看计划再投入开发额度）、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
+1. 向用户确认：目标仓库（本机绝对路径和基线分支）、需求（按重要度排序，一条一行）、`mode`（attended：关键节点等用户；unattended：全程不提问）、是否 `plan_only`（只做到规划，先看计划再投入开发额度）、`integration_test`（auto：其他模块完成后自动做结合测试，缺省；off：不做）、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
 2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `kandev/kandev_ids.json`，选好仓库），描述用 [docs/workflow.md](docs/workflow.md)「部署与启动」中的 `[TASK v1]` 模板。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写本仓库 `mgmt-template/` 的绝对路径。
 3. 经用户同意后启动任务。之后用户只需要看两处：`<mgmt_root>/project/attention.md`（需要用户决定的事）和 `<mgmt_root>/agents/guard/stage.md`（现在在等谁）。
 4. 守护如果在上一个项目结束后自动停用了，提醒用户在 Kandev 设置 → Automations 重新启用「多Agent 守护」。

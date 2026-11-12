@@ -32,6 +32,11 @@ The scripts under `tools/` use only the Python standard library and are copied w
 - Each development task's contract states a directly runnable test command; new features must come with tests, and existing tests must not be deleted or weakened to make them pass.
 - When review, module acceptance and project acceptance rerun tests, they run them exactly as written in environment.md, without changing test selection arguments (`-o addopts`, `-m`, `-k`, etc.) and without turning on quota-consuming switches.
 - environment.md states the smoke test (one command, expected output, duration). Every development session runs it once at the start; on failure it reports instead of developing on a broken baseline.
+- Integration tests (when the project has an integration-test module): environment.md "结合测试" (Integration tests) states the automation tool, how to start the really assembled application, one run command and the test directory; Environment baseline adds one minimal passing case to the skeleton.
+  - Tests run against the really assembled application and assert user-visible results and data state; only quota-consuming external calls may be mocked.
+  - Automation tools come first. Operating the product manually is a fallback, used only for scenarios the tool cannot cover (still with tool support where possible), with the reason and evidence written in the report.
+  - When a product defect is found, the failing case is kept and the defect reported; assertions are not changed, no mocks are added, nothing is skipped.
+  - The suite stays in the repository, and Project acceptance, Final merge and later fix rounds all re-run it.
 
 ## 4. UI evidence
 

@@ -20,8 +20,7 @@ criteria:                 # evidence 必须是审核者亲自确认的内容，�
   - id: AC-2
     result: pass
     evidence: test_login_bad_credentials
-visual_check: null        # ui: true 时：截图是否存在、是否与 AC 一致
-boundary_check:           # 至少 1 个边界情况的亲自抽查
+visual_check: null        # ui: true 时：截图是否存在、是否与 AC 一致boundary_check:           # 至少 1 个边界情况的亲自抽查
   - case: 空题库时抽题
     result: 返回 count=0，没有异常（test_practice.py::test_empty_bank）
 findings:                 # 只指出问题，不写实现方案

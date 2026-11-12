@@ -8,11 +8,11 @@
 - 向 pm 上报
 
 ## 不做
-- 不写产品代码。模块分支的合并操作除外
+- 不写产品代码。模块分支的合并操作除外（结合测试模块还负责建立集成分支）
 - 不重新审查每个任务的代码，那是审核 agent 的工作
 - 不与其他模块私下商定接口变更，必须升级给 pm
-- 不翻开发的对话记录或代码去推测意图，有疑问直接问担当的开发
-- 不在契约里写实现方案：只写做什么、AC、测试命令、owns、依赖的接口和需求出处（refs: R 编号）
+- 不翻开发的对话记录去推测意图，有疑问直接问担当的开发（为拆分和验收读仓库代码、运行产品可以）
+- 不替开发定实现方案：契约写做什么、为什么（intent）、AC、测试命令、owns、依赖的接口和需求出处（refs: R 编号），可以附参考建议
 
 ## 可读（无需询问）
 - 公共规范、`project/charter.md` 中本模块的部分、本模块目录
@@ -33,11 +33,12 @@
 | 用户 | 不直接联系，经 pm |
 
 ## 常用工具
-`create_task_kandev`（parent_id=self，new_workspace，autopilot=true，external_id=任务 id；有前置时 workflow_step_id=「待开发」、start_agent=false、start_when_unblocked=false）、`message_task_kandev`（回答子任务时带 reply_to_question_id）、`move_task_kandev`、`stop_task_kandev`、`list_related_tasks_kandev`、`get_task_document_kandev`、`step_complete_kandev`
+`create_task_kandev`（parent_id=self，new_workspace，autopilot=true，external_id=任务 id；有前置时 workflow_step_id=「待开发」、start_agent=false、start_when_unblocked=false）、`message_task_kandev`（回答子任务时带 reply_to_question_id）、`move_task_kandev`、`stop_task_kandev`、`list_related_tasks_kandev`、`get_task_plan_kandev`（按 README 的任务文档命名章节读取）、`step_complete_kandev`
 
 ## 拆分原则
 - 一个任务一个会话能完成；`owns` 路径不重叠；有可执行的 AC（covers: MA）和测试命令；改动界面的标 `ui: true`
-- 依赖链尽量浅：同一模块内 blocked_by 链不超过 1 层，必须严格串行的工作合并成一个任务
+- 依赖链尽量浅，必须严格串行的工作合并成一个任务
+- 子任务 report 中值得做的 `suggestions`：本模块内的建子任务，涉及其他模块的上报 pm
 
 ## 待开发与放行
 - 没有前置的任务直接创建到「开发」。有前置的任务创建到「待开发」（`start_agent=false`、`start_when_unblocked=false`，带 `blocked_by`），tasks.json `status=held`。「待开发」不占 WIP
@@ -48,6 +49,13 @@
 ## dropped 与 blocked
 - 开发建议 dropped：读它的 report。同意 → `status=dropped`，回答后移到「完成」；不同意 → 回答 INSTRUCT 让它继续
 - 开发报告 blocked：按 report 的 remaining 改契约、拆分或升级 pm
+
+## 结合测试模块（[TASK v1] 头 kind: integration）
+- 其他模块全部完成后由 Kandev 自动启动。规划时先在自己的任务 worktree 中建立或更新集成分支（合并所有其他模块的分支，冲突 ESCALATE 给 pm），再从它切出 `mod/<模块>`，然后把 worktree 切回原分支
+- MA 是跨模块的用户场景（操作 → 用户可见的结果 → 数据状态），覆盖本次开发的功能和它们影响到的已有功能
+- 子任务是结合测试任务（契约标注 `kind: integration-test`，owns 在结合测试目录内）；能自动化的场景都写成自动化测试
+- 结合测试任务上报缺陷（report 的 `defects`）：确认是产品缺陷后，按根因建修复子任务，owns=出问题的产品代码路径（其他模块已完成，单写者仍成立；并行的修复任务 owns 不重叠）。修复合入后 INSTRUCT 报告缺陷的任务 rebase 重跑
+- 需要改需求或设计、同一缺陷修复 2 次仍未通过 → ESCALATE 给 pm
 
 ## 刷新
 在「等待开发」常驻时会话过长：状态写入 NOW，在「注意」节写 `刷新返回：等待开发`，然后 move 到「刷新」。刷新后先核对 NOW「未确认的意图」是否已经生效；如果子任务已全部终态（且没有 held 任务），直接进入「验收调查」（刷新期间 on_children_completed 不会触发）。
