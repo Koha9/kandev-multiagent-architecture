@@ -239,8 +239,8 @@ branch: mod/baseline base <baseline branch>   # regular module: mod/<module> bas
 
 The design relies on the following behaviors, which have not yet been tested on a local Kandev; each comes with a fallback if it does not hold.
 
-- a. Moving a task from Queued (「待开发」) to Develop (「开发」) triggers auto-start (on_enter auto_start). Fallback: tasks with prerequisites are created by the module agent directly in Develop once the prerequisites are merged.
-- b. When an agent moves itself to Awaiting decision (「等待决策」), its development session is kept and reused when moved back. Fallback: the move-back instructions say to read the task docs now and report first (already written).
+- a. Moving a task from Queued (「待开发」) to Develop (「开发」) triggers auto-start (on_enter auto_start). Verified on 2026-11-13 with both Codex and Claude agents. Fallback: tasks with prerequisites are created by the module agent directly in Develop once the prerequisites are merged.
+- b. When an agent moves itself to Awaiting decision (「等待决策」), its development session is kept and reused when moved back. Verified on 2026-11-13 (same runs). Fallback: the move-back instructions say to read the task docs now and report first (already written).
 - c. on_children_completed fires again after a new batch of fix subtasks all completes. Fallback: relax the condition for the module moving itself to Acceptance check to "all subtasks terminal".
 - d. In a task with several sessions, a message without session_id goes to the current step's session, and multiple moves on the same task run in the order sent. Fallback: send messages with the session_id recorded in the registry; the guard's alerts are the safety net.
 - e. All worktrees share the local `mod/*` branches. Fallback: push to a local bare remote instead.

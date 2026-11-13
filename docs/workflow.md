@@ -241,8 +241,8 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 
 下面几条是设计依赖、但还没有在本机 Kandev 上实测的行为；每条写明测不通时的退路。
 
-- a. 把任务从「待开发」移到「开发」会触发自动启动（on_enter auto_start）。退路：有前置的任务等前置合并后，由模块 agent 直接创建到「开发」。
-- b. agent 把自己移到「等待决策」后开发会话保留，移回时沿用。退路：移回的 instructions 里写明先读任务文档 now 和 report（已写）。
+- a. 把任务从「待开发」移到「开发」会触发自动启动（on_enter auto_start）。2026-11-13 在 Codex 和 Claude 两种 agent 上实测通过。退路：有前置的任务等前置合并后，由模块 agent 直接创建到「开发」。
+- b. agent 把自己移到「等待决策」后开发会话保留，移回时沿用。2026-11-13 实测通过（同上）。退路：移回的 instructions 里写明先读任务文档 now 和 report（已写）。
 - c. on_children_completed 在新一批修复子任务全部完成后能再次触发。退路：把模块自己移到「验收调查」的条件放宽为"子任务全部终态"。
 - d. 多会话任务里不带 session_id 的消息投给当前步骤的会话；同一任务上的多个移动按发出顺序执行。退路：发消息时带 registry 登记的 session_id，守护的告警兜底。
 - e. 所有 worktree 共享本地的 `mod/*` 分支。退路：改为推送到一个本地 bare 远端。
