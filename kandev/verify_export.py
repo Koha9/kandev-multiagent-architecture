@@ -77,7 +77,11 @@ def main():
         fname = os.path.join(a.out, FILES[wname][0])
         with open(fname, "w", encoding="utf-8") as f:
             f.write(sanitize(doc, repl))
-        print(f"== {wname}  (version {doc.get('version')}) -> {os.path.relpath(fname, here)}")
+        try:
+            shown = os.path.relpath(fname, here)
+        except ValueError:   # Windows：--out 在另一个盘符
+            shown = fname
+        print(f"== {wname}  (version {doc.get('version')}) -> {shown}")
         summary(doc)
 
 
