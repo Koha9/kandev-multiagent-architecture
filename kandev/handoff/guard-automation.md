@@ -15,6 +15,7 @@
 | `{ARCH_ROOT}` | 本架构仓库在本机的绝对路径（正斜杠） |
 | `{ARCH_REPO_ID}` | 本架构仓库在 Kandev 中的仓库 id（没有登记就留空，见第 3 步） |
 | `{PYTHON}` | 本机 Python 解释器的绝对路径（只用标准库） |
+| `{IDS_FILE}` | 本 workspace 的 ids 文件名（`apply` 写出的）：只有一个 workspace 时是 `kandev_ids.json`；多个 workspace 时是 `apply --ids-out` 指定的那个，例如 `kandev_ids.7f64865e.json` |
 | `{GUARD_PROFILE_ID}` | 守护用的 agent profile id（profiles.local.json 中的 `mechanical`，便宜模型即可） |
 | Kandev 外部 MCP | `http://localhost:38429/mcp`（stage.py 用它只读查询） |
 
@@ -29,7 +30,7 @@
 
 1. 准备
    - kandev 的 MCP 工具可能是延迟加载的：先用工具搜索（查询 "kandev automation"）加载 create_automation_kandev，以及可用的 automation 列表 / 更新 / 运行工具。只有实际调用报错才算不可用；报错时原样回报错误后停止。
-   - 读 {ARCH_ROOT}/docs/prompts.md 末尾「守护 automation」一节，取得 prompt 正文。把其中的 <arch_root> 全部替换为 {ARCH_ROOT}，<python> 全部替换为 {PYTHON}。正文里没有其他需要替换的占位。
+   - 读 {ARCH_ROOT}/docs/prompts.md 末尾「守护 automation」一节，取得 prompt 正文。把其中的 <arch_root> 全部替换为 {ARCH_ROOT}，<python> 全部替换为 {PYTHON}，再把 `kandev/kandev_ids.json` 替换为 `kandev/{IDS_FILE}`（每个 workspace 的守护读自己的 ids 文件）。正文里没有其他需要替换的占位。
 2. 查重
    - 列出本 workspace 的 automation。已有名称为「多Agent 守护」的 → 更新它，不要新建第二个。名称不同但 prompt 里运行 kandev/stage.py 的旧守护 → 在回报中列出，不要删除，由用户决定。
 3. 创建（或更新）
@@ -44,7 +45,7 @@
    - 任务复用（continuation policy 等）：选不会每次运行都留下一个新任务的方式（例如复用同一个任务，或不保留运行任务）。
    - 如果工具的参数名或可选值与上面不同，按工具 schema 选最接近的值，并在回报中逐项写明实际使用的值和理由。
 4. 验证（只读）
-   - 在当前会话运行一次：{PYTHON} {ARCH_ROOT}/kandev/stage.py --json
+   - 在当前会话运行一次：{PYTHON} {ARCH_ROOT}/kandev/stage.py --ids {ARCH_ROOT}/kandev/{IDS_FILE} --json
      期望：退出码 0；没有进行中的项目时标准输出为空（不带 --json 运行会打印「没有进行中的项目。」）。有输出时不要据此发消息或移动任务，这只是连通性检查。
      失败（例如连不上 http://localhost:38429/mcp、找不到 kandev_ids.json）→ 原样回报错误；automation 保留，但说明守护运行时会遇到同样的问题。
    - 如果有"立即运行一次"的工具：运行一次，确认 automation 的会话能执行这条命令、能访问 localhost:38429，并且没有发出任何消息（目前没有进行中的项目）。没有这个工具就跳过，并说明首次定时运行在什么时候。
