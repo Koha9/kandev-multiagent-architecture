@@ -1,4 +1,4 @@
-# 多 Agent 开发 Workflow（v3.2）
+# 多 Agent 开发 Workflow（v3.3）
 
 **中文** | [English](workflow.en.md)
 
@@ -7,6 +7,7 @@
 > - [workflow-diagrams.md](workflow-diagrams.md)：流程图（图为 v3.1，步骤以本文件的表格为准）
 > - [prompts.md](prompts.md)：各步骤 prompt 与配置，由脚本生成
 > - [mgmt-workspace.md](mgmt-workspace.md)：管理目录的构造
+> - [intake.md](intake.md)：启动项目的参数（`[TASK v1]` 头各字段、缺省值、提问方式），「接收」步骤的 agent 直接读它
 > - [project-conventions.md](project-conventions.md)：被开发项目一侧的约定（额度、副作用、约束清单、测试、截图、合并与推送）
 > - [../mgmt-template/](../mgmt-template/README.md)：文档模板、角色卡、消息协议
 > - [../kandev/](../kandev/README.md)：部署脚本
@@ -59,6 +60,7 @@
 
 | 角色（profiles.json 的键） | 用在哪里 | 模型建议 | 会话 |
 |---|---|---|---|
+| `intake`（可选，缺省 = mechanical） | W1 接收 | 轻量模型即可（例如 Sonnet）：只整理参数、提问，不做规划 | 每次新会话，完成即关闭 |
 | `pm` | W1 立项规划 / 模块下发 / 调度 / 刷新 | 强模型 | 长期存在；调度进入时重置上下文 |
 | `plan_auditor`（可选，缺省 = auditor） | W1 立项评审 | 上下文小、影响最大，适合最强模型；profile 必须与 pm 不同 | 每次新会话 |
 | `auditor` | W1 项目验收 | 强模型，profile 必须与 pm 不同 | 每次新会话 |
@@ -90,8 +92,8 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 | # | 步骤 | 角色 | 做什么 | 流转 |
 |---|---|---|---|---|
-| 0 | 待立项 | — | 停放 | 发消息 → 立项规划 |
-| 1 | **立项规划** | pm | 初始化管理目录；写 charter（需求 R-n 原文、模块清单（baseline 最先、结合测试模块最后）、模块边界 B-n、PA 及 covers）、conventions、ADR、attention；不写代码 | 完成信号 → 立项评审 |
+| 0 | **接收** | intake | 入口。任务描述已是完整的 `[TASK v1]` 头 → 原样放行；否则按 [intake.md](intake.md) 推导能推导的参数（仓库、基线分支、项目名、管理目录、模板路径），缺的向用户提问（每批最多 4 问，最多 3 批），把任务描述改写成 `[TASK v1]` 头 + 用户原文；不规划、不改仓库 | 完成信号 → 立项规划 |
+| 1 | 立项规划 | pm | 初始化管理目录；写 charter（需求 R-n 原文、模块清单（baseline 最先、结合测试模块最后）、模块边界 B-n、PA 及 covers）、conventions、ADR、attention；不写代码 | 完成信号 → 立项评审 |
 | 2 | 立项评审 | plan_auditor | 独立评审 charter：需求覆盖表（每条 R 一行）+ 第 1–6 项每项一行结论（含模块规模、模块边界覆盖、baseline 模块），写进任务文档 `charter-review` | 退回 → 立项规划（≤2 次）；第 3 次仍有阻塞问题 → 写进 charter-review，立项确认（不论 mode）；通过：plan_only 或 attended → 立项确认，unattended → 模块下发 |
 | 3 | 立项确认 | 人（会话绑定 pm） | 门禁（attended 或 plan_only） | 拖到模块下发 = 批准；在 pm 会话发消息 = 带意见回到立项规划 |
 | 4 | 模块下发 | pm | 按状态，不按进入次数：先创建还没建的模块（建 `mod/baseline` 分支，baseline 最先，契约为脚本中的固定文本；其余模块 blocked_by baseline，从 `mod/baseline` 或所依赖的模块分支切出；结合测试模块最后）；再把待修复项和终审意见按指针下发为修复模块任务；都没有才是无事可做 | 完成信号 → 调度 |
@@ -190,7 +192,11 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 部署步骤见 [kandev/README.md](../kandev/README.md)，让 agent 代为部署和验收见 [AGENTS.md](../AGENTS.md)。
 
-启动项目：在「多Agent · 项目管理」新建任务，选好仓库，描述写成下面的格式，然后选择 Start task。
+启动项目：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。
+
+描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数（运行模式、是否先看计划、是否做结合测试等）向你提问，然后把描述改写成下面的格式交给 pm。字段、缺省值和提问方式见 [intake.md](intake.md)。
+
+已经按下面的格式写好完整描述时（例如由 agent 按 [AGENTS.md](../AGENTS.md) C 节创建的任务），「接收」不改、不提问，直接进入立项规划。
 
 ```
 [TASK v1]
@@ -247,6 +253,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - d. 多会话任务里不带 session_id 的消息投给当前步骤的会话；同一任务上的多个移动按发出顺序执行。退路：发消息时带 registry 登记的 session_id，守护的告警兜底。
 - e. 所有 worktree 共享本地的 `mod/*` 分支。退路：改为推送到一个本地 bare 远端。
 - f. 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达。退路：`agents/guard/stage.md` 会显示这些状态，由用户手动操作。
+- g. 「接收」步骤的 agent 能用 `update_task_kandev` 改写自己任务的描述，且之后「立项规划」的 `{{task_prompt}}` 取到的是新描述。退路：接收步骤把新描述同时写进任务文档 `intake`，pm 在描述没有 `[TASK v1]` 头时重新读任务、再读这个章节；改写失败时接收步骤在回复里给出全文，由用户粘贴到任务描述后把任务拖到「立项规划」。
 
 ## 13. 已否决的设计
 
@@ -266,6 +273,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 | 开发分支经 PR 合入模块分支 | `mod/*` 只存在于本地，baseline 默认禁用推送，PR 走不通；PR 合并也不会唤醒模块 agent | 合并步骤通过门禁后本地快进；PR 只在「收尾合并」可选 |
 | 用 Kandev 的 pull_from_step 把任务从「待开发」拉进「开发」 | 不确定拉取时是否检查 blocked_by；放行条件（前置已合入）由模块 agent 判断更明确 | 模块 agent 移动 |
 | 开发等待模块回答时移到不计 WIP 的「等待回答」步骤 | 回答通过 message_task 开启新一轮，在无 agent 步骤里的行为没有验证 | 暂不采用 |
+| 启动项目时由用户手写完整的 `[TASK v1]` 头 | 十几行参数里多数可以推导或有缺省值，手写容易出错，门槛高 | 「接收」步骤：轻量模型推导、提问、改写描述；写好的原样放行 |
 | 守护用 LLM 读信号做判断 | 不可重复、难测试 | `stage.py` 规则表 + 回归测试 |
 | 每个项目单独创建一个守护 automation | 每次启动项目都要手动配置，项目结束还要清理 | 每个 workspace 一个守护，从 pm 任务的 `[TASK v1]` 头自己发现项目 |
 | 从对话正文或报告自由文本推断"是否在等人" | 需要结构化事实 | 只用 Kandev 状态、待处理的提问和权限请求 |

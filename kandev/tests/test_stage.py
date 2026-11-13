@@ -134,6 +134,10 @@ def test_steps_v32():
     cases = [
         ("项目管理", "环境基线", idle, "等人：空闲未推进"),      # v3.1 旧 workflow 中的任务仍要能分类
         ("项目管理", "模块下发", idle, "等人：空闲未推进"),
+        ("项目管理", "接收", idle, "等人：空闲未推进"),          # v3.3 入口：描述还没有 [TASK v1] 头，不告警
+        ("项目管理", "接收", [], "排队"),
+        ("项目管理", "接收", [{"state": "FAILED", "updated_at": "2026-11-09T04:00:00Z"}], "等人：接收会话失败"),
+        ("项目管理", "接收", [{"state": "RUNNING", "updated_at": "2026-11-09T04:00:00Z"}], "等人：接收疑似卡住"),
         ("项目管理", "调度", idle, "常驻"),
         ("项目管理", "人工终审", idle, "等人：人工终审"),
         ("项目管理", "某个未来的步骤", idle, "运行中"),            # 不认识的步骤名不报错
@@ -149,9 +153,13 @@ def test_steps_v32():
         t = task(i, wf, step, "")
         t["sessions"] = [dict(s) for s in sessions]
         tasks.append(t)
-    rows, _, _ = evaluate(tasks, now, {}, uid(1))
+    rows, alerts, _ = evaluate(tasks, now, {}, uid(1))
     for (wf, step, _, want), r in zip(cases, rows):
         assert r["category"].startswith(want), (wf, step, r["category"], want)
+    assert not any(a["step"] == "接收" for a in alerts), alerts          # 「接收」没有上级，任何情况都不告警
+    from stage import header_field
+    assert header_field("[TASK v1]\nmgmt_root:\nmode: attended", "mgmt_root") == ""   # 空值不取下一行
+    assert header_field("[TASK v1]\nmgmt_root: D:/x \nmode: attended", "mgmt_root") == "D:/x"
 
 
 def test_pm_unresponsive():

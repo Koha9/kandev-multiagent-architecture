@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_workflows import DEFAULT_URL, W1_NAME, W2_NAME, W3_NAME, Kandev  # noqa: E402
+from build_workflows import ARCH_PLACEHOLDER, DEFAULT_URL, W1_NAME, W2_NAME, W3_NAME, Kandev, arch_root  # noqa: E402
 
 FILES = {W1_NAME: ("W1-project.json", "W1"), W2_NAME: ("W2-module.json", "W2"), W3_NAME: ("W3-dev.json", "W3")}
 # Same names as the placeholders in docs/prompts.md (build_workflows.py dump)
@@ -23,6 +23,8 @@ def placeholders(ids):
     ws = ids.get("_meta", {}).get("workspace_id")
     if ws:
         out[ws] = "<WORKSPACE_ID>"
+    # 「接收」步骤的 prompt 里写入了本仓库的绝对路径（正斜杠）
+    out[ids.get("_meta", {}).get("arch_root") or arch_root()] = ARCH_PLACEHOLDER
     for wname, info in ids.items():
         if wname.startswith("_") or wname not in FILES:
             continue

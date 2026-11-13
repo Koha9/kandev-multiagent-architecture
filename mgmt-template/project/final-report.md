@@ -7,7 +7,7 @@
 -->
 
 ## 第 N 轮 · YYYY-MM-DD HH:MM
-- workflow 版本：<例如 v3.2>
+- workflow 版本：<例如 v3.3>
 - 集成分支：`integration` @ <commit>（从 <基线分支> @ <commit> 切出）
 - 合并的模块分支：mod/baseline @ <commit> → <合并提交>，mod/<模块> @ <commit> → <合并提交>，...
 - 合并冲突：无 | <冲突文件与处理>

@@ -117,7 +117,7 @@ Legend: 🟩 entry　🟦 normal exit　🟥 exception exit　🟨 loop decision
 
 | Entry | Trigger | Where it lands |
 |---|---|---|
-| Project entry | The user creates a pm task (Start task; or leave it in Not started (「待立项」) and start it later by sending a message) | W1 Project planning (立项规划) |
+| Project entry | The user creates a pm task (Start task; from v3.3 it first passes through Intake (「接收」), which completes the `[TASK v1]` header) | W1 Intake (接收) → Project planning (立项规划) |
 | Module entry | The pm calls `create_task_kandev`; with dependencies, `blocked_by` unblocks it automatically once the prerequisite module is done | W2 Module planning (模块规划) |
 | Subtask entry | The module agent calls `create_task_kandev` (autopilot, `base_branch=mod/<module>`); tasks with prerequisites are created in Queued (「待开发」) with `start_agent=false` | W3 Develop (开发) / Queued (待开发) |
 | (Optional) external entry | GitHub Issue Watch imports issues as tasks | W1 or W2 |

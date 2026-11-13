@@ -217,7 +217,7 @@ ID 规则：
 
 ## 9. 初始化顺序
 
-1. **用户**：在 Kandev 创建项目管理任务，任务描述写 `[TASK v1]` 头（含 `mgmt_root`、`mgmt_template`、`repo`）。
+1. **用户**：在 Kandev 创建项目管理任务，描述里写需求；「接收」步骤补全 `[TASK v1]` 头（含 `mgmt_root`、`mgmt_template`、`repo`，见 [intake.md](intake.md)），已写好完整头的原样放行。
 2. **PM（立项规划）**：发现 `mgmt_root` 不存在 → 从 `mgmt-template/` 整体复制 → 回填 registry.json 中的常量和自己的 task id。
 3. **PM（模块下发）**：建 `mod/baseline` 分支，先创建 baseline 模块任务；每创建一个模块任务，就在 registry.json 里加一个条目。
 4. **模块 agent（模块规划）**：复制 `agents/_template/` → `agents/mod-<模块>/`，复制 `modules/_template/` → `modules/<模块>/`。

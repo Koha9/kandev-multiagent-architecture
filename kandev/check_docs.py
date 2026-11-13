@@ -10,6 +10,7 @@
   7. check_tasks.py（tasks.json 契约检查）的测试通过
   8. check_owns.py（改动范围检查）的测试通过
   9. mgmt_precommit.py（管理目录钩子）的测试通过
+ 10. prompt 中引用的 <ARCH_ROOT>/... 文件在本仓库中存在；docs/intake.md 列出了 [TASK v1] 头的每个字段
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
 """
 import contextlib
@@ -113,6 +114,29 @@ def check_template_refs():
     return problems
 
 
+TASK_FIELDS = ("project", "mode", "plan_only", "integration_test", "mgmt_root", "mgmt_template", "repo",
+               "role", "scope", "parent", "pm", "branch")
+
+
+def check_arch_refs():
+    problems, seen = [], set()
+    for wf in bw.all_workflows():
+        for s in wf["steps"]:
+            for ref in re.findall(re.escape(bw.ARCH_PLACEHOLDER) + r"/([\w./-]+)", s.get("prompt", ""), re.ASCII):
+                ref = ref.rstrip(".")
+                if ref not in seen and not os.path.exists(os.path.join(ROOT, ref)):
+                    problems.append(f"prompt 引用 {bw.ARCH_PLACEHOLDER}/{ref}，本仓库中不存在")
+                seen.add(ref)
+    if not seen:
+        problems.append("「接收」步骤的 prompt 没有引用参数说明文档")
+    path = os.path.join(ROOT, "docs", "intake.md")
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    missing = [f for f in TASK_FIELDS if f"`{f}`" not in text]
+    if missing:
+        problems.append(f"docs/intake.md 没有说明这些 [TASK v1] 字段：{missing}")
+    return problems
+
+
 def check_version():
     first = open(os.path.join(ROOT, "docs", "workflow.md"), encoding="utf-8").readline()
     return [] if f"（{bw.VERSION}）" in first else [f"docs/workflow.md 标题版本与 VERSION={bw.VERSION} 不一致：{first.strip()}"]
@@ -147,7 +171,8 @@ def main():
     checks = [("prompts.md", check_prompts), ("链接", check_links), ("步骤名", check_steps),
               ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test),
               ("check_tasks 测试", check_tasks_test),
-              ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test)]
+              ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
+              ("接收文档", check_arch_refs)]
     failed = 0
     for name, fn in checks:
         problems = fn()

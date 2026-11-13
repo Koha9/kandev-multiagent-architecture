@@ -217,7 +217,7 @@ Ownership of development tasks is not in the registry; it is recorded in the cor
 
 ## 9. Initialization order
 
-1. **The user**: creates the project management task in Kandev, with the `[TASK v1]` header in the task description (including `mgmt_root`, `mgmt_template`, `repo`).
+1. **The user**: creates the project management task in Kandev and writes the requirements in the description; the Intake step (「接收」) completes the `[TASK v1]` header (including `mgmt_root`, `mgmt_template`, `repo`; see [intake.md](intake.md), Chinese), and a description that already has a complete header passes through unchanged.
 2. **PM (Project planning (立项规划))**: finds that `mgmt_root` does not exist → copies all of `mgmt-template/` → fills in the constants in registry.json and its own task id.
 3. **PM (Module dispatch (模块下发))**: creates the `mod/baseline` branch and the baseline module task first; adds an entry to registry.json for every module task it creates.
 4. **Module agent (Module planning (模块规划))**: copies `agents/_template/` → `agents/mod-<module>/`, and `modules/_template/` → `modules/<module>/`.

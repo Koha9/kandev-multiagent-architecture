@@ -2,7 +2,7 @@
 
 [中文](README.md) | **English**
 
-A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.2.
+A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.3.
 
 > Chinese is the primary language of this repository. The English docs cover the human-facing parts; the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), the role cards and templates, and the research reports are in Chinese. The Kandev workflow and step names are Chinese too, so the English docs give each step's Chinese name next to its English one.
 
@@ -53,7 +53,7 @@ The full research and comparisons are in [reports/](reports/) and [research_note
   - `pm`, and `auditor` (different from pm)
   - `developer`, and `reviewer` (different from developer, ideally from another vendor)
   - `mechanical` (runs the merge gate; a coding model)
-- Optional: `plan_auditor` (plan review, the strongest model; defaults to auditor), `module` (defaults to pm), `module_auditor` (different from module; defaults to auditor)
+- Optional: `plan_auditor` (plan review, the strongest model; defaults to auditor), `module` (defaults to pm), `module_auditor` (different from module; defaults to auditor), `intake` (the Intake entry step; a light model is enough; defaults to mechanical)
 
 ### Option 1: hand it to an agent (recommended)
 
@@ -92,7 +92,7 @@ and tell me the total duration, how many times review sent work back, how many g
 
 1. Follow [kandev/README.en.md](kandev/README.en.md): fill in `kandev/profiles.local.json`, then run `check_docs.py`, `build_workflows.py apply` and `verify_export.py`.
 2. Create the guard automation following [kandev/handoff/guard-automation.md](kandev/handoff/guard-automation.md) (Chinese).
-3. Create a task in `多Agent · 项目管理` (the W1 project management workflow) using the `[TASK v1]` template from the "Deployment and startup" section of [docs/workflow.en.md](docs/workflow.en.md), then click Start task.
+3. Create a task in `多Agent · 项目管理` (the W1 project management workflow), select the repository, write your requirements in the description, then click Start task. The task starts in the Intake step (「接收」): it derives the repository, branch, management directory and similar parameters, asks you for the rest (run mode, whether to stop after planning, ...), then hands over to the pm. To skip the questions, write the complete description using the `[TASK v1]` template from the "Deployment and launch" section of [docs/workflow.en.md](docs/workflow.en.md); parameters and defaults are described in [docs/intake.md](docs/intake.md) (Chinese).
 
 To see what the workflows look like first: [kandev/export/](kandev/export/README.en.md) has the three workflows exported from a real deployment.
 

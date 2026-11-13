@@ -117,7 +117,7 @@ flowchart TD
 
 | 入口 | 触发方式 | 进入位置 |
 |---|---|---|
-| 项目入口 | 用户新建 pm 任务（Start task；或放在「待立项」，之后发消息启动） | W1 立项规划 |
+| 项目入口 | 用户新建 pm 任务（Start task；v3.3 起先经过「接收」补全 `[TASK v1]` 头） | W1 接收 → 立项规划 |
 | 模块入口 | pm 调用 `create_task_kandev`；有依赖时，前置模块完成后由 `blocked_by` 自动解除阻塞 | W2 模块规划 |
 | 子任务入口 | 模块 agent 调用 `create_task_kandev`（autopilot，`base_branch=mod/<模块>`）；有前置的以 `start_agent=false` 建到「待开发」 | W3 开发 / 待开发 |
 | （可选）外部入口 | GitHub Issue Watch 把 issue 导入为任务 | W1 或 W2 |

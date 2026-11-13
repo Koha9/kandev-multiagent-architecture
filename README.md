@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.2。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3。
 
 ## 简介
 
@@ -47,7 +47,7 @@
 
 - 本机运行着 Kandev，外部 MCP 可用（默认 `http://localhost:38429/mcp`）。
 - Python 3（脚本只用标准库）。
-- 5 个必填 agent profile：`pm`、`auditor`（与 pm 不同）、`developer`、`reviewer`（与 developer 不同，最好换厂商）、`mechanical`（合并门禁，编码模型）。可选 `plan_auditor`（立项评审，最强模型，缺省 = auditor）、`module`（缺省 = pm）、`module_auditor`（与 module 不同，缺省 = auditor）。
+- 5 个必填 agent profile：`pm`、`auditor`（与 pm 不同）、`developer`、`reviewer`（与 developer 不同，最好换厂商）、`mechanical`（合并门禁，编码模型）。可选 `plan_auditor`（立项评审，最强模型，缺省 = auditor）、`module`（缺省 = pm）、`module_auditor`（与 module 不同，缺省 = auditor）、`intake`（入口的「接收」步骤，轻量模型即可，缺省 = mechanical）。
 
 ### 方式一：交给 agent（推荐）
 
@@ -86,7 +86,7 @@
 
 1. 按 [kandev/README.md](kandev/README.md) 填写 `kandev/profiles.local.json`，运行 `check_docs.py`、`build_workflows.py apply`、`verify_export.py`。
 2. 按 [kandev/handoff/guard-automation.md](kandev/handoff/guard-automation.md) 创建守护 automation。
-3. 在「多Agent · 项目管理」新建任务，描述用 [docs/workflow.md](docs/workflow.md)「部署与启动」中的 `[TASK v1]` 模板，然后 Start task。
+3. 在「多Agent · 项目管理」新建任务，选好仓库，描述里写需求，然后 Start task。任务从「接收」步骤开始：它会推导仓库、分支、管理目录等参数，缺的（运行模式、是否先看计划等）向你提问，再交给 pm。想跳过提问，可以按 [docs/workflow.md](docs/workflow.md)「部署与启动」的 `[TASK v1]` 模板写好完整描述；各参数的含义和缺省值见 [docs/intake.md](docs/intake.md)。
 
 想先看看 workflow 长什么样：[kandev/export/](kandev/export/README.md) 是从实际部署导出的三套 workflow。
 

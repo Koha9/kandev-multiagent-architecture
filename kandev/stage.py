@@ -26,6 +26,9 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
   2 等人      有待处理的权限请求                         → 只写进 stage.md，不发告警
   3 等人      有待处理的提问（ask_user_question）        → 同上
   4 等人      步骤=立项确认 / 人工终审                    → 同上
+              W1「接收」（v3.3）中的任务还没有 [TASK v1] 头（mgmt_root 为空）：按项目列出，不写 stage.md；
+              在等用户回答时归第 3 条，空闲未推进时归第 9 条的例外（只给人看）；会话失败或疑似卡住也只给人看
+              （这一步没有上级，接收会话也不认识 KMSG），归为"等人：接收会话失败 / 接收疑似卡住"
   4a 等上限   最新会话停在用量上限，已过重置时间 2 分钟   → 恢复该任务自己 limit_resume（不告警上级）
   4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
   5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
@@ -65,11 +68,11 @@ sys.path.insert(0, HERE)
 
 GATES = {"立项确认", "人工终审"}
 RESIDENT = {"调度", "等待开发"}
-HOLD, DECISION, DONE = "待开发", "等待决策", "完成"
+HOLD, DECISION, DONE, INTAKE = "待开发", "等待决策", "完成", "接收"
 # v3.2 删除了 W1 的「环境基线」；仍在 v3.1 旧 workflow 里运行的项目可能有任务停在这一步，按要求完成信号的步骤处理。
 # 步骤名只用于分类，不认识的步骤名落到"运行中"，不会报错。
 LEGACY_SIGNAL_STEPS = {"环境基线"}
-SIGNAL_STEPS = {"立项规划", "立项评审", "模块下发", "项目验收", "收尾合并",
+SIGNAL_STEPS = {"接收", "立项规划", "立项评审", "模块下发", "项目验收", "收尾合并",
                 "模块规划", "验收调查", "开发", "审核", "合并"} | LEGACY_SIGNAL_STEPS
 AGENT_STEPS = SIGNAL_STEPS | RESIDENT | {"刷新"}
 IDLE_STATES = {"WAITING_FOR_INPUT", "IDLE", "COMPLETED"}
@@ -99,7 +102,7 @@ def ts(s):
 
 
 def header_field(desc, name):
-    m = re.search(rf"^{name}:\s*(.+)$", desc or "", re.M)
+    m = re.search(rf"^{name}:[ \t]*(.+)$", desc or "", re.M)   # 值为空时不跨行取下一行
     return m.group(1).strip() if m else ""
 
 
@@ -206,6 +209,10 @@ def classify(t, now, by_id):
         if reset is None or now >= reset + timedelta(minutes=T_LIMIT_MARGIN):
             return r("等上限：已重置，待恢复", "limit_resume", shown, "-")
         return r("等上限：等待重置", value=shown)
+    if step == INTAKE and s0 and s0.get("state") in ("FAILED", "CANCELLED"):
+        return r("等人：接收会话失败", value=s0["state"])
+    if step == INTAKE and s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
+        return r("等人：接收疑似卡住", value=idle)
     if step == DECISION:
         return r("等上级：等待决策", "decision_pending" if in_step >= T_DECISION else None, in_step, T_DECISION)
     if s0 and s0.get("state") in ("FAILED", "CANCELLED"):

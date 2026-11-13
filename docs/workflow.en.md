@@ -1,4 +1,4 @@
-# Multi-Agent Development Workflow (v3.2)
+# Multi-Agent Development Workflow (v3.3)
 
 [中文](workflow.md) | **English**
 
@@ -59,6 +59,7 @@ Project management task (W1, root task, 1)
 
 | Role (key in profiles.json) | Used in | Suggested model | Session |
 |---|---|---|---|
+| `intake` (optional, defaults to mechanical) | W1 Intake (接收) | A light model is enough (e.g. Sonnet): it only fills in parameters and asks questions, no planning | New session every time, closed on completion |
 | `pm` | W1 Project planning (立项规划) / Module dispatch (模块下发) / Coordination (调度) / Refresh (刷新) | Strong model | Long-lived; Coordination resets context on entry |
 | `plan_auditor` (optional, defaults to auditor) | W1 Plan review (立项评审) | Small context, biggest impact: the strongest model fits; the profile must differ from pm | New session every time |
 | `auditor` | W1 Project acceptance (项目验收) | Strong model; the profile must differ from pm | New session every time |
@@ -90,8 +91,8 @@ The user only needs to watch two places: `project/attention.md` (things the user
 
 | # | Step | Role | What it does | Transition |
 |---|---|---|---|---|
-| 0 | Not started (待立项) | — | Parking | Send a message → Project planning |
-| 1 | **Project planning (立项规划)** | pm | Initialize the management directory; write the charter (verbatim requirements R-n, module list with baseline first and the integration-test module last, module boundaries B-n, PAs and their covers), conventions, ADRs, attention; no code | Completion signal → Plan review |
+| 0 | **Intake (接收)** | intake | Entry point. A description that already is a complete `[TASK v1]` header passes through unchanged; otherwise, following [intake.md](intake.md) (Chinese), derive what can be derived (repository, baseline branch, project name, management directory, template path), ask the user for the rest (at most 4 questions per batch, at most 3 batches), and rewrite the task description as a `[TASK v1]` header + the user's original text; no planning, no repository changes | Completion signal → Project planning |
+| 1 | Project planning (立项规划) | pm | Initialize the management directory; write the charter (verbatim requirements R-n, module list with baseline first and the integration-test module last, module boundaries B-n, PAs and their covers), conventions, ADRs, attention; no code | Completion signal → Plan review |
 | 2 | Plan review (立项评审) | plan_auditor | Independently review the charter: requirement coverage table (one row per R) + one verdict line for each of checks 1–6 (including module size, boundary coverage and the baseline module), written to the task doc `charter-review` | Send back → Project planning (≤2 times); still blocking on the 3rd review → recorded in charter-review, Plan approval (regardless of mode); pass: plan_only or attended → Plan approval, unattended → Module dispatch |
 | 3 | Plan approval (立项确认) | human (session bound to pm) | Gate (attended or plan_only) | Drag to Module dispatch = approve; send a message in the pm session = back to Project planning with comments |
 | 4 | Module dispatch (模块下发) | pm | Driven by state, not by entry count: first create the modules not yet created (create the `mod/baseline` branch; baseline first, its contract is fixed text in the script; the others blocked_by baseline, branching off `mod/baseline` or the module they depend on; the integration-test module last); then dispatch items to fix and final-review comments as fix-module tasks by pointer; only when neither exists is there nothing to do | Completion signal → Coordination |
@@ -188,7 +189,11 @@ The architecture only defines **who, at which step, and how** project convention
 
 For deployment steps see [kandev/README.en.md](../kandev/README.en.md); to have an agent deploy and verify for you, see [AGENTS.md](../AGENTS.md) (Chinese).
 
-To launch a project: create a task in 「多Agent · 项目管理」 (W1 Project management), select the repository, write the description in the format below, then choose Start task.
+To launch a project: create a task in 「多Agent · 项目管理」 (W1 Project management), select the repository and baseline branch, write the requirements in the description, then choose Start task.
+
+The description may contain only the requirements (mention any parameter you care about in a sentence, e.g. "run unattended", "plan only first"). The task starts in Intake (「接收」): it derives the repository path, baseline branch, project name, management directory and template path, asks you for the remaining parameters (run mode, whether to stop after planning, whether to run integration tests, ...), then rewrites the description into the format below for the pm. Fields, defaults and questions are in [intake.md](intake.md) (Chinese).
+
+If the description is already complete in the format below (for example a task created by an agent following section C of [AGENTS.md](../AGENTS.md)), Intake changes nothing, asks nothing, and goes straight to Project planning.
 
 ```
 [TASK v1]
@@ -245,6 +250,7 @@ The design relies on the following behaviors, which have not yet been tested on 
 - d. In a task with several sessions, a message without session_id goes to the current step's session, and multiple moves on the same task run in the order sent. Fallback: send messages with the session_id recorded in the registry; the guard's alerts are the safety net.
 - e. All worktrees share the local `mod/*` branches. Fallback: push to a local bare remote instead.
 - f. Continuing after a usage limit, and moving out and back after a session failure, actually recover; the instructions attached when the guard moves a task are delivered. Fallback: `agents/guard/stage.md` shows these states, and the user acts manually.
+- g. The Intake agent can rewrite its own task's description with `update_task_kandev`, and `{{task_prompt}}` in Project planning then resolves to the new description. Fallback: Intake also writes the new description to the task doc `intake`; when the description has no `[TASK v1]` header the pm re-reads the task, then that section; if the rewrite fails, Intake prints the full text and the user pastes it into the task description and drags the task to Project planning.
 
 ## 13. Rejected designs
 
@@ -264,6 +270,7 @@ Approaches that were tried or evaluated and then abandoned, with the reasons, so
 | Merge development branches into the module branch through PRs | `mod/*` exists only locally and the baseline disables pushing by default, so PRs cannot work; a PR merge does not wake the module agent either | The Merge step fast-forwards locally after the gate; PR is optional only in Final merge |
 | Use Kandev's pull_from_step to pull tasks from Queued into Develop | Unclear whether blocked_by is checked when pulling; the release condition (prerequisites merged) is clearer when decided by the module agent | The module agent moves them |
 | Move Develop to a WIP-free "等待回答" (Awaiting answer) step while waiting for the module's answer | The answer starts a new turn via message_task, and its behavior in a step with no agent has not been verified | Not adopted for now |
+| The user hand-writes the complete `[TASK v1]` header to launch a project | Most of the dozen parameters can be derived or have defaults; hand-writing is error-prone and a high barrier | The Intake step (「接收」): a light model derives, asks, and rewrites the description; a complete header passes through unchanged |
 | Have the guard use an LLM to read signals and decide | Not reproducible, hard to test | `stage.py` rule table + regression tests |
 | Create a separate guard automation for each project | Requires manual configuration every time a project starts, and cleanup when it ends | One guard per workspace, which discovers projects on its own from the pm task's `[TASK v1]` header |
 | Infer "is it waiting on a human" from conversation text or free-text reports | Needs structured facts | Use only Kandev state, pending questions and permission requests |
