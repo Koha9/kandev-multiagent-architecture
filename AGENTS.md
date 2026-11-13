@@ -44,8 +44,8 @@
 
    把你的选择列成表交给用户确认，然后写进 `kandev/profiles.local.json`（格式见 `kandev/profiles.example.json`）。缺合适的 profile 时，告诉用户需要新建什么样的 profile，不要自己创建。
 3. **检查同名 workflow**：`list_workflows_kandev` 中已有「多Agent · 项目管理 / 模块管理 / 开发」时：
-   - description 里带同一版本号（例如 `[v3.3]`）：直接 `apply` 只会同步 prompt 和 profile。
-   - 其他版本：要加 `--retire-existing`（旧版改名为"<名称> (<旧版本号>)"，例如"(v3.2)"，任务保留）。先征得用户同意。
+   - description 里的版本号属于同一系列（major.minor 相同，例如 `[v3.3]` 和 `[v3.3.1]`）：直接 `apply` 就地更新 prompt、profile、description 和步骤结构（顺序、事件、开关），步骤 ID 和任务不变。workspace 里有进行中的项目时先征得用户同意。
+   - 其他系列：要加 `--retire-existing`（旧版改名为"<名称> (<旧版本号>)"，例如"(v3.2)"，任务保留）。先征得用户同意。
    - 同一台机器部署到多个 workspace 时，每个 workspace 用自己的 ids 文件：`apply --ids-out kandev_ids.<workspace 前 8 位>.json`，该 workspace 的守护用 `stage.py --ids` 指向它（这些文件不提交）。
 4. **部署**（在 `kandev/` 下）：
    ```
@@ -65,8 +65,9 @@
 
 1. **自检**：`python kandev/check_docs.py` 全部 OK；`python kandev/tests/test_stage.py` 输出 `OK test_stage`。
 2. **结构**：`python kandev/verify_export.py` 的输出中：
-   - W1 有 11 个步骤（0 接收 … 9 完成、10 刷新，没有「待立项」「环境基线」），「接收」start=True、on_enter 是 auto_start_agent、on_turn_complete 是 move_to_next，「立项规划」start=False；接收、立项评审、项目验收、收尾合并的会话策略是 `new/complete`；`5 调度` 的 on_enter 是 reset_agent_context + auto_start_agent；`3 立项确认` 的 on_turn_start 是 `move_to_step {'step_position': 1}`，`7 人工终审` 的是 `move_to_step {'step_position': 4}`。
-   - W2 有 5 个步骤，「等待开发」的事件含 reset_agent_context + auto_start_agent 和 `on_children_completed: move_to_next`；「验收调查」的会话策略是 `new/complete`。
+   - W1 有 11 个步骤（0 接收 … 9 刷新、10 完成，没有「待立项」「环境基线」）；`8 收尾合并` 的 on_turn_complete 是 `move_to_step {'step_position': 10}`，「接收」start=True、on_enter 是 auto_start_agent、on_turn_complete 是 move_to_next，「立项规划」start=False；接收、立项评审、项目验收、收尾合并的会话策略是 `new/complete`；`5 调度` 的 on_enter 是 reset_agent_context + auto_start_agent；`3 立项确认` 的 on_turn_start 是 `move_to_step {'step_position': 1}`，`7 人工终审` 的是 `move_to_step {'step_position': 4}`。
+   - W2 有 5 个步骤（`3 刷新`、`4 完成`），「等待开发」的事件含 reset_agent_context + auto_start_agent 和 `on_children_completed: move_to_next`；「验收调查」的会话策略是 `new/complete`，on_turn_complete 是 `move_to_step {'step_position': 4}`。
+   - 三套 workflow 都是：最后一个步骤是「完成」且 `done=True`，其他步骤 `done=False`（Kandev 只对最后一个步骤执行 complete_task_on_enter；不满足时模块任务不会变成 COMPLETED，依赖它的模块不启动）。
    - W3：`0 待开发`（无 prompt、无事件、wip=0）、`1 开发`（start=True，wip=4）、`2 审核` 的 on_turn_complete 是 `move_to_step {'step_position': 4}`、`4 合并` 的 on_turn_complete 是 `move_to_step {'step_position': 5}`（没有 on_pr_merged）。
    - 所有 agent 步骤的 profile 是第 A2 步确认的那几个模型，不是 `-`（接收 = intake，立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
    - `kandev/export/W1-project.json` 的「接收」prompt 中出现 `<ARCH_ROOT>/docs/intake.md`（部署的 prompt 里是本仓库的绝对路径，导出时被替换回占位符）；这个路径在运行 Kandev 的机器上存在。

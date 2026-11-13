@@ -2,7 +2,7 @@
 
 [中文](README.md) | **English**
 
-A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.3.
+A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.3.1.
 
 > Chinese is the primary language of this repository. The English docs cover the human-facing parts; the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), the role cards and templates, and the research reports are in Chinese. The Kandev workflow and step names are Chinese too, so the English docs give each step's Chinese name next to its English one.
 

@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3.1。
 
 ## 简介
 

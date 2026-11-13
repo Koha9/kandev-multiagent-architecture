@@ -1,4 +1,4 @@
-# Multi-Agent Development Workflow (v3.3)
+# Multi-Agent Development Workflow (v3.3.1)
 
 [中文](workflow.md) | **English**
 
@@ -100,8 +100,8 @@ The user only needs to watch two places: `project/attention.md` (things the user
 | 6 | Project acceptance (项目验收) | auditor | Create or update the integration branch (cut from the baseline branch), merge all module branches, run the full tests and the integration tests, verify the PAs, check each R one by one; write the final-report (including quota usage, how to run the final review, things the user needs to handle, temporary resources); failures and merge conflicts written as fix items | No fail, or still failing on the 3rd entry (listed under things the user needs to handle) → Final human review; any fail → Module dispatch |
 | 7 | Final human review (人工终审) | human (session bound to pm) | Gate | **Drag to Final merge = approve**; send a message in the pm session = back to Module dispatch with comments |
 | 8 | Final merge (收尾合并) | mechanical | Merge the integration branch into the baseline branch, run smoke tests, clean up temporary resources, restore the recorded push URLs, set status to done | Completion signal → Done |
-| 9 | Done (完成) | — | Task complete | — |
-| 10 | Refresh (刷新) | pm | After resetting context, move back to the original step (`刷新返回：` in the move instructions first, then NOW) | The agent moves itself |
+| 9 | Refresh (刷新) | pm | After resetting context, move back to the original step (`刷新返回：` in the move instructions first, then NOW) | The agent moves itself |
+| 10 | Done (完成) | — | Task complete (Kandev state becomes COMPLETED). Must be the last step | — |
 
 ## 5. W2 Module management
 
@@ -110,8 +110,8 @@ The user only needs to watch two places: `project/attention.md` (things the user
 | 0 | **Module planning (模块规划)** | module | Write spec (MAs and their covers, covering the contract's acceptance points and related B-n) / interfaces (implementing the B-n this module provides) / tasks.json (each task with `tests` and `boundaries`); run `tools/check_tasks.py`; create development subtasks with self-contained contracts: those without prerequisites go to Develop (「开发」), those with prerequisites go to Queued (「待开发」) | Completion signal → Waiting on development |
 | 1 | Waiting on development (等待开发) | module | Long-running, routing only: answer subtask questions; handle tasks in Awaiting decision (「等待决策」) and merge-gate escalations (move back to Develop with instructions, move to Done, or split); update tasks.json when a REPORT arrives and release Queued tasks whose prerequisites are merged; create fix subtasks from the auditor's fix items | All subtasks in a terminal state (on_children_completed) → Acceptance check. The module agent moves there itself only in two cases: it entered with an acceptance send-back and no subtask is left non-terminal, or after handling a pm DECISION all are terminal with none held |
 | 2 | Acceptance check (验收调查) | module_auditor | Independent module auditor (new session): check subtask status first (tasks marked failed / dropped in tasks.json are not a problem); coverage check; run module tests and judge each MA (known issues accepted by the pm are unverified); write this round in acceptance.md with fix items. Fix modules check only the fix items | Pass → REPORT to the pm, Done; any fail → Waiting on development (round 3, or other modules involved: ESCALATE to the pm first) |
-| 3 | Done (完成) | — | | |
-| 4 | Refresh (刷新) | module | After resetting context, move back to the original step (instructions first, then NOW); if all subtasks are already in a terminal state, go straight to Acceptance check | The agent moves itself |
+| 3 | Refresh (刷新) | module | After resetting context, move back to the original step (instructions first, then NOW); if all subtasks are already in a terminal state, go straight to Acceptance check | The agent moves itself |
+| 4 | Done (完成) | — | Module complete (Kandev state becomes COMPLETED, so modules that depend on it start). Must be the last step | — |
 
 The auditor does not write tasks.json (single writer): on a send-back the module agent writes `passes` back from acceptance.md; once acceptance passes the module ends, and the last round of acceptance.md is authoritative.
 

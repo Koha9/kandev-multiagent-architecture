@@ -1,4 +1,4 @@
-# 多 Agent 开发 Workflow（v3.3）
+# 多 Agent 开发 Workflow（v3.3.1）
 
 **中文** | [English](workflow.en.md)
 
@@ -101,8 +101,8 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 | 6 | 项目验收 | auditor | 建立或更新集成分支（从基线分支切出），合并全部模块分支，运行全量测试和结合测试，验证 PA，逐条核对 R；写 final-report（含额度用量、终审运行方式、需要用户处理、临时资源）；fail 和合并冲突写成修复项 | 没有 fail，或第 3 次仍有 fail（列入需要用户处理）→ 人工终审；有 fail → 模块下发 |
 | 7 | 人工终审 | 人（会话绑定 pm） | 门禁 | **拖到收尾合并 = 批准**；在 pm 会话发消息 = 带意见回到模块下发 |
 | 8 | 收尾合并 | mechanical | 集成分支合入基线分支、跑冒烟测试、清理临时资源、按记录恢复推送地址、把 status 设为 done | 完成信号 → 完成 |
-| 9 | 完成 | — | 任务完成 | — |
-| 10 | 刷新 | pm | 重置上下文后，移回原步骤（移动 instructions 中的 `刷新返回：` 优先，其次 NOW） | agent 自己移动 |
+| 9 | 刷新 | pm | 重置上下文后，移回原步骤（移动 instructions 中的 `刷新返回：` 优先，其次 NOW） | agent 自己移动 |
+| 10 | 完成 | — | 任务完成（Kandev 状态变为 COMPLETED）。必须是最后一个步骤 | — |
 
 ## 5. W2 模块管理
 
@@ -111,8 +111,8 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 | 0 | **模块规划** | module | 写 spec（MA 及 covers，覆盖契约的验收要点和相关 B-n）/ interfaces（落实本模块提供的 B-n）/ tasks.json（每个任务带 `tests`、`boundaries`）；运行 `tools/check_tasks.py`；创建自包含契约的开发子任务：无前置的进「开发」，有前置的进「待开发」 | 完成信号 → 等待开发 |
 | 1 | 等待开发 | module | 常驻、只做路由：回答子任务提问；处理「等待决策」中的任务和合并门禁升级（移回「开发」并带 instructions、移到「完成」或拆分）；REPORT 到达时更新 tasks.json，放行前置已合入的「待开发」任务；按验收者的修复项建修复子任务 | 子任务全部终态（on_children_completed）→ 验收调查。模块 agent 只在两种情况下自己移过去：带验收退回的说明进入、处理后没有非终态子任务；或处理完 pm 的 DECISION 后全部终态、没有 held |
 | 2 | 验收调查 | module_auditor | 独立的模块验收者（新会话）：先查子任务状态（tasks.json 标了 failed / dropped 的不算问题）；覆盖核对；跑模块测试，逐条判定 MA（pm 已接受的已知问题记 unverified）；写 acceptance.md 本轮一节和修复项。修复模块只核对修复项 | 通过 → REPORT 给 pm，完成；有 fail → 等待开发（第 3 轮或涉及其他模块时先 ESCALATE 给 pm） |
-| 3 | 完成 | — | | |
-| 4 | 刷新 | module | 重置上下文后移回原步骤（instructions 优先，其次 NOW）；如果子任务已全部终态，直接去验收调查 | agent 自己移动 |
+| 3 | 刷新 | module | 重置上下文后移回原步骤（instructions 优先，其次 NOW）；如果子任务已全部终态，直接去验收调查 | agent 自己移动 |
+| 4 | 完成 | — | 模块完成（Kandev 状态变为 COMPLETED，依赖它的模块随之启动）。必须是最后一个步骤 | — |
 
 验收者不写 tasks.json（单写者）：退回时模块 agent 按 acceptance.md 回写 `passes`；验收通过后模块随即结束，以 acceptance.md 最后一轮为准。
 
@@ -237,6 +237,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - 外部 MCP 没有 `message_task_kandev`，也不能创建 automation。外部的守护或观察者只能移动任务、代答提问和权限请求。需要这些能力的工作写成交接 prompt（`kandev/handoff/`），交给 Kandev 内部的 agent 执行。
 - `on_children_completed` 只在任务处于「等待开发」时生效。刷新步骤会检查子任务状态，补上这个缺口。
 - 会话里的上下文用量 Kandev 有记录，但 MCP 读不到，所以守护只能看间接信号。
+- Kandev 只在步骤没有后继步骤时才执行 `complete_task_on_enter`（任务状态变为 COMPLETED），而模块之间的 blocked_by 只在前置任务 COMPLETED 时解除。所以每个 workflow 的「完成」都排在最后，「刷新」在它前面；进入「完成」的事件用 `move_to_step` 指定位置，不用 `move_to_next`。`build_workflows.py` 和 `check_docs.py` 会检查这条约束。在设置里保存这个选项不会回头处理已经停在「完成」里的任务：v3.3 上已经进入「完成」但状态不是 COMPLETED 的模块任务，要手动把状态改成 COMPLETED，依赖它的模块才会启动。
 - 导出的 workflow 文件只按 model / mode 记录 profile。同模型的 profile 有多个时可能匹配错，所以部署用 `build_workflows.py`，它按 ID 绑定。
 - 门禁中的用户消息投递给用户所在的会话标签，而不是下一步骤的会话；由用户消息触发的移动也不一定会把下一步的步骤 prompt 送达。所以：门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的）；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】）；评审会话万一收到，就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。如果 pm 仍没有开始工作，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
 - 「待开发」依赖两点 Kandev 行为，部署后要先验证（见 [AGENTS.md](../AGENTS.md)「验收部署」）：`create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在该步骤、不启动会话；从无 agent 步骤移到「开发」会触发 on_enter 的 auto_start。
@@ -282,5 +283,6 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 | pm 自己做环境基线（W1「环境基线」步骤） | pm 要写代码，骨架和脚本没有审核和验收，pm 的上下文里堆满环境细节 | baseline 模块走 W2 + W3，经审核、合并门禁和模块验收 |
 | 模块 agent 自己验收自己的模块 | 规划者验收自己的规划，容易只核对自己写下的 MA，漏掉契约要点和模块边界；常驻上下文也越积越多 | 「验收调查」由独立的模块验收者（module_auditor，新会话）做，先做覆盖核对 |
 | 模块 agent 逐个合并子任务分支 | 常驻会话要读 diff、跑测试、处理冲突，上下文膨胀，也成为串行瓶颈 | 合并步骤自己跑合并门禁并快进合入，模块 agent 只更新 tasks.json |
+| W1、W2 的「刷新」排在「完成」后面（v3.3 及以前） | Kandev 只对最后一个步骤执行 complete_task_on_enter：模块任务进了「完成」但状态停在 REVIEW，依赖它的模块（blocked_by）不启动，项目停住（实测） | 「完成」排在最后，「验收调查」「收尾合并」用 move_to_step 进入 |
 | 小项目变体：去掉 W2，pm 直接创建开发子任务 | prompt 里没有这条路径，pm 也不持有模块内部的知识；为它单独维护一套流程不划算 | 模块少也走 W2；模块可以只有一两个任务 |
 | 结合测试模块自己修复缺陷 | 它不持有其他模块的知识，修复时要读别的模块内部，违反知识边界 | 缺陷写明担当模块，经 pm 交给担当模块的修复模块任务 |

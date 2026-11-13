@@ -11,6 +11,7 @@
   8. check_owns.py（改动范围检查）的测试通过
   9. mgmt_precommit.py（管理目录钩子）的测试通过
  10. prompt 中引用的 <ARCH_ROOT>/... 文件在本仓库中存在；docs/intake.md 列出了 [TASK v1] 头的每个字段
+ 11. 步骤结构：「完成」（complete_task_on_enter）是每个 workflow 的最后一个步骤，move_to_next 不进入「刷新」
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
 """
 import contextlib
@@ -137,6 +138,10 @@ def check_arch_refs():
     return problems
 
 
+def check_structure():
+    return [p for wf in bw.all_workflows() for p in bw.structure_problems(wf)]
+
+
 def check_version():
     first = open(os.path.join(ROOT, "docs", "workflow.md"), encoding="utf-8").readline()
     return [] if f"（{bw.VERSION}）" in first else [f"docs/workflow.md 标题版本与 VERSION={bw.VERSION} 不一致：{first.strip()}"]
@@ -172,7 +177,7 @@ def main():
               ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test),
               ("check_tasks 测试", check_tasks_test),
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
-              ("接收文档", check_arch_refs)]
+              ("接收文档", check_arch_refs), ("步骤结构", check_structure)]
     failed = 0
     for name, fn in checks:
         problems = fn()

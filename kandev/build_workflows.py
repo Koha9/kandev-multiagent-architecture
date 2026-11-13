@@ -1,4 +1,4 @@
-"""Multi-agent workflow v3.3 for Kandev — single source of truth for structure and prompts.
+"""Multi-agent workflow v3.3.1 for Kandev — single source of truth for structure and prompts.
 
 Builds three workflows (项目管理 / 模块管理 / 开发) in any Kandev workspace through the external MCP
 endpoint, binds step profiles by ID, and can dump all prompts + step config to Markdown.
@@ -6,8 +6,9 @@ endpoint, binds step profiles by ID, and can dump all prompts + step config to M
 Usage:
   python build_workflows.py apply  --workspace <id> --profiles profiles.json [--retire-existing] [--url URL]
   python build_workflows.py dump   --out ../docs/prompts.md
-Re-running apply on workflows of the same VERSION only re-syncs prompts and profiles (structure is left as is).
-Workflows of another version (description lacks "[VERSION]") need --retire-existing: they are renamed
+Re-running apply on workflows of the same series (same major.minor, e.g. v3.3 and v3.3.1) updates them in place:
+prompts, profiles, description and step structure (order, events, flags); step IDs and resident tasks are kept.
+Workflows of another series need --retire-existing: they are renamed
 "<name> (<old version>)", e.g. "(v3.1)"; "(旧)" when the old description carries no version.
 With several workspaces, pass --ids-out so each workspace keeps its own ids file (the guard reads it via --ids).
 
@@ -27,7 +28,7 @@ import re
 import sys
 import urllib.request
 
-VERSION = "v3.3"
+VERSION = "v3.3.1"
 DEFAULT_URL = "http://localhost:38429/mcp"
 HDR = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
@@ -406,12 +407,14 @@ kind: integration（结合测试模块，其他模块全部完成后才启动）
              signal=True, role="module", note="创建开发子任务（base_branch=mod/<模块>，autopilot）"),
         step("等待开发", 1, "bg-neutral-400", wait, events={"on_enter": RESET_AUTO, "on_children_completed": NEXT},
              role="module", note="常驻，只做路由；进入时重置上下文；子任务全部终态 → 验收调查"),
-        step("验收调查", 2, "bg-cyan-500", accept, events={"on_enter": RESET_AUTO, "on_turn_complete": NEXT},
+        step("验收调查", 2, "bg-cyan-500", accept, events={"on_enter": RESET_AUTO, "on_turn_complete": to(4)},
              signal=True, start_policy="new", end_policy="complete", role="module_auditor",
              note="独立的模块验收者（新会话）；有 fail 时写修复项退回等待开发"),
-        step("完成", 3, "bg-green-500", complete_on_enter=True, panel=False),
-        step("刷新", 4, "bg-neutral-400", refresh, events={"on_enter": RESET_AUTO}, role="module",
+        # 「完成」必须是最后一个步骤：Kandev 只在没有后继步骤时才执行 complete_task_on_enter，
+        # 任务不变成 COMPLETED，依赖它的模块（blocked_by）就不会启动。所以「刷新」排在它前面。
+        step("刷新", 3, "bg-neutral-400", refresh, events={"on_enter": RESET_AUTO}, role="module",
              note="中转：重置上下文后移回 instructions / NOW 记录的步骤"),
+        step("完成", 4, "bg-green-500", complete_on_enter=True, panel=False),
     ]
     desc = (f"[{VERSION}] 多 agent 模块管理：模块规划（拆分并创建「多Agent · 开发」子任务）→ 等待开发（常驻路由）"
             "→ 验收调查（独立的模块验收者）→ 上报 pm；「刷新」为常驻会话的中转步骤。任务由「多Agent · 项目管理」创建，描述须含 [TASK v1] 头。")
@@ -574,12 +577,13 @@ def w1(w2_id, w2_plan_step, arch=ARCH_PLACEHOLDER):
         step("人工终审", 7, "bg-yellow-500", events={"on_turn_start": to(4)}, role="pm",
              note="人工门禁；绑定 pm profile，让门禁中的当前会话是 pm 的（验收会话随之关闭）；"
                   "拖到收尾合并 = 批准；发消息 = 带意见回到模块下发"),
-        step("收尾合并", 8, "bg-orange-500", final_merge, events={"on_enter": AUTO, "on_turn_complete": NEXT},
+        step("收尾合并", 8, "bg-orange-500", final_merge, events={"on_enter": AUTO, "on_turn_complete": to(10)},
              signal=True, start_policy="new", end_policy="complete", role="mechanical",
              note="集成分支合入基线、冒烟、清理临时资源、恢复推送地址"),
-        step("完成", 9, "bg-green-500", complete_on_enter=True, panel=False),
-        step("刷新", 10, "bg-neutral-400", refresh, events={"on_enter": RESET_AUTO}, role="pm",
+        # 「完成」必须是最后一个步骤（原因见 W2），「刷新」排在它前面。
+        step("刷新", 9, "bg-neutral-400", refresh, events={"on_enter": RESET_AUTO}, role="pm",
              note="中转：重置上下文后移回 instructions / NOW 记录的步骤"),
+        step("完成", 10, "bg-green-500", complete_on_enter=True, panel=False),
     ]
     desc = (f"[{VERSION}] 多 agent 项目管理（pm 长期任务）：接收（整理任务描述）→ 立项规划 → 立项评审（独立）→ [立项确认] → 模块下发"
             "（创建「多Agent · 模块管理」任务，baseline 模块最先）→ 调度（常驻路由）→ 项目验收（独立）→ 人工终审 → 收尾合并 → 完成；"
@@ -627,18 +631,30 @@ def find_workflow(k, ws, name):
     return next((w for w in k.call("list_workflows_kandev", {"workspace_id": ws})["workflows"] if w["name"] == name), None)
 
 
+def series(version):
+    """v3.3.1 -> v3.3：同一系列（major.minor 相同）的 workflow 可以就地更新。"""
+    return ".".join(version.split(".")[:2])
+
+
+def desc_version(desc):
+    m = re.search(r"\[(v[\d.]+)\]", desc or "")
+    return m.group(1) if m else None
+
+
 def import_one(k, ws, wf, retire):
     existing = find_workflow(k, ws, wf["name"])
-    if existing and f"[{VERSION}]" not in (existing.get("description") or ""):
+    old_ver = desc_version(existing.get("description")) if existing else None
+    if existing and not (old_ver and series(old_ver) == series(VERSION)):
         if not retire:
-            raise SystemExit(f"'{wf['name']}' exists but is not {VERSION}; rerun with --retire-existing to rename it.")
-        m = re.search(r"\[(v[\d.]+)\]", existing.get("description") or "")
-        old = f"{wf['name']} ({m.group(1) if m else '旧'})"   # 带旧版本号，避免与更早的"(旧)"重名
+            raise SystemExit(f"'{wf['name']}' exists but is not {series(VERSION)}.x; rerun with --retire-existing to rename it.")
+        old = f"{wf['name']} ({old_ver or '旧'})"   # 带旧版本号，避免与更早的"(旧)"重名
         k.call("update_workflow_kandev", {"workflow_id": existing["id"], "name": old})
         print(f"retired: {wf['name']} -> {old}")
         existing = None
     if existing:
-        print("exists, reuse:", wf["name"])
+        print(f"exists ({old_ver}), update in place:", wf["name"])
+        if existing.get("description") != wf["description"]:
+            k.call("update_workflow_kandev", {"workflow_id": existing["id"], "description": wf["description"]})
         return existing["id"], list_steps(k, existing["id"])
     doc = {"type": "kandev_workflow", "version": 2, "workflows": [clean(wf)]}
     res = k.call("import_workflow_kandev", {"workspace_id": ws, "document": json.dumps(doc, ensure_ascii=False)})
@@ -659,6 +675,69 @@ def bind(k, wf, steps_by_name, profiles, sync_prompts=False):
             print("updated", wf["name"], s["name"], "profile=" + str(s["_role"]), "prompt" if "prompt" in args else "")
 
 
+STRUCT_FIELDS = ("events", "complete_task_on_enter", "auto_advance_requires_signal", "is_start_step",
+                 "profile_session_start_policy", "profile_session_end_policy", "show_in_command_panel", "wip_limit")
+
+
+def fetch_steps(k, wid):
+    steps = k.call("list_workflow_steps_kandev", {"workflow_id": wid})
+    steps = steps.get("steps", steps) if isinstance(steps, dict) else steps
+    return sorted(steps, key=lambda s: s["position"])
+
+
+def structure_problems(wf):
+    """脚本内的结构约束：complete_task_on_enter 的步骤必须是最后一个（否则 Kandev 不执行它），
+    move_to_next 不能把任务送进「刷新」，move_to_step 的目标位置必须存在。"""
+    steps = sorted(wf["steps"], key=lambda s: s["position"])
+    by_pos = {s["position"]: s for s in steps}
+    problems = []
+    if [s["position"] for s in steps] != list(range(len(steps))):
+        problems.append(f"{wf['name']}: position 不是从 0 连续编号")
+    for s in steps:
+        if s["complete_task_on_enter"] and s is not steps[-1]:
+            problems.append(f"{wf['name']}「{s['name']}」设了 complete_task_on_enter 但不是最后一个步骤")
+        for ev, actions in s["events"].items():
+            for a in actions:
+                if a["type"] == "move_to_next" and by_pos.get(s["position"] + 1, {}).get("name") in (None, "刷新"):
+                    problems.append(f"{wf['name']}「{s['name']}」{ev}: move_to_next 的下一步不存在或是「刷新」")
+                if a["type"] == "move_to_step" and a["config"]["step_position"] not in by_pos:
+                    problems.append(f"{wf['name']}「{s['name']}」{ev}: move_to_step 的位置不存在")
+    if not steps[-1]["complete_task_on_enter"]:
+        problems.append(f"{wf['name']}: 最后一个步骤「{steps[-1]['name']}」没有设 complete_task_on_enter")
+    return problems
+
+
+def sync_structure(k, wf, wid):
+    """把已部署 workflow 的步骤顺序和结构字段改成脚本里的样子（步骤 ID 和步骤里的任务不变）。
+    只发送有差异的字段；新导入的 workflow 上没有差异，相当于一次核对。"""
+    want = sorted(wf["steps"], key=lambda s: s["position"])
+    cur = {s["name"]: s for s in fetch_steps(k, wid)}
+    if set(cur) != {s["name"] for s in want}:
+        raise SystemExit(f"'{wf['name']}': deployed steps {sorted(cur)} differ from the script; "
+                         "cannot update in place, retire it and import again.")
+    # Kandev 存的 move_to_step 目标是步骤 ID（导入时由 step_position 换算），就地更新时要自己换算
+    id_at = {s["position"]: cur[s["name"]]["id"] for s in want}
+    want = [{**s, "events": {ev: [{"type": a["type"], "config": {"step_id": id_at[a["config"]["step_position"]]}}
+                                  if a["type"] == "move_to_step" else a for a in actions]
+                             for ev, actions in s["events"].items()}} for s in want]
+    for s in want:
+        c = cur[s["name"]]
+        diff = {f: s.get(f, 0 if f == "wip_limit" else None) for f in STRUCT_FIELDS
+                if (c.get(f) or None) != (s.get(f) or None)}
+        if diff:
+            k.call("update_workflow_step_kandev", {"step_id": c["id"], **diff})
+            print("structure", wf["name"], s["name"], sorted(diff))
+    order = [cur[s["name"]]["id"] for s in want]
+    if [c["id"] for c in sorted(cur.values(), key=lambda c: c["position"])] != order:
+        k.call("reorder_workflow_steps_kandev", {"workflow_id": wid, "step_ids": order})
+        print("reordered", wf["name"], [s["name"] for s in want])
+    after = fetch_steps(k, wid)
+    bad = [f"{c['name']}.{f}" for c, s in zip(after, want) for f in STRUCT_FIELDS
+           if c["name"] != s["name"] or (c.get(f) or None) != (s.get(f) or None)]
+    if [c["name"] for c in after] != [s["name"] for s in want] or bad:
+        raise SystemExit(f"'{wf['name']}': structure still differs after sync: {[c['name'] for c in after]} {bad}")
+
+
 def all_workflows(ids=None, arch=ARCH_PLACEHOLDER):
     ids = ids or {}
     w3_id, w3_dev, w3_hold = ids.get("w3", ("<W3_ID>", "<W3_DEV_STEP_ID>", "<W3_HOLD_STEP_ID>"))
@@ -674,16 +753,22 @@ def cmd_apply(a):
             raise SystemExit(f"profiles.json missing roles: {sorted(missing)}")
         for role, fallback in OPTIONAL_ROLES.items():
             profiles.setdefault(role, profiles[fallback])
+    problems = [p for wf in all_workflows() for p in structure_problems(wf)]
+    if problems:
+        raise SystemExit("\n".join(problems))
     k = Kandev(a.url)
     out = {}
     wf3 = w3()
     id3, st3 = import_one(k, a.workspace, wf3, a.retire_existing)
+    sync_structure(k, wf3, id3)
     bind(k, wf3, st3, profiles, sync_prompts=True)
     wf2 = w2(id3, st3["开发"], st3["待开发"])
     id2, st2 = import_one(k, a.workspace, wf2, a.retire_existing)
+    sync_structure(k, wf2, id2)
     bind(k, wf2, st2, profiles, sync_prompts=True)
     wf1 = w1(id2, st2["模块规划"], arch_root())
     id1, st1 = import_one(k, a.workspace, wf1, a.retire_existing)
+    sync_structure(k, wf1, id1)
     bind(k, wf1, st1, profiles, sync_prompts=True)
     for name, wid, st in ((W1_NAME, id1, st1), (W2_NAME, id2, st2), (W3_NAME, id3, st3)):
         out[name] = {"workflow_id": wid, "steps": st}
