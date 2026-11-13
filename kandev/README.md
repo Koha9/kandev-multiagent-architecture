@@ -41,7 +41,7 @@ python verify_export.py
 - `apply` 按 W3 → W2 → W1 的顺序导入（后者的 prompt 里要写入前者的步骤 ID），先不带 profile 导入，再按 ID 逐步绑定 profile，最后写出 `kandev_ids.json`。
 - **已有同名 workflow**：
   - 同一版本：再次运行 `apply` 只同步 prompt 和 profile，不改结构。
-  - 其他版本：加 `--retire-existing`，旧版会被改名为"<名称> (旧)"，任务都保留，然后导入新版。旧版上进行中的项目会在旧 workflow 上跑完。
+  - 其他版本：加 `--retire-existing`，旧版会被改名为"<名称> (<旧版本号>)"（例如"(v3.1)"），任务都保留，然后导入新版。旧版上进行中的项目会在旧 workflow 上跑完。
 - **改 prompt 之后**：`python build_workflows.py dump --out ../docs/prompts.md`，再跑一次 `check_docs.py`。
 - 部署后按 [AGENTS.md](../AGENTS.md)「验收部署」核对。
 

@@ -9,6 +9,8 @@ __pycache__/
 # 每台机器各自维护 / 生成的 Kandev 配置（见 kandev/README.md）
 kandev/profiles.local.json
 kandev/kandev_ids.json
+kandev/profiles.*.local.json
+kandev/kandev_ids.*.json
 kandev/guard_state/
 
 # 填好本机取值的文档副本（公开版本用占位符，例如 guard-automation.local.md）

@@ -43,7 +43,8 @@
    把你的选择列成表交给用户确认，然后写进 `kandev/profiles.local.json`（格式见 `kandev/profiles.example.json`）。缺合适的 profile 时，告诉用户需要新建什么样的 profile，不要自己创建。
 3. **检查同名 workflow**：`list_workflows_kandev` 中已有「多Agent · 项目管理 / 模块管理 / 开发」时：
    - description 里带同一版本号（例如 `[v3.2]`）：直接 `apply` 只会同步 prompt 和 profile。
-   - 其他版本：要加 `--retire-existing`（旧版改名为"(旧)"，任务保留）。先征得用户同意。
+   - 其他版本：要加 `--retire-existing`（旧版改名为"<名称> (<旧版本号>)"，例如"(v3.1)"，任务保留）。先征得用户同意。
+   - 同一台机器部署到多个 workspace 时，每个 workspace 用自己的 ids 文件：`apply --ids-out kandev_ids.<workspace 前 8 位>.json`，该 workspace 的守护用 `stage.py --ids` 指向它（这些文件不提交）。
 4. **部署**（在 `kandev/` 下）：
    ```
    python check_docs.py

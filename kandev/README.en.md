@@ -41,7 +41,7 @@ python verify_export.py
 - `apply` imports in the order W3 → W2 → W1 (each later workflow's prompts embed the step IDs of the earlier one). It first imports without profiles, then binds profiles step by step by ID, and finally writes out `kandev_ids.json`.
 - **Workflows with the same name already exist**:
   - Same version: running `apply` again only syncs prompts and profiles; the structure is not changed.
-  - Other version: add `--retire-existing`. The old version is renamed to "<name> (旧)" ("(old)"), all its tasks are kept, and then the new version is imported. Projects in progress on the old version finish on the old workflow.
+  - Other version: add `--retire-existing`. The old version is renamed to "<name> (<old version>)", e.g. "(v3.1)", all its tasks are kept, and then the new version is imported. Projects in progress on the old version finish on the old workflow.
 - **After changing prompts**: `python build_workflows.py dump --out ../docs/prompts.md`, then run `check_docs.py` again.
 - After deploying, check it against "Verify the deployment" (验收部署, section B) in [AGENTS.md](../AGENTS.md).
 

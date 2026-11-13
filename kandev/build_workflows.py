@@ -7,7 +7,9 @@ Usage:
   python build_workflows.py apply  --workspace <id> --profiles profiles.json [--retire-existing] [--url URL]
   python build_workflows.py dump   --out ../docs/prompts.md
 Re-running apply on workflows of the same VERSION only re-syncs prompts and profiles (structure is left as is).
-Workflows of another version (description lacks "[VERSION]") need --retire-existing: they are renamed "(旧)".
+Workflows of another version (description lacks "[VERSION]") need --retire-existing: they are renamed
+"<name> (<old version>)", e.g. "(v3.1)"; "(旧)" when the old description carries no version.
+With several workspaces, pass --ids-out so each workspace keeps its own ids file (the guard reads it via --ids).
 
 profiles.json maps roles to Kandev agent profile IDs (see profiles.example.json):
   required: {"pm": "...", "auditor": "...", "developer": "...", "reviewer": "...", "mechanical": "..."}
@@ -20,6 +22,7 @@ Workflows reference each other's step IDs in prompts, so the import order is W3 
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -591,7 +594,8 @@ def import_one(k, ws, wf, retire):
     if existing and f"[{VERSION}]" not in (existing.get("description") or ""):
         if not retire:
             raise SystemExit(f"'{wf['name']}' exists but is not {VERSION}; rerun with --retire-existing to rename it.")
-        old = f"{wf['name']} (旧)"
+        m = re.search(r"\[(v[\d.]+)\]", existing.get("description") or "")
+        old = f"{wf['name']} ({m.group(1) if m else '旧'})"   # 带旧版本号，避免与更早的"(旧)"重名
         k.call("update_workflow_kandev", {"workflow_id": existing["id"], "name": old})
         print(f"retired: {wf['name']} -> {old}")
         existing = None
