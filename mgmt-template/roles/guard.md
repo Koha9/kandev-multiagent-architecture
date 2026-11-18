@@ -21,6 +21,7 @@
 
 | # | 分类 | 条件 | 告警（信号 → 发给上级） |
 |---|---|---|---|
+| 0 | 等上级：完成未登记 | 开发任务在「完成」/ COMPLETED，但 tasks.json 中它的 status 不是 merged / dropped / failed（合并的 REPORT 没有送达），停留 ≥10 分钟，且模块任务在「等待开发 / 刷新 / 模块规划」。tasks.json 中查不到该任务时不告警；模块在其他步骤或已完成时只显示"完成（tasks.json 未登记）" | `child_unrecorded` |
 | 1 | 完成 | 步骤=完成，或任务 COMPLETED | — |
 | 2 | 等人：权限请求 | 有待处理的权限请求 | 不告警，只写进 stage.md |
 | 3 | 等人：提问 | 有待处理的用户提问 | 同上 |
@@ -30,6 +31,7 @@
 | 4b | 等上限：等待重置 | 最新会话停在用量上限，还没到重置时间 | 不告警，只写进 stage.md |
 | 5 | 等上级：等待决策 | 步骤=等待决策，停留 ≥10 分钟（开发任务上报 blocked / dropped / 缺陷后自己移到这里；不会再判为空闲未推进） | `decision_pending` |
 | 6 | 等上级：会话失败 | 最新会话 FAILED / CANCELLED | `session_failed` |
+| 6a | 等上级：会话未启动 | 任务 state=SCHEDULING、在 agent 步骤、没有运行中的会话、不是 WIP 排队，停留 ≥10 分钟（Kandev 准备会话失败后静默停在这里；排在第 9 条之前，避免上一步骤的空闲会话被判为空闲未推进）。W1 / W2 任务归为"等人：会话未启动"，只写进 stage.md | `session_not_started`（只对开发任务） |
 | 7 | 等上级：前置失败 | 步骤=待开发，前置有 failed（tasks.json）或 FAILED / CANCELLED（v3.1 的 Kandev 前置） | `hold_broken` |
 | 8 | 等上级：可放行 | 步骤=待开发，前置全部完成，停留 ≥10 分钟 | `hold_ready` |
 | 8a | 等上级：开发步骤前置未满足 | 步骤=开发，前置未满足、还没有会话，停留 ≥10 分钟（v3.2 不应出现，多见于 v3.1 任务；不再无声地归为排队） | `dev_blocked` |
@@ -42,6 +44,7 @@
 | 14 | 运行中 | 其他 | — |
 
 - **前置关系的来源**：v3.2 的「待开发」任务不在 Kandev 里设 blocked_by，前置只记在 `modules/<模块>/tasks.json`（含 `-fix-<n>` 修复模块）。任务 `blocked_by` 中每个任务 status 都是 `merged` / `dropped` 才算完成，有 `failed` 算失败；v3.1 任务在 Kandev 里设置的 blocked_by 仍然有效，两种来源任一表明未完成就不放行。读不到 tasks.json 时只剩 Kandev 来源，都没有就只在 stage.md 显示
+- `child_unrecorded`、`session_not_started`（v3.3.2 新增）的建议是完整的处理方法，旧版 prompt 的模块 agent 收到也能照做
 - 同一任务的同一信号 60 分钟内只告警一次（去重状态存在架构仓库的 `kandev/guard_state/<pm 任务 id>.json`，不在管理目录里）
 - pm 的告警发给 pm 自己；pm 停在常驻步骤（调度）时，同一信号 60 分钟后仍未消除 → `pm_unresponsive`，输出带 `return_step`（当前步骤名）。pm 在立项规划、模块下发、项目验收、收尾合并等其他步骤不升级为 `pm_unresponsive`（刷新默认回到「调度」，会跳过剩下的工作），到期后重发原信号
 - 管理目录还没初始化（没有 README.md，例如立项规划刚开始）时，不写 stage.md，以免干扰 pm 判断"管理目录是否存在"
@@ -59,7 +62,7 @@
 - 上次心跳在 60 分钟内，且当时有进行中的项目（防止新项目还没建 pm 任务时就停用）；
 - 三套 workflow 中没有未完成、且会话还在运行或停在用量上限的任务。
 
-FAILED / CANCELLED 的 pm 不算完成，项目仍在进行中，守护继续运行。停用后启动新项目时，在 Kandev 设置 → Automations 重新启用「多Agent 守护」。
+FAILED / CANCELLED 的 pm 不算完成，项目仍在进行中，守护继续运行。停用后启动新项目时，W1「接收」步骤会检查并重新启用「多Agent 守护」（做不到时在摘要第一行提醒用户到 Kandev 设置 → Automations 启用）；pm 在「调度」中发现 stage.md 超过 60 分钟没更新时登记 attention.md。
 
 ## 告警路由
 | 被告警对象 | 告警发给 | 建议 |

@@ -47,7 +47,98 @@ def main():
     test_w1_idle_and_decision()
     test_hold_from_tasks_json()
     test_load_blockers()
+    test_child_unrecorded()
+    test_session_not_started()
+    test_load_statuses()
+    test_suggest_complete()
     print("OK test_stage")
+
+
+def test_child_unrecorded():
+    """v3.3.2：开发任务已在「完成」但 tasks.json 没有登记（REPORT 没送达）→ 告警模块 agent，兜底放行。"""
+    now = ts("2026-11-09T05:00:00Z")
+
+    def run2(own, mod_step="等待开发", mod_state="IN_PROGRESS", state=None):
+        mod = task(11, "模块管理", mod_step, f"pm: task {uid(1)}", state=mod_state)
+        d = task(21, "开发", "完成", f"parent: mod:a @ task {uid(11)}", state="COMPLETED")
+        d["own_status"] = own
+        rows, first, st = evaluate([mod, d], now, state or {}, uid(1))
+        rows, second, st = evaluate([mod, d], now + timedelta(minutes=20), st, uid(1))
+        cat = {r["title"]: r["category"] for r in rows}["t21"]
+        return cat, [(a["signal"], a["to_task"]) for a in first + second], st
+
+    c, al, st = run2("todo")
+    assert c == "等上级：完成未登记" and al == [("child_unrecorded", uid(11))], (c, al)   # 第一次看到不告警，20 分钟后告警
+    for own in ("merged", "dropped", "failed"):
+        assert run2(own)[:2] == ("完成", []), own                                   # 已登记：正常完成
+    assert run2(None)[:2] == ("完成", [])                                            # tasks.json 中查不到：不告警
+    assert run2("")[0] == "等上级：完成未登记"                                        # 查到了但没有 status
+    for mod_step, mod_state in (("验收调查", "IN_PROGRESS"), ("完成", "COMPLETED")):
+        c, al, _ = run2("todo", mod_step, mod_state)
+        assert c == "完成（tasks.json 未登记）" and al == [], (mod_step, c, al)       # 模块不在能处理的步骤：只显示
+    # 60 分钟去重
+    mod = task(11, "模块管理", "等待开发", f"pm: task {uid(1)}")
+    d = task(21, "开发", "完成", f"parent: mod:a @ task {uid(11)}", state="COMPLETED")
+    d["own_status"] = "todo"
+    _, a1, st = evaluate([mod, d], now, {}, uid(1))
+    _, a2, st = evaluate([mod, d], now + timedelta(minutes=20), st, uid(1))
+    _, a3, st = evaluate([mod, d], now + timedelta(minutes=40), st, uid(1))
+    _, a4, st = evaluate([mod, d], now + timedelta(minutes=85), st, uid(1))
+    assert (len(a1), len(a2), len(a3), len(a4)) == (0, 1, 0, 1), (a1, a2, a3, a4)
+    # 旧的快照里「完成」的任务没有 own_status：仍是"完成"
+    assert run({}, "2026-11-09T05:00:00+00:00")[0]["core-01"] == "完成"
+
+
+def test_session_not_started():
+    """v3.3.2：进入步骤后 Kandev 没能启动会话、停在 SCHEDULING → 告警上级，且优先于 idle_no_signal。"""
+    now = ts("2026-11-09T05:00:00Z")
+    old_dev = [{"state": "COMPLETED", "updated_at": "2026-11-09T03:00:00Z"}]   # 上一步骤（开发）留下的会话
+
+    def run2(step, state="SCHEDULING", sessions=old_dev, wf="开发", wip=None):
+        t = task(21, wf, step, f"parent: mod:a @ task {uid(11)}", state=state)
+        t["sessions"] = [dict(s) for s in sessions]
+        if wip is not None:
+            t["wip_step"], t["wip_admitted"] = True, wip
+        rows, first, st = evaluate([t], now, {}, uid(1))
+        rows, second, st = evaluate([t], now + timedelta(minutes=15), st, uid(1))
+        return rows[0]["category"], [(a["signal"], a["to_task"]) for a in first + second]
+
+    assert run2("审核") == ("等上级：会话未启动", [("session_not_started", uid(11))])
+    assert run2("合并", sessions=[]) == ("等上级：会话未启动", [("session_not_started", uid(11))])
+    assert run2("审核", state="IN_PROGRESS")[1] == [("idle_no_signal", uid(11))]     # 不是 SCHEDULING：原规则
+    assert run2("审核", sessions=[{"state": "RUNNING", "updated_at": "2026-11-09T04:59:00Z"}])[1] == []   # 会话在跑
+    assert run2("开发", wip=False, sessions=[]) == ("排队", [])                      # WIP 排队不算
+    c, al = run2("验收调查", wf="模块管理")
+    assert c == "等人：会话未启动" and al == [], (c, al)                             # W2 / W1：只给人看
+    assert run2("待开发", sessions=[])[0].startswith("待开发")                       # 不是 agent 步骤
+
+
+def test_load_statuses():
+    import tempfile
+    from stage import load_statuses
+    with tempfile.TemporaryDirectory() as root:
+        def put(mod, text):
+            os.makedirs(os.path.join(root, "modules", mod))
+            with open(os.path.join(root, "modules", mod, "tasks.json"), "w", encoding="utf-8") as f:
+                f.write(text)
+        put("auth", json.dumps({"tasks": [{"id": "a-1", "kandev_task_id": "K1", "status": "merged"},
+                                          {"id": "a-2", "kandev_task_id": "K2"},
+                                          {"id": "a-3", "status": "todo"}]}))
+        put("broken", "{坏的")
+        put("weird", json.dumps({"tasks": ["不是对象"]}))
+        put("_template", json.dumps({"tasks": [{"id": "x", "kandev_task_id": "KX", "status": "todo"}]}))
+        assert load_statuses(root) == {"K1": "merged", "K2": ""}, load_statuses(root)
+        assert load_statuses(os.path.join(root, "nope")) == {}
+
+
+def test_suggest_complete():
+    """每个可能发出的信号都有建议（evaluate 用 SUGGEST[...] 取值，缺了会 KeyError）。"""
+    import inspect
+    import re
+    import stage
+    src = inspect.getsource(stage.classify)                       # classify 产生的信号都要在 SUGGEST 里
+    signals = set(re.findall(r'"([a-z_]+)" if ', src)) | set(re.findall(r'r\("[^"]+", "([a-z_]+)"', src))
+    assert signals and signals <= set(stage.SUGGEST), signals - set(stage.SUGGEST)
 
 
 def test_parse_reset():

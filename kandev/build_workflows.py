@@ -1,4 +1,4 @@
-"""Multi-agent workflow v3.3.1 for Kandev — single source of truth for structure and prompts.
+"""Multi-agent workflow v3.3.2 for Kandev — single source of truth for structure and prompts.
 
 Builds three workflows (项目管理 / 模块管理 / 开发) in any Kandev workspace through the external MCP
 endpoint, binds step profiles by ID, and can dump all prompts + step config to Markdown.
@@ -28,7 +28,7 @@ import re
 import sys
 import urllib.request
 
-VERSION = "v3.3.1"
+VERSION = "v3.3.2"
 DEFAULT_URL = "http://localhost:38429/mcp"
 HDR = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
@@ -81,10 +81,17 @@ class Kandev:
 
 
 # ================================================================== shared prompt parts
-KANDEV_NOTE = "【Kandev 工具】*_kandev 工具可能延迟加载：先用工具搜索（查询 \"kandev\"）加载并实际调用一次，报错才算不可用，并原样写出错误。"
+KANDEV_NOTE = (
+    "【Kandev 工具】*_kandev 工具可能延迟加载：先用工具搜索（查询 \"kandev\"）加载并实际调用一次，报错才算不可用，并原样写出错误。\n"
+    "【工具报错】先对照本 prompt 写明的参数改正后重试一次；报错给出的修法与本 prompt 一致才采用；"
+    "不得删掉 prompt 或契约要求的参数来消除报错；仍失败 → 停下，原样写出错误，不调用 step_complete_kandev（本步骤另有写明的除外）。\n"
+    "【发消息】message_task_kandev 的参数：task_id=接收方任务的 UUID，prompt=消息全文（KMSG v1），回复某个会话时另加 session_id。"
+    "\"self\" 只能用作 create_task_kandev 的 parent_id，不能当 task_id；上级的 UUID 是 [TASK v1] 头 parent 行中 `task ` 后面的那一段。"
+    "调用没有返回错误才算已发出；重试沿用同一个 KMSG id，并在头部加 `resend: 1`。"
+)
 SIGNAL_NOTE = (
     "【推进信号】只有全部要求都已完成并落盘（NOW/now、文档、commit）之后，才把 step_complete_kandev 作为最后一个动作调用；"
-    "被中断、未完成或在等待回答时不调用。"
+    "被中断、未完成或在等待回答时不调用。summary 和 handoff 只写已经确认成功的动作，失败或没有确认的照实写。"
 )
 STORE_RULE = (
     "【任务文档】now、report、review、charter-review 是任务计划中的章节 `## task-doc: <名称>`：get_task_plan_kandev 读全文和版本，"
@@ -232,6 +239,25 @@ def fix_module_task(w2_id, w2_plan_step):
             "base=集成分支，还不存在时为担当模块的当前分支（registry.json 的 current_branch），由修复模块规划时用 git 建立；登记到 registry.json 和 status.json。")
 
 
+def child_task_spec(w3_id, w3_dev_step, w3_hold_step):
+    """建开发子任务的完整参数：W2「模块规划」第 5 步和「等待开发」的验收退回、拆分共用（原文内联，
+    「等待开发」进入时重置上下文，看不到「模块规划」的 prompt）。返回最终文本：{task_id} 由 Kandev 替换。"""
+    return (
+        "【建子任务】逐个任务，先写后做，幂等键=任务 id：tasks.json 中该任务 status=creating → create_task_kandev（"
+        f"parent_id=\"self\"，workspace_mode=\"new_workspace\"，base_branch=\"mod/<模块>\"，autopilot=true，start_agent=false，"
+        f"workflow_id=\"{w3_id}\"，workflow_step_id=\"{w3_hold_step}\"（「待开发」，一律先建在这里），external_id=<任务 id>，"
+        "title=<任务 id> <简称>，不传 blocked_by（前置只记在 tasks.json），prompt=[TASK v1] 头（role=developer，scope=dev:<任务id>，"
+        "parent=mod:<模块> @ task {task_id}，mgmt_root 同本任务，branch=<自动> base mod/<模块>）+ 开发契约）→ 回填 kandev_task_id。"
+        "这些参数一个都不能省：报错时按【工具报错】处理，不得删掉其中任何一个来消除报错。\n"
+        "   读回核对：list_tasks_kandev 读出该任务，确认它停在「待开发」且没有会话；工作区模式（应为 new_workspace）、autopilot（应为 true）、"
+        "base 分支（应为 mod/<模块>）的字段存在且值不同 → 不一致；字段不存在 → 在 NOW 记 unverified（缺哪个字段）后照常继续。\n"
+        f"   - 一致：没有前置 → move_task_kandev 到「开发」（workflow_step_id=\"{w3_dev_step}\"），status=todo；有前置 → status=held，留在「待开发」。\n"
+        "   - 不一致：不移动它。建替代任务（任务 id 加后缀 -r<n>，external_id 随之改变；用同一个 external_id 重调只会拿回原任务），"
+        "原任务 move_task_kandev 到「完成」，tasks.json status=failed（note=参数不符：<字段>，被 <新 id> 取代），依赖它的任务改为依赖新任务。"
+        "替代任务仍不一致，或创建按【工具报错】重试后仍失败 → 在 NOW 记录错误原文并 ESCALATE 给 pm。"
+    )
+
+
 # ================================================================== step helpers
 def step(name, pos, color, prompt=None, start=False, events=None, signal=False, role=None,
          start_policy="reuse", end_policy="park", wip=0, complete_on_enter=False, panel=True, note=""):
@@ -311,10 +337,12 @@ def w3():
     merge = MECH_HEADER + """
 
 【步骤：合并｜合并门禁】第 {step_entry_number} 次进入。
-1. 读任务描述的契约、任务文档 report 和 <mgmt_root>/project/environment.md「合并方式」「合并门禁」。先核对：本分支是否已合入 mod/<模块>（`git merge-base --is-ancestor HEAD mod/<模块>`）、已合入的不再重复，直接做第 4 步的上报。
+1. 读任务描述的契约、任务文档 report 和 <mgmt_root>/project/environment.md「合并方式」「合并门禁」。先核对：本分支是否已合入 mod/<模块>（`git merge-base --is-ancestor HEAD mod/<模块>`）、已合入的不再重复，直接做第 5 步的上报。
 2. rebase 到最新 mod/<模块>。冲突只涉及「共享文件」的按 environment.md 就地解决（保留双方条目，生成文件重新生成）；本任务「范围」内的自己解决；涉及他人范围 → 向模块 agent（parent）发 KMSG ESCALATE，停下。
 3. 门禁：运行「合并门禁」的命令（写明了结合测试套件时一并运行）和 owns 检查；还没有这一节时（baseline 模块的任务）运行契约中的测试命令。失败：进入次数 < 3 → move_task_kandev 回「开发」，instructions 写失败的命令和关键输出（几行）；≥ 3 → 向模块 agent 发 KMSG ESCALATE（写明失败的命令），停下。
-4. 通过后在任务 worktree 中快进合入模块分支（`git fetch . HEAD:mod/<模块>`，只允许快进，不用 PR；失败说明别的任务先合入了，回到第 2 步，最多 3 次），向模块 agent（parent）message_task_kandev 发 KMSG REPORT（refs: 合入的 commit），调用 step_complete_kandev（进入「完成」）。
+4. 通过后在任务 worktree 中快进合入模块分支（`git fetch . HEAD:mod/<模块>`，只允许快进，不用 PR；失败说明别的任务先合入了，回到第 2 步，最多 3 次）。
+5. 向模块 agent 发 KMSG REPORT（refs: 合入的 commit）：message_task_kandev(task_id="<[TASK v1] 头 parent 行 task 后面的 UUID>", prompt="[KMSG v1]\\n…")，按【发消息】判断是否已发出；报错按【工具报错】改正后重试一次。
+6. 调用 step_complete_kandev（进入「完成」），summary 照实写：REPORT 已发出 → "已合入 <commit>；REPORT 已发出"；重试后仍失败 → 仍然调用（本步骤唯一的例外：合入已经生效，停在这里没有人会处理；模块 agent 被唤醒时按 Kandev 状态补记，守护也会告警），summary="已合入 <commit>；REPORT 未送达：<错误原文>"。
 
 """ + SIGNAL_NOTE
 
@@ -341,6 +369,7 @@ def w3():
 
 # ================================================================== W2 模块管理
 def w2(w3_id, w3_dev_step, w3_hold_step):
+    child = child_task_spec(w3_id, w3_dev_step, w3_hold_step)
     plan = MOD_HEADER + f"""
 
 【步骤：模块规划】第 {{step_entry_number}} 次进入。
@@ -353,10 +382,7 @@ def w2(w3_id, w3_dev_step, w3_hold_step):
 2. 写 spec.md（MA-n，每条写 covers: 验收要点、B-n、PA / R 编号）和 interfaces.md（对外接口 + 任务间接口，标明提供方任务）。契约的每条验收要点和每条与本模块有关的 B-n 都要被某条 MA 覆盖；本模块是提供方的 B-n 落实到 interfaces.md。
 3. 拆分开发任务写入 tasks.json：一个会话可完成；owns 明确且不重叠（environment.md「共享文件」写进 shared，只追加条目）；有可执行的 AC（covers: MA）和 tests；本模块提供的每条 B-n 指定给一个任务（boundaries），该任务的测试覆盖它；改动界面的标 ui: true；依赖链尽量浅。契约自包含：做什么、为什么（intent）、AC、测试命令、owns / shared，并把相关接口片段和需求原话摘进契约；实现方案留给开发。
 4. 创建子任务前运行 `python <mgmt_root>/tools/check_tasks.py --tasks <mgmt_root>/modules/<模块>/tasks.json --boundaries <本模块提供的 B-n，逗号分隔>`；退出码非 0 先改 tasks.json。
-5. 逐个任务（先写后做，幂等键=任务 id）：status=creating → create_task_kandev（parent_id="self"，workspace_mode="new_workspace"，base_branch="mod/<模块>"，autopilot=true，workflow_id="{w3_id}"，external_id=<任务 id>，title=<任务 id> <简称>，prompt=[TASK v1] 头（role=developer，scope=dev:<任务id>，parent=mod:<模块> @ task {{task_id}}，mgmt_root 同本任务，branch=<自动> base mod/<模块>）+ 开发契约）→ 回填 kandev_task_id：
-   - 没有前置：workflow_step_id="{w3_dev_step}"（「开发」），status=todo。
-   - 有前置：workflow_step_id="{w3_hold_step}"（「待开发」，不占 WIP），start_agent=false，不传 blocked_by（前置只记在 tasks.json），status=held；确认它停在「待开发」且没有启动会话，否则在 NOW 记录并 ESCALATE 给 pm。
-   创建失败：在 NOW 记录错误原文并 ESCALATE 给 pm。
+5. 创建子任务。{child}
 6. 用 KMSG NOTICE 告知依赖本模块的其他模块：对外接口已定义（refs: interfaces.md）。
 
 kind: baseline（基线模块，最先运行）：project/environment.md 由你写（MGMT_SCOPE=mod:baseline），仓库文件由开发子任务完成，契约中写明由模块 agent 执行的动作你自己做并记入 journal；此时还没有冒烟测试和合并门禁，tasks 要写全（包括 owns 检查命令）。
@@ -374,23 +400,26 @@ kind: integration（结合测试模块，其他模块全部完成后才启动）
 
 【步骤：等待开发】你常驻在此步骤，只做路由：不合并子任务分支，不验收，不读子任务对话。""" + RESET_NOTE + """本次移动带 instructions 时按对应事件处理，否则只更新 NOW.md 后结束本轮。之后每次被唤醒只处理本次事件：
 - 子任务提问（ask_parent_question）：属于本模块（接口、契约、范围）→ 需要时先改 interfaces.md / tasks.json，再 message_task_kandev 回答（带 reply_to_question_id）；超出本模块 → ESCALATE 给 pm，回复"已上报，等待中"。
-- 「等待决策」中的任务（审核 ESCALATE、开发的 blocked / dropped）和合并门禁的 ESCALATE：先查任务所在步骤，还在「开发」（它的移动要到它本轮结束才生效）就在本轮结束前再查一次，仍在则留给下一次唤醒。读 report / review / 失败的命令，选一：a) 同意 dropped → tasks.json status=dropped（note 写理由），move_task_kandev 到「完成」；b) 改契约或要求继续 → 更新 tasks.json / interfaces.md，move_task_kandev 回「开发」，instructions 写要做什么和完成标准；c) 拆分 → 新建子任务，原任务 move_task_kandev 到「完成」，tasks.json 标 status=failed（note 写被哪些任务取代），依赖它的 held 任务在 tasks.json 改为依赖新任务；d) 涉及其他模块 → ESCALATE 给 pm 等 DECISION。
+- 「等待决策」中的任务（审核 ESCALATE、开发的 blocked / dropped）和合并门禁的 ESCALATE：先查任务所在步骤，还在「开发」（它的移动要到它本轮结束才生效）就在本轮结束前再查一次，仍在则留给下一次唤醒。读 report / review / 失败的命令，选一：a) 同意 dropped → tasks.json status=dropped（note 写理由），move_task_kandev 到「完成」；b) 改契约或要求继续 → 更新 tasks.json / interfaces.md，move_task_kandev 回「开发」，instructions 写要做什么和完成标准；c) 拆分 → 按下面【建子任务】新建子任务（id 接着编号），原任务 move_task_kandev 到「完成」，tasks.json 标 status=failed（note 写被哪些任务取代），依赖它的 held 任务在 tasks.json 改为依赖新任务；d) 涉及其他模块 → ESCALATE 给 pm 等 DECISION。
 - 合并步骤的 REPORT：tasks.json status=merged。kind: baseline：按该任务的 report 更新 project/environment.md 对应的节，契约中由你执行的落实动作在相应任务合入后执行。
-- 从「验收调查」退回（instructions 指向 acceptance.md 第 n 轮）：把该轮结果回写 tasks.json（passes）；按修复项建修复子任务（创建方式同「模块规划」第 5 步，id 接着编号），契约按【路由备注】；说明已升级 pm 的，等 DECISION；说明子任务状态有问题的，先处理这些任务。
+- 从「验收调查」退回（instructions 指向 acceptance.md 第 n 轮）：把该轮结果回写 tasks.json（passes）；按修复项建修复子任务（按下面【建子任务】，id 接着编号），契约按【路由备注】；说明已升级 pm 的，等 DECISION；说明子任务状态有问题的，先处理这些任务。
 - 修复模块（scope mod:<模块>-fix-<n>）的子任务有证据认为缺陷不归本模块或是测试写错：子任务设 dropped 并移到「完成」，带证据向 pm 发 ESCALATE（misrouted），再 move_task_kandev 把本任务移到「完成」。
 - pm 的 NOTICE（依赖模块的修复分支）：把它合并进 mod/<模块>（冲突同「模块规划」第 1 步）。
 - 结合测试任务（在「等待决策」）报告缺陷：不修复、不自行确认：向 pm 发 KMSG ESCALATE（refs: 该任务 report 的 defects）。pm 通知修复完成后，在自己的任务 worktree 中把修复分支合并进集成分支和 mod/<模块>（冲突同「模块规划」第 1 步），再 move_task_kandev 把该任务移回「开发」，instructions="rebase 到 mod/<模块> 重跑"；pm 转来 misrouted 时同样移回「开发」，instructions=原话，让它重新判断（改测试，或改担当模块后重新上报）。
 - pm 的 DECISION / INSTRUCT：执行，更新本模块文件（接受为已知问题的写进 spec 变更记录），通知受影响的子任务；结合测试缺陷被接受为已知问题时，把「等待决策」中的测试任务移回「开发」，instructions=把对应的失败用例标成预期失败并引用 ADR 编号，然后正常上报。
-- 守护 ALERT：子任务会话过长 → 让它写检查点后移到「等待决策」再移回「开发」并带 reset_context（或拆分）；子任务 session_failed → 移到「等待决策」再移回「开发」，instructions="从任务文档 now 继续"；前置 FAILED/CANCELLED → 改契约或拆分；自己过长 → 按【刷新】规则移到「刷新」。
-- 放行（每次被唤醒都检查）：held 任务的前置在 tasks.json 中都是 merged（已用 `git merge-base --is-ancestor` 核对提交在 mod/<模块> 上）或 dropped → move_task_kandev 到「开发」，status=todo。
+- 守护 ALERT：子任务会话过长 → 让它写检查点后移到「等待决策」再移回「开发」并带 reset_context（或拆分）；子任务 session_failed → 移到「等待决策」再移回「开发」，instructions="从任务文档 now 继续"；前置 FAILED/CANCELLED → 改契约或拆分；child_unrecorded（子任务已在「完成」，tasks.json 没有登记）→ 按下面「对账」a) 处理；session_not_started（子任务进入某步骤后没有启动会话）→ 第一次：move_task_kandev 到「等待决策」再移回原步骤；同一任务再次收到 → 按 c) 拆分新建任务取代它；自己过长 → 按【刷新】规则移到「刷新」。
+- 对账与放行（每次被唤醒都先做，不论被什么唤醒；不只靠 REPORT）：list_related_tasks_kandev 对照 tasks.json。
+  a) 子任务已在「完成」而 tasks.json 不是 merged / dropped / failed：`git log mod/<模块> --oneline --grep "^<任务id>"` 有提交（开发的 commit message 以任务 id 开头）才记 status=merged，journal 写"按 Kandev 状态补记（未收到 REPORT）"；没有提交 → 先查 NOW「未确认的意图」（中断的 dropped / 拆分）并做完；仍不清楚 → 不改 status，ESCALATE 给 pm。不猜 merged。
+  b) held 任务的前置在 tasks.json 中都是 merged（提交已在 mod/<模块> 上）或 dropped → move_task_kandev 到「开发」，status=todo。
+- 「完成」中的任务不移出：需要再做一轮时按【建子任务】新建任务（id 加后缀 -r<n>），依赖原任务的改为依赖新任务。
 - 其他模块的 QUESTION：只答事实，给出文件指针；涉及变更 → 转给 pm。
 自己移到「验收调查」只在两种情况下：带验收退回的说明进入、处理后没有非终态子任务；或处理完 pm 的 DECISION 后子任务全部终态、没有 held。先确认本任务仍在「等待开发」，instructions 写明已知问题和 ADR。其他情况等 on_children_completed。一轮结束前刷新 NOW.md。
-""" + RESIDENT_RULE
+""" + child + "\n" + RESIDENT_RULE
 
     accept = MOD_AUDIT_HEADER + """
 
 【步骤：验收调查】第 {step_entry_number} 次进入。
-1. 子任务状态：list_related_tasks_kandev 对照 tasks.json。有 held、尚未创建、或 FAILED / CANCELLED 而 tasks.json 没有标 failed / dropped 的任务 → 不验收：move_task_kandev 回「等待开发」，instructions 写明哪些任务、什么状态。dropped 的确认理由仍成立。
+1. 子任务状态：list_related_tasks_kandev 对照 tasks.json。有 held、尚未创建、FAILED / CANCELLED 而 tasks.json 没有标 failed / dropped、或已在「完成」而 tasks.json 不是 merged / dropped / failed（合并的 REPORT 没有送达，tasks.json 由模块 agent 补记）的任务 → 不验收：move_task_kandev 回「等待开发」，instructions 写明哪些任务、什么状态。dropped 的确认理由仍成立。
 2. 覆盖核对：模块契约的每条验收要点、与本模块有关的每条 B-n（charter「模块边界」）是否都被 spec 的某条 MA 覆盖；逐条列表，有缺口即为 fail。修复模块（scope mod:<模块>-fix-<n>）只核对修复项本身：复跑修复项对应的失败测试和合并门禁，不做第 2 步。
 3. 读子任务的 report、review（不清楚 → 向该任务发 KMSG QUESTION）。在 mod/<模块> 上运行模块测试：kind: integration 时运行全量测试和「结合测试」的命令；kind: baseline 时在全新 worktree 中运行冒烟测试和本地检查脚本，并试跑「约束落实」的命令。逐条 MA 判定 pass / fail / unverified(原因) 并附证据；pm 的 DECISION 已接受为已知问题的项（见移动说明或 spec 变更记录）记 unverified(已知问题，ADR 编号)。临时服务、目录结束前清理。
 4. 在 modules/<模块>/acceptance.md 追加本轮一节（按该文件的格式）：子任务终态、覆盖核对、测试、MA 结果、修复项、建议、转交。
@@ -399,7 +428,7 @@ kind: integration（结合测试模块，其他模块全部完成后才启动）
 """ + SIGNAL_NOTE
 
     refresh = MOD_HEADER + refresh_steps("roles/module.md", "等待开发") + """
-3. 返回目标是「等待开发」且子任务全部终态、没有 held：改为 move_task_kandev 到「验收调查」（刷新期间 on_children_completed 不会触发）。
+3. 返回目标是「等待开发」时，先按「等待开发」的「对账与放行」把已在「完成」的子任务补记到 tasks.json（以任务 id 开头的提交已在 mod/<模块> 上才记 merged；没有证据的不改，留给「等待开发」处理）。之后子任务全部终态、tasks.json 也都已登记、没有 held：改为 move_task_kandev 到「验收调查」（刷新期间 on_children_completed 不会触发）。
 4. 否则 move_task_kandev 回返回目标（不带 instructions）。"""
 
     steps = [
@@ -434,7 +463,7 @@ def w1(w2_id, w2_plan_step, arch=ARCH_PLACEHOLDER):
 
 要做：
 1. 判断任务描述是否已经是完整的 [TASK v1] 描述：第一个非空行是 `[TASK v1]`；头里有 project、mode（attended 或 unattended）、mgmt_root、mgmt_template、repo、`role: pm`、branch（含 `base <分支>`）这 7 个字段且值不为空、不是 `<...>` 占位（branch 行里的 `<自动>` 是固定写法，不算占位）；有一行 `---`，之后有需求正文。先不读说明全文。
-   - 完整 → 不改任务描述，不提问，直接调用 step_complete_kandev（summary="任务描述已完整，原样交给立项规划"）。只有字段的值明显不可用（路径不存在等，说明「5. 校验」）时才按第 3 步只问这一项。
+   - 完整 → 不改任务描述，不提问，做完第 7 步（守护）后调用 step_complete_kandev（summary="任务描述已完整，原样交给立项规划"）。只有字段的值明显不可用（路径不存在等，说明「5. 校验」）时才按第 3 步只问这一项。
 2. 不完整 → 读说明。按「3. 字段」逐个取值，顺序：用户已写明的（含自然语言，如"无人值守""先只出计划"）→ 能推导的（仓库路径、基线分支、项目名、mgmt_root、mgmt_template）→ 不提问的缺省值。用户已写明的值不改。
 3. 仍然缺少、且说明标为「要问」的字段，用 ask_user_question_kandev 提问：一次调用最多 4 个问题；多于 4 个时按说明「4. 提问」的顺序分批，上一批得到回答后再问下一批，最多 3 批；每个问题给选项、推荐答案和一句理由。能推导或有缺省值的不问。用户写明不要提问（或 mode 已写明 unattended，或在提问中选择了 unattended）时不再提问，其余字段全部采用缺省值；唯一的例外是没有任何可执行的需求，这时只问需求。不提问时遇到没有缺省值的字段（repo、基线分支）推导不出或校验不通过：停下说明原因，不调用 step_complete_kandev，不编造值。
 4. 按「5. 校验」检查；不通过的字段只就这一项再问一次（不提问时按第 3 步的规则），仍不通过则停下说明原因，不调用 step_complete_kandev。
@@ -443,7 +472,8 @@ def w1(w2_id, w2_plan_step, arch=ARCH_PLACEHOLDER):
    a. 用 create_task_plan_kandev / update_task_plan_kandev 把新描述全文写进任务计划的 `## task-doc: intake` 章节（pm 读不到新描述时的备份）。
    b. update_task_kandev（task_id={{task_id}}，description=新描述全文）。再用 list_tasks_kandev 读回，确认描述以 `[TASK v1]` 开头且含 mgmt_root。
    c. 更新失败或读回不一致：不调用 step_complete_kandev；在回复中给出新描述全文，请用户把它粘贴到任务描述后把任务拖到「立项规划」，并原样写出错误。
-7. 回复用户一段摘要（≤10 行）：每个字段的值和来源（用户写明 / 推导 / 缺省 / 提问），以及之后看哪两个文件（<mgmt_root>/project/attention.md、<mgmt_root>/agents/guard/stage.md）；提醒守护 automation 停用时要重新启用。然后调用 step_complete_kandev（summary=一句话；进入「立项规划」）。
+7. 守护（第 1 步判断为完整时也做）：list_settings_resources_kandev（resource_type=automation）找名为「多Agent 守护」的 automation。enabled=false（上一个项目结束时守护会自动停用）→ update_settings_kandev（target=该条目的 target，changes 中设 enabled=true）重新启用并读回确认。找不到、工具不可用或启用失败 → 不影响推进，在摘要第一行醒目提醒用户到 Kandev 设置 → Automations 启用，并原样写出错误。
+8. 回复用户一段摘要（≤10 行）：每个字段的值和来源（用户写明 / 推导 / 缺省 / 提问）、守护的状态（已启用 / 本次重新启用 / 需要用户启用），以及之后看哪两个文件（<mgmt_root>/project/attention.md、<mgmt_root>/agents/guard/stage.md）。然后调用 step_complete_kandev（summary=一句话；进入「立项规划」）。
 
 {SIGNAL_NOTE}"""
 
@@ -521,6 +551,7 @@ def w1(w2_id, w2_plan_step, arch=ARCH_PLACEHOLDER):
 - 其他 ESCALATE：能决定的写 ADR 并向受影响模块发 DECISION；影响到已完成的模块（接口变更、新依赖）时，为它建修复模块任务，不给已完成的任务发消息。open_escalations 登记 / 销账。
 - QUESTION：属于你担当的就答；不属于 → 回 ANSWER 转介。
 - ALERT（守护）：按建议处理；建议 refresh 时按【刷新】规则移到「刷新」。
+- 守护是否在运行（每次被唤醒都检查，status.json phase=developing 时）：读 <mgmt_root>/agents/guard/stage.md 开头"更新："一行的时间；文件不存在或超过 60 分钟没更新 → 在 attention.md 登记一条"守护未运行（stage.md 最后更新 <时间>）：请到 Kandev 设置 → Automations 启用「多Agent 守护」"（已有未处理的同一条时不重复登记）。守护恢复后把这条标为已处理。
 一轮结束前刷新 NOW.md。全部模块 status=done（或 dropped）→ move_task_kandev 到「项目验收」。
 """ + RESIDENT_RULE
 

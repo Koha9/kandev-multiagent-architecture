@@ -38,7 +38,7 @@
 
 | 用途 | 工具 | 注意 |
 |---|---|---|
-| 跨任务消息 | `message_task_kandev` | 对方运行中：排队；空闲或已完成：开启新的一轮；失败或已取消：报错 |
+| 跨任务消息 | `message_task_kandev` | 参数是 `task_id`（接收方任务的 UUID，不能写 `self`；上级的 UUID 在 [TASK v1] 头 parent 行 `task` 之后）和 `prompt`（消息全文），回复某个会话时加 `session_id`。没有返回错误才算已发出，失败按报错改正后用同一个 id 加 `resend: 1` 重试。对方运行中：排队；空闲或已完成：开启新的一轮；失败或已取消：报错 |
 | 子任务问父任务 | `ask_parent_question_kandev` | 父任务用 `message_task_kandev` 并带 `reply_to_question_id` 回答 |
 | 退回 | `move_task_kandev` + `instructions` | instructions 只写摘要和 review 文档指针 |
 | 步骤交接 | `step_complete_kandev` 的 `handoff` | 只传给下一步，≤8KB |
