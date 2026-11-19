@@ -22,6 +22,11 @@ provider_error.error_kind=rate_limit 的 status 消息 → 判为"到达用量�
 enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要重新启用。
 
 规则表（从上到下，第一条匹配的生效；与 mgmt-template/roles/guard.md「阶段分类」一致）：
+  0 等上级    开发任务在「完成」/ COMPLETED，但它在 tasks.json 中的 status 不是 merged / dropped / failed，停留 ≥10 分钟，
+              且模块任务在「等待开发 / 刷新 / 模块规划」→ 告警上级 child_unrecorded（合并的 REPORT 没有送达时的兜底）。
+              tasks.json 中查不到该任务时不告警；模块任务在其他步骤或已完成时只在 stage.md 显示"完成（tasks.json 未登记）"。
+              since 是守护第一次看到它在这一步的时间，所以实际要连续两次巡检（20–40 分钟）都看到才告警，
+              覆盖了合并 → 模块 agent 处理 REPORT 之间的正常间隔
   1 完成      步骤=完成，或任务 state=COMPLETED
   2 等人      有待处理的权限请求                         → 只写进 stage.md，不发告警
   3 等人      有待处理的提问（ask_user_question）        → 同上
@@ -33,6 +38,9 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
   4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
   5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
   6 等上级    最新会话 FAILED / CANCELLED                 → 告警上级 session_failed
+  6a 等上级   任务 state=SCHEDULING、在 agent 步骤、没有运行中的会话、不是 WIP 排队，停留 ≥10 分钟
+              → 开发任务告警上级 session_not_started（Kandev 准备会话失败后会静默停在这里）；W1 / W2 任务只写进 stage.md
+              （"等人：会话未启动"）。排在第 9 条之前：否则上一步骤留下的空闲会话会被误判为 idle_no_signal
   7 等上级    步骤=待开发，前置失败                       → 告警上级 hold_broken
   8 等上级    步骤=待开发，前置全部完成，停留 ≥10 分钟    → 告警上级 hold_ready
               前置关系取自 <mgmt_root>/modules/*/tasks.json（含 -fix-<n> 修复模块）：任务的 blocked_by 中每个任务
@@ -49,6 +57,7 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
  13 常驻      步骤=调度 / 等待开发
  14 运行中    其他
 上级：开发任务 → [TASK v1] 头 parent 中的模块任务；模块任务 → pm；pm → pm 自己。limit_resume 发给任务自己。
+v3.3.2 新增的信号（child_unrecorded、session_not_started）的 suggest 是完整的处理方法，旧版 prompt 的 agent 收到也能照做。
 同一任务的同一信号 60 分钟内只告警一次；pm 停在常驻步骤（调度）时，同一信号告警 60 分钟后仍未消除 → pm_unresponsive
 （守护把 pm 移到「刷新」，instructions 写「刷新返回：<return_step>」）。pm 在其他步骤不升级，到期后重发原信号。
 limit_resume 不升级为 pm_unresponsive：恢复后又碰到上限，就等新的重置时间，且距上次恢复 ≥60 分钟再试。
@@ -81,6 +90,9 @@ ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
 PREREQ_DONE = {"merged", "dropped"}      # tasks.json 中算"前置已完成"的 status
+RECORDED = PREREQ_DONE | {"failed"}      # 开发任务进入「完成」后 tasks.json 应有的 status
+MOD_LIVE = {"等待开发", "刷新", "模块规划"}   # 模块 agent 能处理 child_unrecorded 的步骤（验收调查会自己退回）
+SCHEDULING_STATES = {"SCHEDULING"}       # Kandev 为步骤准备会话时的任务状态（v3.3.1 事故中观察到；未在其他场景验证）
 GUARD_NAME = "多Agent 守护"
 RESUME_TEXT = ("continue\n\n（守护 guard：本会话上一轮因到达用量上限而中断，上限已于 {reset} 重置。请从中断处继续当前步骤："
                "先核对 NOW / now、磁盘与 git 的实际状态，已经完成的操作不要重复。）")
@@ -196,6 +208,12 @@ def classify(t, now, by_id):
         return {"category": category, "signal": signal, "value": value, "threshold": threshold}
 
     if step == DONE or t["state"] == "COMPLETED":
+        own = t.get("own_status")         # None = tasks.json 中查不到这个任务（或读不到 tasks.json）：不告警
+        if t["workflow"].endswith("开发") and own is not None and own not in RECORDED:
+            parent = by_id.get(header_task(t.get("description"), "parent"))
+            if parent and not is_done(parent) and parent["step"] in MOD_LIVE:
+                return r("等上级：完成未登记", "child_unrecorded" if in_step >= T_IDLE else None, own or "(空)", T_IDLE)
+            return r("完成（tasks.json 未登记）", value=own or "(空)")
         return r("完成")
     if t.get("perm"):
         return r("等人：权限请求", value=t["perm"])
@@ -217,6 +235,11 @@ def classify(t, now, by_id):
         return r("等上级：等待决策", "decision_pending" if in_step >= T_DECISION else None, in_step, T_DECISION)
     if s0 and s0.get("state") in ("FAILED", "CANCELLED"):
         return r("等上级：会话失败", "session_failed", s0["state"], "-")
+    if (t["state"] in SCHEDULING_STATES and step in AGENT_STEPS and not (s0 and s0.get("state") in ACTIVE_STATES)
+            and not (t.get("wip_step") and t.get("wip_admitted") is False)):
+        if not t["workflow"].endswith("开发"):     # W1 / W2 没有「等待决策」可用来重启会话：只给人看
+            return r("等人：会话未启动", value=f"{step}，{in_step} 分钟")
+        return r("等上级：会话未启动", "session_not_started" if in_step >= T_IDLE else None, step, T_IDLE)
     known, pre_failed, pre_done = prereq_state(t, by_id)
     if step == HOLD:
         if not known:
@@ -250,7 +273,14 @@ def route(t, pm_task):
 
 
 SUGGEST = {"dev_blocked": "unblock", "decision_pending": "unblock", "session_failed": "unblock", "hold_broken": "split",
-           "hold_ready": "unblock", "idle_no_signal": "unblock", "running_stale": "refresh", "limit_resume": "continue"}
+           "hold_ready": "unblock", "idle_no_signal": "unblock", "running_stale": "refresh", "limit_resume": "continue",
+           # v3.3.2 新增的信号：建议写成完整的处理方法，旧版 prompt 的模块 agent 收到也能照做
+           "child_unrecorded": ("该开发任务已在「完成」，但 tasks.json 没有登记（合并的 REPORT 可能没有送达）："
+                                "`git log mod/<模块> --oneline --grep \"^<任务id>\"` 有提交 → tasks.json 记 merged，"
+                                "再检查 held 任务能否放行；没有提交 → 查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm，不要猜 merged"),
+           "session_not_started": ("该任务进入当前步骤后一直没有启动会话（Kandev 停在 SCHEDULING）：先 move_task_kandev 到"
+                                   "「等待决策」再移回当前步骤一次；再次收到本告警 → 新建任务取代它（workspace_mode=new_workspace、"
+                                   "autopilot=true、base_branch=mod/<模块>），原任务移到「完成」并在 tasks.json 标 failed")}
 SELF_SIGNALS = {"limit_resume"}   # 发给任务自己、不升级的信号
 
 
@@ -310,6 +340,27 @@ def load_blockers(mgmt_root):
                 if t.get("kandev_task_id"):
                     out[t["kandev_task_id"]] = [status.get(b) for b in t.get("blocked_by") or []]
         except (TypeError, KeyError, AttributeError):
+            continue
+    return out
+
+
+def load_statuses(mgmt_root):
+    """kandev task id -> 该任务自己在 tasks.json 中的 status（没有 status 字段记为 ""）。来源和容错同 load_blockers。
+    查不到的任务不在结果里（调用方得到 None，不据此告警）。"""
+    out = {}
+    mods = os.path.join(mgmt_root, "modules")
+    if not os.path.isdir(mods):
+        return out
+    for m in os.listdir(mods):
+        p = os.path.join(mods, m, "tasks.json")
+        if m.startswith("_") or not os.path.exists(p):
+            continue
+        try:
+            tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
+            for t in tasks:
+                if t.get("kandev_task_id"):
+                    out[t["kandev_task_id"]] = t.get("status") or ""
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             continue
     return out
 
@@ -495,9 +546,10 @@ def main():
     for pr in projects:
         root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
         if ready and not a.snapshot:
-            blockers = load_blockers(root)
+            blockers, statuses = load_blockers(root), load_statuses(root)
             for t in pr["tasks"]:
                 t["blocker_status"] = blockers.get(t["id"])
+                t["own_status"] = statuses.get(t["id"])
         state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
         state = json.load(open(state_path, encoding="utf-8")) if os.path.exists(state_path) else {}
         rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])

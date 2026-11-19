@@ -35,8 +35,10 @@
 | 其他模块 agent | QUESTION / ANSWER / NOTICE，只涉及事实 |
 
 ## 待开发与放行
-- 没有前置的任务直接创建到「开发」。有前置的创建到「待开发」（`start_agent=false`，不设 Kandev 的 `blocked_by`：前置只记在 tasks.json），`status=held`。「待开发」不占 WIP
-- 合并步骤的 REPORT 到达 → 核对提交已在 `mod/<模块>` 上（`git merge-base --is-ancestor`）后设 `status=merged`。每次被唤醒都检查：`held` 任务的前置在 tasks.json 中都是 merged 或 dropped → 移到「开发」，`status=todo`
+- 子任务一律先创建到「待开发」（`workspace_mode=new_workspace`、`base_branch=mod/<模块>`、`autopilot=true`、`start_agent=false`，不设 Kandev 的 `blocked_by`：前置只记在 tasks.json），读回核对工作区模式、autopilot、base 后：没有前置的移到「开发」（`status=todo`），有前置的留下（`status=held`）。参数不符 → 换新 id（加 `-r<n>`）重建，原任务移到「完成」、`status=failed`。「待开发」不占 WIP。参数一个都不能省；报错时按报错改正后重试，不要删参数来消除报错
+- 合并步骤的 REPORT 到达 → 核对提交已在 `mod/<模块>` 上（`git merge-base --is-ancestor`）后设 `status=merged`。REPORT 可能发不出去，所以每次被唤醒都先按 Kandev 状态对账：子任务已在「完成」而 tasks.json 没有登记 → `mod/<模块>` 上有以任务 id 开头的提交才补记 merged，没有就查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm（不猜 merged）。然后检查：`held` 任务的前置在 tasks.json 中都是 merged 或 dropped → 移到「开发」，`status=todo`
+- 「完成」中的任务不移出：需要再做一轮时新建任务（id 加 `-r<n>`），依赖原任务的改为依赖新任务
+- 守护 `child_unrecorded` → 按上面对账；`session_not_started` → 先移到「等待决策」再移回原步骤一次，再次告警就新建任务取代它
 - 前置 FAILED / CANCELLED：held 任务不会自动开始，要改契约、拆分或升级 pm
 - 拆分：新建子任务后，原任务移到「完成」，tasks.json `status=failed`（note 写被哪些任务取代）；依赖它的 held 任务在 tasks.json 改为依赖新任务
 

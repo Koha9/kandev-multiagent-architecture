@@ -1,4 +1,4 @@
-# 多 Agent 开发 Workflow（v3.3.1）
+# 多 Agent 开发 Workflow（v3.3.2）
 
 **中文** | [English](workflow.en.md)
 
@@ -109,7 +109,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 | # | 步骤 | 角色 | 做什么 | 流转 |
 |---|---|---|---|---|
 | 0 | **模块规划** | module | 写 spec（MA 及 covers，覆盖契约的验收要点和相关 B-n）/ interfaces（落实本模块提供的 B-n）/ tasks.json（每个任务带 `tests`、`boundaries`）；运行 `tools/check_tasks.py`；创建自包含契约的开发子任务：无前置的进「开发」，有前置的进「待开发」 | 完成信号 → 等待开发 |
-| 1 | 等待开发 | module | 常驻、只做路由：回答子任务提问；处理「等待决策」中的任务和合并门禁升级（移回「开发」并带 instructions、移到「完成」或拆分）；REPORT 到达时更新 tasks.json，放行前置已合入的「待开发」任务；按验收者的修复项建修复子任务 | 子任务全部终态（on_children_completed）→ 验收调查。模块 agent 只在两种情况下自己移过去：带验收退回的说明进入、处理后没有非终态子任务；或处理完 pm 的 DECISION 后全部终态、没有 held |
+| 1 | 等待开发 | module | 常驻、只做路由：回答子任务提问；处理「等待决策」中的任务和合并门禁升级（移回「开发」并带 instructions、移到「完成」或拆分）；每次被唤醒先按 Kandev 状态对账 tasks.json（不只靠 REPORT），放行前置已合入的「待开发」任务；按验收者的修复项建修复子任务 | 子任务全部终态（on_children_completed）→ 验收调查。模块 agent 只在两种情况下自己移过去：带验收退回的说明进入、处理后没有非终态子任务；或处理完 pm 的 DECISION 后全部终态、没有 held |
 | 2 | 验收调查 | module_auditor | 独立的模块验收者（新会话）：先查子任务状态（tasks.json 标了 failed / dropped 的不算问题）；覆盖核对；跑模块测试，逐条判定 MA（pm 已接受的已知问题记 unverified）；写 acceptance.md 本轮一节和修复项。修复模块只核对修复项 | 通过 → REPORT 给 pm，完成；有 fail → 等待开发（第 3 轮或涉及其他模块时先 ESCALATE 给 pm） |
 | 3 | 刷新 | module | 重置上下文后移回原步骤（instructions 优先，其次 NOW）；如果子任务已全部终态，直接去验收调查 | agent 自己移动 |
 | 4 | 完成 | — | 模块完成（Kandev 状态变为 COMPLETED，依赖它的模块随之启动）。必须是最后一个步骤 | — |
@@ -134,7 +134,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 | 1 | **开发**（WIP 4） | developer | 冒烟测试（还没有时跳过）→ 按自包含的契约实现（`shared` 文件只追加条目）→ 测试 + owns 检查 → 写 report → commit；无需改动 → 建议 dropped；做不完 → blocked | 完成信号 → 审核；dropped / blocked / 缺陷 → 向模块 agent 发 ESCALATE（message_task），自己移到等待决策；普通提问留在开发 |
 | 2 | 审核 | reviewer | 原样重跑测试和 owns 检查；每条 AC 写出亲自确认的证据（不能确认的写 unverified），至少抽查 1 个边界情况；写 review | pass → 合并；minor → 开发（≤3 轮，从模块 agent 最近一次 INSTRUCT / 改契约之后算起）；direction → 等待决策并 ESCALATE |
 | 3 | 等待决策 | — | 不计 WIP；审核方向性问题、开发的 blocked / dropped / 缺陷上报在此等模块 agent | 模块 agent 带 instructions 移回开发，或移到完成 |
-| 4 | 合并 | mechanical | 合并门禁：先核对是否已合入；rebase 到最新模块分支；运行 environment.md「合并门禁」的命令和 owns 检查；通过后自己快进合入模块分支（不支持 PR），向模块 agent 发 REPORT | 合入 → 完成；门禁失败 → 开发（第 3 次 ESCALATE 给模块 agent） |
+| 4 | 合并 | mechanical | 合并门禁：先核对是否已合入；rebase 到最新模块分支；运行 environment.md「合并门禁」的命令和 owns 检查；通过后自己快进合入模块分支（不支持 PR），向模块 agent 发 REPORT（失败重试一次，仍失败照实写进 summary） | 合入 → 完成；门禁失败 → 开发（第 3 次 ESCALATE 给模块 agent） |
 | 5 | 完成 | — | | |
 
 **结合测试任务**（契约标注 `kind: integration-test`）：开发按 environment.md「结合测试」的工具，对真实组装的应用写自动化测试，断言用户可见的结果和数据状态；自动化工具做不到的场景才手动操作产品，并写明原因和证据。测试因为产品缺陷失败时，保留失败的用例，report 写 `result=blocked` 和 `defects`（每条写明担当模块和疑似位置），上报模块 agent，不改断言、不加 mock、不跳过。审核核对测试跑的是真实应用，没有用 mock、skip 或放宽断言换取通过。
@@ -154,7 +154,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 ## 8. 并发与 WIP
 
 - 「开发」步骤的 WIP 是所有模块共用的全局上限（默认 4），用来控制本机同时运行的 agent 数量。
-- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**，前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置在 tasks.json 中都是 merged（REPORT 已到，且用 `git merge-base --is-ancestor` 核对提交已在 `mod/<模块>` 上）或 dropped 时，模块 agent 把它移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
+- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**，前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置在 tasks.json 中都是 merged（REPORT 已到，或按 Kandev 状态对账补记；提交都已在 `mod/<模块>` 上）或 dropped 时，模块 agent 把它移到「开发」。没有前置的子任务也先建在「待开发」，读回核对参数后再移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
 - 依赖链仍建议尽量浅，必须串行的工作合并成一个任务。
 - 所有模块都 blocked_by baseline；其余模块之间有依赖关系的用 blocked_by（并从依赖模块的分支切出），能在骨架上并行的不设依赖。
 - 等模块 agent 决定的开发任务（blocked / dropped / 缺陷上报）移到不计 WIP 的「等待决策」，不占「开发」的名额。
@@ -241,7 +241,9 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - 导出的 workflow 文件只按 model / mode 记录 profile。同模型的 profile 有多个时可能匹配错，所以部署用 `build_workflows.py`，它按 ID 绑定。
 - 门禁中的用户消息投递给用户所在的会话标签，而不是下一步骤的会话；由用户消息触发的移动也不一定会把下一步的步骤 prompt 送达。所以：门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的）；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】）；评审会话万一收到，就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。如果 pm 仍没有开始工作，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
 - 「待开发」依赖两点 Kandev 行为，部署后要先验证（见 [AGENTS.md](../AGENTS.md)「验收部署」）：`create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在该步骤、不启动会话；从无 agent 步骤移到「开发」会触发 on_enter 的 auto_start。
-- 合并步骤发 REPORT 后才调用 step_complete_kandev，所以放行的条件是"前置的 REPORT 已到且提交已在模块分支上"，不等 Kandev 状态；待开发任务不设 blocked_by，移动不受平台依赖检查影响。
+- 放行不只靠 REPORT（v3.3.2）：合并步骤的 REPORT 是一条消息，可能发不出去（v3.3.1 出现过：参数写错后没有重试就推进了步骤，依赖它的任务停了 4 小时）；而 `on_children_completed` 只在全部子任务终态时触发，还有 held 任务时单个子任务完成唤醒不了模块 agent。所以：REPORT 发送失败时合并步骤照实写进 summary 后仍进入「完成」；模块 agent 每次被唤醒都先按 Kandev 状态对账（子任务已在「完成」而 tasks.json 没有登记时，`mod/<模块>` 上有以任务 id 开头的提交才补记 merged，不猜）；「验收调查」和「刷新」遇到这种任务先退回「等待开发」对账；守护的 `child_unrecorded` 负责在没有其他事件时唤醒模块 agent。待开发任务不设 blocked_by，移动不受平台依赖检查影响。
+- 建子任务的参数只靠 prompt（v3.3.2 起统一写在【建子任务】一段，三处原文内联）：漏传 `workspace_mode` 时 Kandev 默认 `inherit_parent`，子任务共用模块任务的 worktree，换 profile 开新会话（「审核」）会失败并静默停在 SCHEDULING。所以子任务一律先建在「待开发」，读回核对工作区模式、autopilot、base 后再移到「开发」；不一致就换新 id 重建。守护的 `session_not_started` 兜底发现停在 SCHEDULING 的任务。
+- 守护在上一个项目结束时会自动停用；同一 workspace 再开项目时，「接收」步骤会检查并重新启用它，pm 在「调度」中发现 stage.md 超过 60 分钟没更新时登记 attention.md。
 - 「等待开发」和「验收调查」交替时，模块 agent 的会话（profile `module`）和验收者的会话（profile `module_auditor`）在同一个 Kandev 任务里轮换；等待开发以 NOW 和文件为准，不依赖之前的对话。
 
 ### 部署后需要实测的平台行为
@@ -255,6 +257,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - e. 所有 worktree 共享本地的 `mod/*` 分支。退路：改为推送到一个本地 bare 远端。
 - f. 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达。退路：`agents/guard/stage.md` 会显示这些状态，由用户手动操作。
 - g. 「接收」步骤的 agent 能用 `update_task_kandev` 改写自己任务的描述，且之后「立项规划」的 `{{task_prompt}}` 取到的是新描述。退路：接收步骤把新描述同时写进任务文档 `intake`，pm 在描述没有 `[TASK v1]` 头时重新读任务、再读这个章节；改写失败时接收步骤在回复里给出全文，由用户粘贴到任务描述后把任务拖到「立项规划」。
+- h. （v3.3.2）`list_tasks_kandev` 返回子任务的工作区模式、autopilot、base 分支（字段名未确认，报告中见过 `metadata.workspace.mode`）；Kandev 准备会话失败时任务 state 是 `SCHEDULING`；Kandev 内部 agent 能用 `list_settings_resources_kandev` / `update_settings_kandev` 启用 automation。退路：读回核对时字段不存在就记 unverified 继续；`session_not_started` 不触发时由 stage.md 显示，用户处理；「接收」启用不了守护时在摘要第一行提醒用户。
 
 ## 13. 已否决的设计
 
