@@ -36,6 +36,9 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
               （这一步没有上级，接收会话也不认识 KMSG），归为"等人：接收会话失败 / 接收疑似卡住"
   4a 等上限   最新会话停在用量上限，已过重置时间 2 分钟   → 恢复该任务自己 limit_resume（不告警上级）
   4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
+  4c 等上级   有一个不是最新的会话 RUNNING 但 ≥45 分钟没有更新（那一轮不会结束，发给它的消息一直排队）；
+              模块任务完成后也检查它的全部会话                → 告警 pm session_stuck（v3.3.3；不升级为 pm_unresponsive）
+  4d 等上级   开发任务未结束而它的模块任务已完成，停留 ≥10 分钟 → 告警 pm parent_done（v3.3.3）
   5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
   6 等上级    最新会话 FAILED / CANCELLED                 → 告警上级 session_failed
   6a 等上级   任务 state=SCHEDULING、在 agent 步骤、没有运行中的会话、不是 WIP 排队，停留 ≥10 分钟
@@ -54,9 +57,14 @@ enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要
  10 等上级    会话 RUNNING 但 ≥45 分钟没有更新            → 告警上级 running_stale
  11 排队      在设了 WIP 的步骤但未获准入，或在 agent 步骤还没有会话
  12 待开发    步骤=待开发（前置未完成）
+ 13a 常驻     步骤=调度 / 等待开发，常驻会话自上次上下文重置以来已被唤醒 ≥15 次
+              → 告警任务自己 session_long（带 session_id，建议 refresh；v3.3.3）。唤醒 = 该会话里用户侧的 message
+              （步骤 prompt、KMSG、用户输入）；重置标记 = 内容以 "Context reset" 开头的 status。只读消息的类型、作者和这个标记
  13 常驻      步骤=调度 / 等待开发
  14 运行中    其他
-上级：开发任务 → [TASK v1] 头 parent 中的模块任务；模块任务 → pm；pm → pm 自己。limit_resume 发给任务自己。
+上级：开发任务 → [TASK v1] 头 parent 中的模块任务；模块任务 → pm；pm → pm 自己。limit_resume、session_long 发给任务自己；
+session_stuck、parent_done 一律发给 pm。发给模块任务的告警带 session_id（modules/*/tasks.json 顶层的 module_session_id）。
+连不上 Kandev 时退出码 1：last_run.json 记连续失败次数，上次巡检过的各项目 stage.md 标题下加一行"守护故障"（note_failure）。
 v3.3.2 新增的信号（child_unrecorded、session_not_started）的 suggest 是完整的处理方法，旧版 prompt 的 agent 收到也能照做。
 同一任务的同一信号 60 分钟内只告警一次；pm 停在常驻步骤（调度）时，同一信号告警 60 分钟后仍未消除 → pm_unresponsive
 （守护把 pm 移到「刷新」，instructions 写「刷新返回：<return_step>」）。pm 在其他步骤不升级，到期后重发原信号。
@@ -89,6 +97,10 @@ LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会
 ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
+T_WAKES = 15                              # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 相同）
+WAKE_PAGE, WAKE_PAGES = 100, 5            # 数唤醒次数时每页条数、最多翻几页（实测 Kandev 每页只返回约 40 条，15 次唤醒约 1–2 页）
+FAIL_MARK = "> **守护故障**"              # note_failure 写进 stage.md 的那一行的开头
+RESET_MARK = "Context reset"             # Kandev 重置上下文时写入会话的 status 消息的开头（实测："Context reset — new conversation started"）
 PREREQ_DONE = {"merged", "dropped"}      # tasks.json 中算"前置已完成"的 status
 RECORDED = PREREQ_DONE | {"failed"}      # 开发任务进入「完成」后 tasks.json 应有的 status
 MOD_LIVE = {"等待开发", "刷新", "模块规划"}   # 模块 agent 能处理 child_unrecorded 的步骤（验收调查会自己退回）
@@ -171,11 +183,18 @@ def parse_reset(text, at):
     return cand.astimezone(timezone.utc)
 
 
+LIMIT_TEXT = re.compile(r"hit your .{0,40}limit", re.I)
+
+
 def usage_limit(messages, session_id):
-    """messages：会话消息，新的在前。最新一条 message/status 是用量上限的 status → dict，否则 None。只看类型和 metadata。"""
+    """messages：会话消息，新的在前。最新一条 message/status 是用量上限的 status → dict，否则 None。只看类型和 metadata
+    （唯一的例外：内容就是上限提示的 agent 消息会被跳过）。"""
     for msg in messages:
         if msg.get("type") not in ("message", "status"):
             continue
+        if (msg.get("type") == "message" and msg.get("author_type") != "user"
+                and LIMIT_TEXT.search(msg.get("content") or "")):
+            continue    # 上限文字有时还会以普通 agent 消息再出现一次，排在那条 status 之后：跳过它继续往前找（v3.3.3）
         meta = msg.get("metadata") or {}
         pe = meta.get("provider_error") or {}
         if msg.get("type") != "status" or not (pe.get("error_kind") == "rate_limit" or meta.get("failure_code") == "quota_limited"):
@@ -188,12 +207,34 @@ def usage_limit(messages, session_id):
     return None
 
 
+def wakes_since_reset(messages):
+    """messages：会话消息，新的在前。返回 (最近一次上下文重置之后的唤醒次数, 是否看到了重置标记)。
+    唤醒 = 用户侧的 message（步骤 prompt、KMSG、用户输入）。只看类型、作者和重置标记，不读正文。"""
+    n = 0
+    for msg in messages:
+        if msg.get("type") == "status" and (msg.get("content") or "").startswith(RESET_MARK):
+            return n, True
+        if msg.get("type") == "message" and msg.get("author_type") == "user":
+            n += 1
+    return n, False
+
+
 def limit_reset(lim):
     reset = ts(lim.get("resets_at"))
     if reset:
         return reset
     at = ts(lim.get("at"))
     return at + timedelta(minutes=T_LIMIT_FALLBACK) if at else None
+
+
+def stuck_session(sessions, now, skip):
+    """sessions[skip:] 中有 RUNNING 但 ≥45 分钟没有更新的会话 → "<会话 id 前 8 位>，<分钟> 分钟"，否则 None。
+    这样的会话那一轮不会结束，发给它的消息会一直排队（v3.3.1 出现过，停了 9 小时）。"""
+    for s in sessions[skip:]:
+        idle = mins(ts(s.get("updated_at")), now)
+        if s.get("state") == "RUNNING" and idle >= T_STALE:
+            return f"{(s.get('session_id') or '?')[:8]}，{idle} 分钟"
+    return None
 
 
 # ------------------------------------------------------------------ classification (pure)
@@ -208,6 +249,9 @@ def classify(t, now, by_id):
         return {"category": category, "signal": signal, "value": value, "threshold": threshold}
 
     if step == DONE or t["state"] == "COMPLETED":
+        stuck = stuck_session(t["sessions"], now, 0)     # 只有模块任务完成后还会带着会话列表（见 collect）
+        if stuck:
+            return r("等上级：已完成但会话卡住", "session_stuck", stuck, T_STALE)
         own = t.get("own_status")         # None = tasks.json 中查不到这个任务（或读不到 tasks.json）：不告警
         if t["workflow"].endswith("开发") and own is not None and own not in RECORDED:
             parent = by_id.get(header_task(t.get("description"), "parent"))
@@ -227,6 +271,13 @@ def classify(t, now, by_id):
         if reset is None or now >= reset + timedelta(minutes=T_LIMIT_MARGIN):
             return r("等上限：已重置，待恢复", "limit_resume", shown, "-")
         return r("等上限：等待重置", value=shown)
+    stuck = stuck_session(t["sessions"], now, 1)         # 最新会话卡住归第 10 条；这里查更早的会话
+    if stuck:
+        return r("等上级：旧会话卡住", "session_stuck", stuck, T_STALE)
+    if t["workflow"].endswith("开发"):
+        parent = by_id.get(header_task(t.get("description"), "parent"))
+        if parent and is_done(parent):
+            return r("等上级：模块已完成", "parent_done" if in_step >= T_IDLE else None, parent["title"], T_IDLE)
     if step == INTAKE and s0 and s0.get("state") in ("FAILED", "CANCELLED"):
         return r("等人：接收会话失败", value=s0["state"])
     if step == INTAKE and s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
@@ -260,6 +311,9 @@ def classify(t, now, by_id):
     if (t.get("wip_step") and t.get("wip_admitted") is False) or (step in AGENT_STEPS and not s0):
         return r("排队", value=in_step)
     if step in RESIDENT:
+        wakes = (t.get("long") or {}).get("wakes", 0)
+        if wakes >= T_WAKES:
+            return r("常驻：会话过长", "session_long", wakes, T_WAKES)
         return r("常驻", value=idle)
     return r("运行中", value=idle)
 
@@ -280,8 +334,19 @@ SUGGEST = {"dev_blocked": "unblock", "decision_pending": "unblock", "session_fai
                                 "再检查 held 任务能否放行；没有提交 → 查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm，不要猜 merged"),
            "session_not_started": ("该任务进入当前步骤后一直没有启动会话（Kandev 停在 SCHEDULING）：先 move_task_kandev 到"
                                    "「等待决策」再移回当前步骤一次；再次收到本告警 → 新建任务取代它（workspace_mode=new_workspace、"
-                                   "autopilot=true、base_branch=mod/<模块>），原任务移到「完成」并在 tasks.json 标 failed")}
+                                   "autopilot=true、base_branch=mod/<模块>），原任务移到「完成」并在 tasks.json 标 failed"),
+           # v3.3.3：同样写成完整的处理方法
+           "session_long": ("refresh：本会话自上次上下文重置以来被唤醒的次数已到上限（见数值）。处理完手头的事件后，把未落盘的状态写入 NOW.md，"
+                            "在 NOW「注意」节写一行 `刷新返回：<当前步骤名>`，再 move_task_kandev 把本任务移到本 workflow 的「刷新」"),
+           "session_stuck": ("该任务有一个会话一直 RUNNING 但很久没有输出（数值是会话 id 前 8 位和分钟数），那一轮不会自己结束，"
+                             "发给这个会话的消息会一直排队。agent 取消不了它：在 attention.md 登记一条，请用户在 Kandev 界面打开该任务的"
+                             "这个会话并取消当前这一轮；在此之前不要再给这个会话发消息，要它做的事等取消后重发"),
+           "parent_done": ("该开发任务还没结束，但它的模块任务已经完成（数值是模块任务标题），没有模块 agent 会处理它的 REPORT、提问和放行，"
+                           "也不能给已完成的模块发指令。它如果是多余的 → 请用户取消；它的工作还需要 → 为这个模块建修复模块任务接手，"
+                           "契约写明接手这个任务（任务 id、分支），原任务请用户取消")}
 SELF_SIGNALS = {"limit_resume"}   # 发给任务自己、不升级的信号
+SELF_ALERTS = {"session_long"}    # 发给任务自己的告警（带常驻会话的 session_id）；pm 不处理时照常升级为 pm_unresponsive
+PM_SIGNALS = {"session_stuck", "parent_done"}   # 不论对象是谁都发给 pm（上级模块可能已完成，或处理不了）；不升级为 pm_unresponsive
 
 
 def evaluate(tasks, now, state, pm_task):
@@ -298,8 +363,10 @@ def evaluate(tasks, now, state, pm_task):
         if c["signal"]:
             last = ts(sent.get(c["signal"]))
             own = c["signal"] in SELF_SIGNALS
-            to_task = t["id"] if own else route(t, pm_task)
-            is_pm = to_task == t["id"] and not own
+            to_self = c["signal"] in SELF_ALERTS
+            to_pm = c["signal"] in PM_SIGNALS
+            to_task = t["id"] if (own or to_self) else pm_task if to_pm else route(t, pm_task)
+            is_pm = to_task == t["id"] and not own and not to_pm and t["workflow"].endswith("项目管理")
             if last is None or now - last >= timedelta(minutes=T_DEDUP):
                 signal = "pm_unresponsive" if (is_pm and last is not None and t["step"] in RESIDENT) else c["signal"]
                 al = {"to_task": to_task, "object": f"{t['title']} @ task {t['id']}", "step": t["step"],
@@ -309,6 +376,12 @@ def evaluate(tasks, now, state, pm_task):
                     al["return_step"] = t["step"]
                 if own:
                     al.update({"session_id": t["limit"].get("session_id"), "message": RESUME_TEXT.format(reset=c["value"])})
+                if to_self and signal != "pm_unresponsive":
+                    al["session_id"] = (t.get("long") or {}).get("session_id")
+                # 发给模块任务的告警带上模块 agent 的会话 id：不带时消息进主会话，模块进过「验收调查」后那是验收者的
+                mod_session = (by_id.get(to_task) or {}).get("module_session")
+                if mod_session and not al.get("session_id") and signal != "pm_unresponsive":
+                    al["session_id"] = mod_session
                 alerts.append(al)
                 sent[c["signal"]] = now.isoformat()
         else:
@@ -365,6 +438,53 @@ def load_statuses(mgmt_root):
     return out
 
 
+def load_module_sessions(mgmt_root):
+    """模块任务的 kandev task id -> 模块 agent 的会话 id，取自 modules/*/tasks.json 顶层的 module_task_id / module_session_id
+    （v3.3.3 起模块 agent 在「模块规划」写入）。没写的模块不在结果里。容错同 load_blockers。"""
+    out = {}
+    mods = os.path.join(mgmt_root, "modules")
+    if not os.path.isdir(mods):
+        return out
+    for m in os.listdir(mods):
+        p = os.path.join(mods, m, "tasks.json")
+        if m.startswith("_") or not os.path.exists(p):
+            continue
+        try:
+            doc = json.load(open(p, encoding="utf-8"))
+            if doc.get("module_task_id") and doc.get("module_session_id"):
+                out[doc["module_task_id"]] = doc["module_session_id"]
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            continue
+    return out
+
+
+def note_failure(state_dir, now, err):
+    """连不上 Kandev 时留痕：心跳文件记连续失败次数（at 不更新，仍表示最后一次成功），并在上次巡检过的各项目
+    stage.md 标题下面加一行故障提示（用户看的就是这个文件；下次成功运行会整份重写，提示随之消失）。返回连续失败次数。"""
+    beat_path = os.path.join(state_dir, "last_run.json")
+    try:
+        beat = json.load(open(beat_path, encoding="utf-8")) if os.path.exists(beat_path) else {}
+    except (OSError, json.JSONDecodeError):
+        beat = {}
+    beat["failures"] = int(beat.get("failures") or 0) + 1
+    beat["failed_at"], beat["last_error"] = now.isoformat(), str(err)[:300]
+    os.makedirs(state_dir, exist_ok=True)
+    with open(beat_path, "w", encoding="utf-8") as f:
+        json.dump(beat, f, ensure_ascii=False, indent=1)
+    banner = (f"{FAIL_MARK} 守护连不上 Kandev，已连续 {beat['failures']} 次（最近一次 "
+              f"{now.astimezone().strftime('%Y-%m-%d %H:%M')}）：{beat['last_error']}。下面的内容是最后一次成功巡检时的，可能已经过时。")
+    for root in beat.get("mgmt_roots") or []:
+        path = os.path.join(root, "agents", "guard", "stage.md")
+        try:
+            lines = [l for l in open(path, encoding="utf-8").read().split("\n") if not l.startswith(FAIL_MARK)]
+            lines[1:1] = [banner]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+        except OSError:
+            continue
+    return beat["failures"]
+
+
 def kandev_blockers(t):
     """v3.1：任务在 Kandev 里设置的 blocked_by（list_tasks 返回的字段，形状不确定：id 字符串或带 id 的对象）。"""
     out = []
@@ -392,6 +512,34 @@ def detect_limit(k, task_id, s0):
     return usage_limit(conv.get("messages", []) if isinstance(conv, dict) else [], s0["session_id"])
 
 
+def detect_long(k, task_id, sessions):
+    """常驻步骤的任务：常驻会话空闲时，数它自上次上下文重置以来被唤醒了几次 → {"session_id", "wakes"}，否则 None。
+    常驻会话 = 最新的一个还活着的会话（WAITING_FOR_INPUT / IDLE / RUNNING / STARTING；验收等一次性会话结束后是
+    COMPLETED，不会被选中）。正在运行时也数：告警是排队送达的，而且这样去重状态不会因为某次巡检碰上它在运行而被清掉。
+    最多翻 WAKE_PAGES 页；翻完还没看到重置标记时，按已数到的次数算。"""
+    alive = LIMIT_STATES | ACTIVE_STATES
+    s = next((s for s in sessions if s.get("state") in alive and s.get("session_id")), None)
+    if not s:
+        return None
+    wakes, before = 0, None
+    for _ in range(WAKE_PAGES):
+        args = {"task_id": task_id, "session_id": s["session_id"], "sort": "desc", "limit": WAKE_PAGE,
+                "message_types": ["message", "status"]}
+        if before:
+            args["before"] = before
+        try:
+            conv = k.call("get_task_conversation_kandev", args)
+        except RuntimeError:
+            return None
+        msgs = conv.get("messages", []) if isinstance(conv, dict) else []
+        n, seen = wakes_since_reset(msgs)
+        wakes += n
+        if seen or wakes >= T_WAKES or not msgs or not conv.get("has_more"):
+            break
+        before = msgs[-1].get("id")
+    return {"session_id": s["session_id"], "wakes": wakes}
+
+
 def collect(ids):
     k = kandev()
     try:
@@ -410,14 +558,18 @@ def collect(ids):
                     "description": t.get("description", ""), "wip_admitted": t.get("wip_admitted"),
                     "wip_step": step in wip_steps, "blockers": kandev_blockers(t),
                     "question": t["id"] in pq_tasks, "sessions": [], "perm": 0}
-            if step != DONE and t["state"] != "COMPLETED":
+            live = step != DONE and t["state"] != "COMPLETED"
+            if live or wname.endswith("模块管理"):     # 已完成的模块任务也取会话：完成后仍可能留着一个卡住的会话（session_stuck）
                 item["sessions"] = k.call("list_task_sessions_kandev", {"task_id": t["id"]}).get("sessions", [])
+            if live:
                 try:
                     perms = k.call("list_pending_agent_permissions_kandev", {"task_id": t["id"]})
                     item["perm"] = len(perms.get("requests", perms.get("permissions", []))) if isinstance(perms, dict) else 0
                 except RuntimeError:
                     item["perm"] = 0
                 item["limit"] = detect_limit(k, t["id"], item["sessions"][0] if item["sessions"] else None)
+                if step in RESIDENT and not item["limit"]:
+                    item["long"] = detect_long(k, t["id"], item["sessions"])
             tasks.append(item)
     return tasks
 
@@ -536,7 +688,12 @@ def main():
         for t in tasks:
             t.setdefault("description", ""), t.setdefault("sessions", []), t.setdefault("blockers", [])
     else:
-        tasks = collect(ids)
+        try:
+            tasks = collect(ids)
+        except (OSError, RuntimeError) as e:      # 连不上 Kandev MCP（URLError 是 OSError）或工具调用失败
+            n = note_failure(a.state_dir, now, e)
+            print(f"stage.py：连不上 Kandev 或查询失败（连续第 {n} 次）：{e}", file=sys.stderr)
+            return 1
 
     projects = group_projects(tasks)
     if a.mgmt_root:
@@ -546,10 +703,11 @@ def main():
     for pr in projects:
         root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
         if ready and not a.snapshot:
-            blockers, statuses = load_blockers(root), load_statuses(root)
+            blockers, statuses, mod_sessions = load_blockers(root), load_statuses(root), load_module_sessions(root)
             for t in pr["tasks"]:
                 t["blocker_status"] = blockers.get(t["id"])
                 t["own_status"] = statuses.get(t["id"])
+                t["module_session"] = mod_sessions.get(t["id"])
         state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
         state = json.load(open(state_path, encoding="utf-8")) if os.path.exists(state_path) else {}
         rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])
@@ -588,7 +746,8 @@ def main():
             texts.append(f"已停用守护 automation：{reason}")
     if not a.snapshot:   # 心跳：守护是否还在运行，看这个文件的 at 即可
         beat = {"at": now.isoformat(), "projects": [pr["title"] for pr in projects], "alerts": n_alerts,
-                "disabled": bool(disabled)}
+                "disabled": bool(disabled),
+                "mgmt_roots": [pr["mgmt_root"] for pr in projects if initialized(pr["mgmt_root"])]}   # note_failure 用
         with open(beat_path, "w", encoding="utf-8") as f:
             json.dump(beat, f, ensure_ascii=False, indent=1)
     if not a.json:

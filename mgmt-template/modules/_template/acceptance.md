@@ -26,10 +26,22 @@
 | MA-1 | pass / fail / unverified(原因) | |
 
 ### 修复项
-<!-- 每个 fail 一条；没有写"无"。格式见 roles/module-auditor.md「修复项格式」。 -->
+<!-- 只写阻塞级的 fail（F-n），以及属于本模块、要退回去改测试的测试缺陷（T-n，契约只改测试）；没有写"无"。定级和格式见 roles/module-auditor.md。 -->
 | 编号 | 担当 | 复现步骤 | 期望 | 实际 | 疑似位置 | 对应 |
 |---|---|---|---|---|---|---|
 | F-1 | auth-02 | `pytest tests/auth/test_login.py -k locked` | 返回 423 | 返回 500 | src/auth/api/login.py | MA-3 |
+
+### 已知问题
+<!-- 轻微级：对应的 MA 照常判 pass，不触发修复，随 REPORT（result=partial）交给 pm。没有写"无"。 -->
+| 编号 | 现象 | 影响 | 定为轻微的理由 | 对应 |
+|---|---|---|---|---|
+| K-1 | 登录页在 320px 宽时按钮文字换行 | 外观，功能可用 | 需求没有提到 320px | MA-2 |
+
+### 测试缺陷
+<!-- 失败来自测试、判定脚本或 harness 自身：对应的 MA 判 unverified(测试缺陷)。属于本模块的同时写进「修复项」；不属于本模块的只记在这里，由 pm 转交。没有写"无"。 -->
+| 编号 | 测试 | 为什么是测试的问题 | 属于 |
+|---|---|---|---|
+| 无 | | | |
 
 ### 建议
 <!-- 子任务 report 中值得做的 suggestions：本模块内 / 涉及其他模块。没有写"无"。 -->
@@ -40,5 +52,5 @@
 - 无
 
 ### 结论
-- 通过 → REPORT 消息 id：M-mod-audit.auth-...（有 unverified 时 result=partial，逐条列出）
+- 通过（「修复项」为空）→ REPORT 消息 id：M-mod-audit.auth-...（有 unverified 或 K-n 时 result=partial，逐条列出）
 - 不通过 → 退回「等待开发」：N 条修复项（第 3 轮或涉及其他模块时另发 ESCALATE <id>）

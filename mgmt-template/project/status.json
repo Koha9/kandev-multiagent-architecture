@@ -12,6 +12,7 @@
       "blocked_reason": null
     }
   ],
+  "fix_rounds": 0,
   "open_escalations": [],
   "open_decisions": []
 }
