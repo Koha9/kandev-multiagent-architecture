@@ -51,7 +51,172 @@ def main():
     test_session_not_started()
     test_load_statuses()
     test_suggest_complete()
+    test_session_long()
+    test_stuck_and_parent_done()
+    test_module_session_routing()
+    test_note_failure()
     print("OK test_stage")
+
+
+def test_stuck_and_parent_done():
+    """v3.3.3：旧会话一直 RUNNING（消息永久排队）、模块已完成而子任务还在跑 → 都告警 pm，不升级为 pm_unresponsive。"""
+    now = ts("2026-11-09T05:00:00Z")
+    fresh = {"state": "RUNNING", "updated_at": "2026-11-09T04:58:00Z", "session_id": "aaaaaaaa-new"}
+    stale = {"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "bbbbbbbb-old"}
+    idle = {"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T03:00:00Z", "session_id": "cccccccc-idle"}
+
+    mod = task(11, "模块管理", "验收调查", f"pm: task {uid(1)}")
+    mod["sessions"] = [fresh, stale]                                   # 验收会话在跑，模块 agent 的旧会话卡住
+    rows, alerts, st = evaluate([mod], now, {}, uid(1))
+    assert rows[0]["category"] == "等上级：旧会话卡住" and rows[0]["value"].startswith("bbbbbbbb"), rows
+    assert [(a["signal"], a["to_task"]) for a in alerts] == [("session_stuck", uid(1))], alerts
+    mod["sessions"] = [stale]                                          # 最新会话卡住仍是原来的 running_stale
+    assert evaluate([mod], now, {}, uid(1))[1][0]["signal"] == "running_stale"
+    mod["sessions"] = [fresh, idle]                                    # 旧会话只是空闲：不算
+    assert evaluate([mod], now, {}, uid(1))[0][0]["category"] == "运行中"
+
+    done = task(12, "模块管理", "完成", f"pm: task {uid(1)}", state="COMPLETED")
+    done["sessions"] = [{"state": "COMPLETED", "updated_at": "2026-11-09T03:00:00Z"}, stale]
+    rows, alerts, st = evaluate([done], now, {}, uid(1))
+    assert rows[0]["category"] == "等上级：已完成但会话卡住", rows
+    assert [(a["signal"], a["to_task"]) for a in alerts] == [("session_stuck", uid(1))], alerts
+    done["sessions"] = [{"state": "COMPLETED", "updated_at": "2026-11-09T03:00:00Z"}]
+    assert evaluate([done], now, {}, uid(1))[0][0]["category"] == "完成"
+
+    pm = task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt")
+    pm["sessions"] = [idle, stale]                                     # pm 自己的旧会话卡住：发给 pm，但不把它移到刷新
+    rows, alerts, st = evaluate([pm], now, {}, uid(1))
+    rows, alerts, st = evaluate([pm], now + timedelta(minutes=65), st, uid(1))
+    assert [(a["signal"], a["to_task"]) for a in alerts] == [("session_stuck", uid(1))], alerts
+
+    child = task(21, "开发", "开发", f"parent: mod:a @ task {uid(12)}")
+    child["sessions"] = [fresh]
+    done["sessions"] = []
+    rows, a1, st = evaluate([done, child], now, {}, uid(1))
+    rows, a2, st = evaluate([done, child], now + timedelta(minutes=12), st, uid(1))
+    assert {r["title"]: r["category"] for r in rows}["t21"] == "等上级：模块已完成", rows
+    assert [(a["signal"], a["to_task"]) for a in a1 + a2] == [("parent_done", uid(1))], (a1, a2)   # 刚看到不告警；发给 pm
+    live = task(13, "模块管理", "等待开发", f"pm: task {uid(1)}")
+    child2 = task(22, "开发", "开发", f"parent: mod:b @ task {uid(13)}")
+    child2["sessions"] = [fresh]
+    assert evaluate([live, child2], now, {}, uid(1))[0][1]["category"] == "运行中"       # 模块还在：不受影响
+
+    # 用量上限：上限文字又以普通 agent 消息出现一次（排在那条 status 之后）时仍要认出来
+    echo = {"type": "message", "author_type": "agent", "created_at": "2026-11-09T11:46:00Z",
+            "content": "You've hit your 5-hour limit · resets 3:30am (Asia/Tokyo)"}
+    assert usage_limit([echo, limit_status()], "S1") is not None
+    said = {"type": "message", "author_type": "user", "created_at": "2026-11-09T11:46:00Z",
+            "content": "did you hit your usage limit?"}
+    assert usage_limit([said, limit_status()], "S1") is None           # 用户发来的消息不跳过：说明之后已有新一轮
+
+
+def test_module_session_routing():
+    """v3.3.3：发给模块任务的告警带上模块 agent 的会话 id（tasks.json 顶层的 module_session_id）。"""
+    import tempfile
+    from stage import load_module_sessions
+    now = ts("2026-11-09T05:00:00Z")
+    mod = task(11, "模块管理", "等待开发", f"pm: task {uid(1)}")
+    dev = task(22, "开发", "等待决策", f"parent: mod:a @ task {uid(11)}")
+    mod["module_session"] = "S-mod"
+    _, a1, st = evaluate([mod, dev], now, {}, uid(1))
+    _, a2, st = evaluate([mod, dev], now + timedelta(minutes=12), st, uid(1))
+    assert [(a["signal"], a["to_task"], a.get("session_id")) for a in a1 + a2] == [("decision_pending", uid(11), "S-mod")], a2
+    mod["module_session"] = None                                       # 旧项目没有记录：照旧不带
+    _, a1, st = evaluate([mod, dev], now, {}, uid(1))
+    _, a2, st = evaluate([mod, dev], now + timedelta(minutes=12), st, uid(1))
+    assert "session_id" not in a2[0], a2
+    with tempfile.TemporaryDirectory() as root:
+        def put(m, doc):
+            os.makedirs(os.path.join(root, "modules", m))
+            with open(os.path.join(root, "modules", m, "tasks.json"), "w", encoding="utf-8") as f:
+                f.write(doc if isinstance(doc, str) else json.dumps(doc))
+        put("auth", {"module_task_id": "T1", "module_session_id": "S1", "tasks": []})
+        put("old", {"tasks": []})
+        put("half", {"module_task_id": "T3", "tasks": []})
+        put("broken", "{坏的")
+        put("_template", {"module_task_id": "TX", "module_session_id": "SX", "tasks": []})
+        assert load_module_sessions(root) == {"T1": "S1"}, load_module_sessions(root)
+
+
+def test_note_failure():
+    """v3.3.3：连不上 Kandev 时在各项目的 stage.md 留一行故障提示，并记连续失败次数；at（最后一次成功）不变。"""
+    import tempfile
+    from stage import FAIL_MARK, note_failure
+    with tempfile.TemporaryDirectory() as tmp:
+        root, state = os.path.join(tmp, "mgmt"), os.path.join(tmp, "state")
+        os.makedirs(os.path.join(root, "agents", "guard"))
+        os.makedirs(state)
+        sm = os.path.join(root, "agents", "guard", "stage.md")
+        with open(sm, "w", encoding="utf-8") as f:
+            f.write("# 现在在等谁\n\n> 由 kandev/stage.py 生成，不要手改。更新：2026-11-09 14:00\n\n没有需要处理的事项。\n")
+        with open(os.path.join(state, "last_run.json"), "w", encoding="utf-8") as f:
+            json.dump({"at": "2026-11-09T05:00:00+00:00", "projects": ["P"],
+                       "mgmt_roots": [root, os.path.join(tmp, "不存在")]}, f)
+        assert note_failure(state, ts("2026-11-09T05:20:00Z"), OSError("Connection refused")) == 1
+        assert note_failure(state, ts("2026-11-09T05:40:00Z"), OSError("Connection refused")) == 2
+        text = open(sm, encoding="utf-8").read()
+        assert text.count(FAIL_MARK) == 1 and "连续 2 次" in text and "Connection refused" in text, text
+        assert text.startswith("# 现在在等谁\n" + FAIL_MARK) and "更新：2026-11-09 14:00" in text, text
+        beat = json.load(open(os.path.join(state, "last_run.json"), encoding="utf-8"))
+        assert beat["failures"] == 2 and beat["at"] == "2026-11-09T05:00:00+00:00", beat
+    with tempfile.TemporaryDirectory() as tmp:                         # 没有心跳文件也不报错
+        assert note_failure(os.path.join(tmp, "new"), ts("2026-11-09T05:20:00Z"), OSError("x")) == 1
+
+
+def test_session_long():
+    """v3.3.3：常驻会话自上次重置被唤醒 ≥15 次 → 告警任务自己（带会话 id）；pm 不处理则 60 分钟后移到「刷新」。"""
+    from stage import T_WAKES, WAKE_PAGES, detect_long, wakes_since_reset
+    user = {"type": "message", "author_type": "user", "content": "[KMSG v1] ..."}
+    agent = {"type": "message", "author_type": "agent", "content": "已处理"}
+    reset = {"type": "status", "author_type": "agent", "content": "Context reset — new conversation started"}
+    other = {"type": "status", "author_type": "agent", "content": "Agent encountered an error"}
+    assert wakes_since_reset([user, agent, other, user, reset, user, user]) == (2, True)    # 新的在前，重置之前的不算
+    assert wakes_since_reset([agent, user]) == (1, False)
+    assert wakes_since_reset([]) == (0, False)
+
+    class Fake:                                    # 每页 1 次唤醒；第 9 页才有重置标记
+        def __init__(self, pages):
+            self.pages, self.calls = pages, []
+
+        def call(self, name, args):
+            self.calls.append(args)
+            i = len(self.calls) - 1
+            return {"messages": [dict(m, id=f"m{i}-{j}") for j, m in enumerate(self.pages[i])],
+                    "has_more": i + 1 < len(self.pages)}
+
+    idle = [{"state": "COMPLETED", "session_id": "S-audit"}, {"state": "WAITING_FOR_INPUT", "session_id": "S-mod"}]
+    k = Fake([[agent, agent, user]] * 8 + [[reset]])
+    got = detect_long(k, uid(11), idle)
+    assert got == {"session_id": "S-mod", "wakes": WAKE_PAGES}, got       # 翻页有上限；选的是还活着的会话，不是已结束的验收会话
+    assert len(k.calls) == WAKE_PAGES, len(k.calls)
+    assert k.calls[0]["message_types"] == ["message", "status"] and "before" not in k.calls[0], k.calls[0]
+    assert k.calls[1]["before"] == "m0-2", k.calls[1]
+    assert detect_long(Fake([[user, reset, user, user]]), uid(11), idle)["wakes"] == 1
+    assert detect_long(Fake([[user] * 20, [user] * 20]), uid(11), idle)["wakes"] == 20   # 够数就不再翻页
+    assert detect_long(Fake([]), uid(11), [{"state": "COMPLETED", "session_id": "S"}]) is None
+
+    now = ts("2026-11-09T05:00:00Z")
+    pm = task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt")
+    mod = task(11, "模块管理", "等待开发", f"pm: task {uid(1)}")
+    low = task(12, "模块管理", "等待开发", f"pm: task {uid(1)}")
+    pm["long"], mod["long"] = {"session_id": "S-pm", "wakes": T_WAKES}, {"session_id": "S-mod", "wakes": T_WAKES + 3}
+    low["long"] = {"session_id": "S-low", "wakes": T_WAKES - 1}
+    for t in (pm, mod, low):
+        t["sessions"] = [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:50:00Z", "session_id": "S"}]
+    rows, alerts, st = evaluate([pm, mod, low], now, {}, uid(1))
+    cats = {r["title"]: r["category"] for r in rows}
+    assert cats == {"t1": "常驻：会话过长", "t11": "常驻：会话过长", "t12": "常驻"}, cats
+    got = {(a["signal"], a["to_task"], a.get("session_id")) for a in alerts}
+    assert got == {("session_long", uid(1), "S-pm"), ("session_long", uid(11), "S-mod")}, got   # 发给自己的常驻会话
+    assert all(a["suggest"].startswith("refresh") for a in alerts), alerts
+    rows, alerts, st = evaluate([pm, mod, low], now + timedelta(minutes=20), st, uid(1))
+    assert alerts == [], alerts                                                       # 60 分钟内去重
+    rows, alerts, st = evaluate([pm, mod, low], now + timedelta(minutes=65), st, uid(1))
+    got = {(a["signal"], a["to_task"]) for a in alerts}
+    assert got == {("pm_unresponsive", uid(1)), ("session_long", uid(11))}, got       # 只有 pm 升级；模块任务重发原信号
+    assert next(a for a in alerts if a["signal"] == "pm_unresponsive")["return_step"] == "调度", alerts
+    pm["long"] = {"session_id": "S-pm", "wakes": 0}                                   # 刷新之后
+    assert evaluate([pm], now + timedelta(minutes=90), st, uid(1))[0][0]["category"] == "常驻"
 
 
 def test_child_unrecorded():

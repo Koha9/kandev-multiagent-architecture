@@ -29,6 +29,8 @@
 | — | （W1「接收」） | 任务还没有 `[TASK v1]` 头（mgmt_root 为空）：不写 stage.md；等用户回答时归第 3 条，空闲未推进时归第 9 条的例外；会话失败、疑似卡住归为"等人：接收会话失败 / 接收疑似卡住"（这一步没有上级） | 不告警 |
 | 4a | 等上限：已重置，待恢复 | 最新会话停在用量上限，已过重置时间 2 分钟 | `limit_resume` → 发给任务自己（不告警上级） |
 | 4b | 等上限：等待重置 | 最新会话停在用量上限，还没到重置时间 | 不告警，只写进 stage.md |
+| 4c | 等上级：旧会话卡住 / 已完成但会话卡住 | 任务有一个不是最新的会话 RUNNING 但 ≥45 分钟没有更新（最新会话卡住归第 10 条）；模块任务完成后也检查它的全部会话。那一轮不会自己结束，发给它的消息会一直排队 | `session_stuck` → 发给 pm（不升级为 `pm_unresponsive`） |
+| 4d | 等上级：模块已完成 | 开发任务还没结束，但它的模块任务已经完成，停留 ≥10 分钟：没有模块 agent 会处理它 | `parent_done` → 发给 pm |
 | 5 | 等上级：等待决策 | 步骤=等待决策，停留 ≥10 分钟（开发任务上报 blocked / dropped / 缺陷后自己移到这里；不会再判为空闲未推进） | `decision_pending` |
 | 6 | 等上级：会话失败 | 最新会话 FAILED / CANCELLED | `session_failed` |
 | 6a | 等上级：会话未启动 | 任务 state=SCHEDULING、在 agent 步骤、没有运行中的会话、不是 WIP 排队，停留 ≥10 分钟（Kandev 准备会话失败后静默停在这里；排在第 9 条之前，避免上一步骤的空闲会话被判为空闲未推进）。W1 / W2 任务归为"等人：会话未启动"，只写进 stage.md | `session_not_started`（只对开发任务） |
@@ -40,11 +42,16 @@
 | 10 | 等上级：疑似卡住 | 会话 RUNNING 但 ≥45 分钟没有更新 | `running_stale` |
 | 11 | 排队 | 在设了 WIP 的步骤但未获准入，或在 agent 步骤还没有会话 | — |
 | 12 | 待开发 | 步骤=待开发，前置未完成 | — |
+| 13a | 常驻：会话过长 | 步骤=调度 / 等待开发，常驻会话（最新的一个还活着的会话）自上次上下文重置以来已被唤醒 ≥15 次。唤醒 = 该会话里用户侧的 message（步骤 prompt、KMSG、用户输入）；重置标记 = 内容以 `Context reset` 开头的 status。只看消息的类型、作者和这个标记 | `session_long` → 发给任务自己的常驻会话（带 `session_id`），建议 refresh |
 | 13 | 常驻 | 步骤=调度 / 等待开发 | — |
 | 14 | 运行中 | 其他 | — |
 
 - **前置关系的来源**：v3.2 的「待开发」任务不在 Kandev 里设 blocked_by，前置只记在 `modules/<模块>/tasks.json`（含 `-fix-<n>` 修复模块）。任务 `blocked_by` 中每个任务 status 都是 `merged` / `dropped` 才算完成，有 `failed` 算失败；v3.1 任务在 Kandev 里设置的 blocked_by 仍然有效，两种来源任一表明未完成就不放行。读不到 tasks.json 时只剩 Kandev 来源，都没有就只在 stage.md 显示
 - `child_unrecorded`、`session_not_started`（v3.3.2 新增）的建议是完整的处理方法，旧版 prompt 的模块 agent 收到也能照做
+- `session_long`（v3.3.3）同样带完整的处理方法。它不靠 agent 自己判断"会话变长"：pm 收到后 60 分钟仍未刷新 → 按下一条升级为 `pm_unresponsive`；模块任务不由守护移动，到期后重发
+- 发给模块任务的告警带 `session_id`（v3.3.3）：取自 `modules/<模块>/tasks.json` 顶层的 `module_session_id`（模块 agent 规划时写入）。没有记录的旧项目照旧不带
+- 用量上限的判断会跳过内容就是上限提示的 agent 消息（它有时排在那条 status 之后，v3.3.2 因此认不出上限）
+- 连不上 Kandev（v3.3.3）：脚本退出码 1，在 `last_run.json` 记连续失败次数（`failures`，`at` 仍是最后一次成功的时间），并在上次巡检过的各项目 stage.md 标题下加一行"守护故障"；下次成功运行时整份重写，提示消失
 - 同一任务的同一信号 60 分钟内只告警一次（去重状态存在架构仓库的 `kandev/guard_state/<pm 任务 id>.json`，不在管理目录里）
 - pm 的告警发给 pm 自己；pm 停在常驻步骤（调度）时，同一信号 60 分钟后仍未消除 → `pm_unresponsive`，输出带 `return_step`（当前步骤名）。pm 在立项规划、模块下发、项目验收、收尾合并等其他步骤不升级为 `pm_unresponsive`（刷新默认回到「调度」，会跳过剩下的工作），到期后重发原信号
 - 管理目录还没初始化（没有 README.md，例如立项规划刚开始）时，不写 stage.md，以免干扰 pm 判断"管理目录是否存在"
@@ -71,10 +78,12 @@ FAILED / CANCELLED 的 pm 不算完成，项目仍在进行中，守护继续运
 | 模块任务 | pm 任务 | unblock / refresh |
 | pm 任务 | pm 任务本身；在「调度」时 `pm_unresponsive` 移到「刷新」 | refresh |
 | 任意任务停在用量上限（`limit_resume`） | 任务自己的原会话 | continue |
+| 任意任务有卡住的旧会话（`session_stuck`）、模块已完成而子任务还在跑（`parent_done`） | pm 任务 | 登记 attention.md 请用户取消 / 建修复模块接手 |
+| 常驻会话被唤醒次数过多（`session_long`） | 任务自己的常驻会话（脚本输出的 `session_id`） | refresh |
 
 ## 可写
 - 各项目的 `agents/guard/journal.md`（只追加；没有告警时不写；时间取自系统时钟）。管理目录未初始化时写 `kandev/guard_state/journal.md`
 - 各项目的 `agents/guard/stage.md`（由 `stage.py` 写）
 
 ## 可联系
-- `message_task_kandev` 发 KMSG ALERT（reply: none）；`limit_resume` 时发脚本给出的 `continue` 消息到原会话
+- `message_task_kandev` 发 KMSG ALERT（reply: none；脚本输出带 `session_id` 时发到那个会话）；`limit_resume` 时发脚本给出的 `continue` 消息到原会话

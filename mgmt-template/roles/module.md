@@ -34,6 +34,11 @@
 | 本模块的审核会话 | QUESTION（用 `review.reviewer_session` 定位） |
 | 其他模块 agent | QUESTION / ANSWER / NOTICE，只涉及事实 |
 
+## 会话 id
+- 「模块规划」时把自己的任务 id 和会话 id 写进 tasks.json 顶层（`module_task_id`、`module_session_id`），并写进每个子任务 [TASK v1] 头的 parent 行（`parent: mod:<模块> @ task <id> session <会话 id>`）。pm、验收者、子任务和守护靠它把消息发到你的会话；不写的话，模块进过「验收调查」后消息会落到验收者的会话
+- 每次恢复协议发现本会话 id 与 tasks.json 记的不同，就更新 `module_session_id`
+- 给其他模块发消息时同样带对方的 `module_session_id`
+
 ## 待开发与放行
 - 子任务一律先创建到「待开发」（`workspace_mode=new_workspace`、`base_branch=mod/<模块>`、`autopilot=true`、`start_agent=false`，不设 Kandev 的 `blocked_by`：前置只记在 tasks.json），读回核对工作区模式、autopilot、base 后：没有前置的移到「开发」（`status=todo`），有前置的留下（`status=held`）。参数不符 → 换新 id（加 `-r<n>`）重建，原任务移到「完成」、`status=failed`。「待开发」不占 WIP。参数一个都不能省；报错时按报错改正后重试，不要删参数来消除报错
 - 合并步骤的 REPORT 到达 → 核对提交已在 `mod/<模块>` 上（`git merge-base --is-ancestor`）后设 `status=merged`。REPORT 可能发不出去，所以每次被唤醒都先按 Kandev 状态对账：子任务已在「完成」而 tasks.json 没有登记 → `mod/<模块>` 上有以任务 id 开头的提交才补记 merged，没有就查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm（不猜 merged）。然后检查：`held` 任务的前置在 tasks.json 中都是 merged 或 dropped → 移到「开发」，`status=todo`
@@ -56,6 +61,7 @@
 ## 修复模块（scope mod:<模块>-fix-<n>）
 - 用自己的 `modules/<模块>-fix-<n>/`、`agents/mod-<模块>-fix-<n>/`；原模块的 `modules/<模块>/` 只读，接口有变更时在自己目录写增量并通知 pm
 - 通常只拆一个任务，AC 是修复项本身；验收只复跑修复项对应的失败测试和合并门禁
+- 契约写了「同步范围」（修复带来的文档、规格、判定脚本改动）时，这些路径写进同一个任务的 owns，和修复一起改、一起审核，即使它们属于别的模块的源码路径；不为同步另拆任务
 - 有证据认为缺陷不归本模块或其实是测试写错 → 带证据向 pm 报 misrouted，不硬修，然后把本任务移到「完成」（一个子任务都没建时也一样）
 
 ## 结合测试模块（kind: integration）
@@ -64,6 +70,6 @@
 - 结合测试任务上报缺陷（任务在「等待决策」）：不自己修、不自行确认，ESCALATE 给 pm（refs 指向 report 的 defects）。pm 通知修复完成后，把修复分支合并进集成分支和 `mod/<模块>`，再把该任务移回「开发」重跑；pm 转来 misrouted 时同样移回，让它重新判断；pm 把缺陷接受为已知问题（DECISION + ADR）时也移回，instructions=把对应的失败用例标成预期失败并引用 ADR 编号，然后正常上报
 
 ## 刷新、上限与每轮必做
-- 会话过长：状态写入 NOW，「注意」节写 `刷新返回：等待开发`，move 到「刷新」；刷新后先核对「未确认的意图」，子任务已全部终态（且没有 held）时直接进入「验收调查」
+- 会话过长（NOW 开头的「唤醒计数」每轮加 1，达到 15；或收到守护的 refresh / session_long 告警）：处理完本轮事件后，状态写入 NOW，「注意」节写 `刷新返回：等待开发`，move 到「刷新」；刷新后先核对「未确认的意图」，子任务已全部终态（且没有 held）时直接进入「验收调查」
 - 审核退回 3 次、合并门禁失败 3 次 → 当作方向性问题处理；模块验收第 3 轮仍不通过 → 验收者 ESCALATE 给 pm，你等 DECISION；涉及其他模块的接口或决策 → ESCALATE 给 pm
 - 每轮只处理本次事件，不 sleep、不轮询；先写后做；一轮结束前刷新 NOW
