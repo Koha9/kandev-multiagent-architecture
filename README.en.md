@@ -2,7 +2,7 @@
 
 [中文](README.md) | **English**
 
-A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts. Current version: v3.3.4.
+A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts.
 
 > Chinese is the primary language of this repository. The English docs cover the human-facing parts; the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), the role cards and templates, and the research reports are in Chinese. The Kandev workflow and step names are Chinese too, so the English docs give each step's Chinese name next to its English one.
 
@@ -59,6 +59,8 @@ The full research and comparisons are in [reports/](reports/) and [research_note
 
 Copy one of the prompts below to an agent that can access your local files and the Kandev MCP, such as Claude Code, Codex, or a task agent inside Kandev. The agent's entry point is [AGENTS.md](AGENTS.md) (Chinese; agents read it fine). It has the steps for deploying, verifying, starting a project, running the benchmark and changing the workflow, and says where the agent must ask you first.
 
+While deploying, the agent asks you four things: quick or custom setup, which workspace, which profile for each role, and whether to create the guard. The default is a standalone install: everything needed at run time is copied to the install directory (`~/.kandev-ma/<first 8 chars of the workspace id>/`), so the workflows keep working after this repository is deleted; `<install directory>` in the prompts below means that directory (or this repository in link mode). One step may need you: an agent outside Kandev cannot create a Kandev automation, so it hands you a handoff file and asks you to give its "handoff prompt" (交接 prompt) to an agent in any Kandev task.
+
 **Deploy and verify**
 
 ```text
@@ -72,7 +74,7 @@ Ask me before choosing profiles, before changing Kandev, and before any check th
 **Start a project**
 
 ```text
-Following section C of <local path of this repo>/AGENTS.md, start a new project in Kandev with the multi-agent workflow:
+Following section C of <install directory>/AGENTS.md, start a new project in Kandev with the multi-agent workflow:
 - Repository: <absolute local path>, base branch: <main>
 - Mode: attended (wait for me at key points)
 - Requirements, most important first:
@@ -84,7 +86,7 @@ Show me the [TASK v1] task description first; create and start the task only aft
 **Run the benchmark to check a deployment**
 
 ```text
-Following section D of <local path of this repo>/AGENTS.md, run the benchmark project once. When it finishes, append the metrics to evaluation/bench/results.md,
+Following section D of <install directory>/AGENTS.md, run the benchmark project once. When it finishes, append the metrics to evaluation/bench/results.md,
 and tell me the total duration, how many times review sent work back, how many guard alerts fired, and the requirement coverage. Before starting, tell me the expected cost and duration.
 ```
 
@@ -130,6 +132,7 @@ To see what the workflows look like first: [kandev/export/](kandev/export/README
 ├─ AGENTS.md         Entry point for agents: deploy, verify, start a project, run the benchmark, change the workflow
 ├─ docs/             Architecture docs, diagrams, generated prompts, management directory and project conventions
 ├─ kandev/           Deployment scripts, guard script, example workflows (export/), handoff prompts
+├─ rules/            Factory versions of the customizable rule slots (git, coding, testing, …) and parameters
 ├─ mgmt-template/    Per-project management directory template: role cards, message protocol, check scripts
 ├─ evaluation/       Benchmark project and metrics collection
 ├─ reports/          Research reports

@@ -5,7 +5,7 @@ ma-manifest.json 放在安装目录（独立安装）或本仓库（链接模式
   mode         standalone（复制到安装目录）| link（直接使用源仓库）
   source       安装来源（路径、commit）
   files        独立安装时每个出厂文件的 sha256：升级时用来判断用户是否改过
-  deployments  每个 workspace 一条：用户对提问清单的回答、ids / profiles 文件名、已部署的版本和 prompt 哈希
+  deployments  每个 workspace 一条：用户对 install 阶段提问的回答、ids / profiles 文件名、已部署的版本和指纹
 """
 import fnmatch
 import hashlib
@@ -16,18 +16,21 @@ NAME = "ma-manifest.json"
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUESTIONS = os.path.join(HERE, "deploy_questions.json")
 STAGES = ("install", "customize", "redeploy", "upgrade")
+ASKS = ("always", "custom", "when_prompted")
 
 # 不随安装复制的内容：本机文件、运行时状态、调研材料、用户的定制
 SKIP_DIR_NAMES = {".git", ".claude", "__pycache__", "node_modules"}
 SKIP_TOP = {"reports", "research_notes", "custom"}
-SKIP_PREFIX = ("kandev/guard_state/", "evaluation/pilot-")
-SKIP_FILES = ("*.local.md", "*.local.json", "kandev/kandev_ids*.json", NAME, "*.pyc", "*.new", "*.mine", "*.bak",
-              ".conda-env")
+SKIP_PREFIX = ("kandev/guard_state/", "kandev/export.local/", "evaluation/pilot-")
+SKIP_FILES = ("*.local.md", "*.local.json", "kandev/kandev_ids*.json", NAME, "*.pyc", "*.new", "*.new.*", "*.mine",
+              "*.mine.*", "*.bak", "*.tmp", ".conda-env")
 GENERATED = ("docs/prompts.md", "kandev/export/*.json")   # 部署时重新生成，升级时直接覆盖
 
+# 角色：必填 / 可选（缺省取另一个角色）/ 必须互不相同的组合。build_workflows.py 也用这三张表。
 REQUIRED_ROLES = ("pm", "auditor", "developer", "reviewer", "mechanical")
 OPTIONAL_ROLES = {"module": "pm", "module_auditor": "auditor", "plan_auditor": "auditor", "intake": "mechanical"}
 DISTINCT = (("pm", "auditor"), ("pm", "plan_auditor"), ("module", "module_auditor"), ("developer", "reviewer"))
+TYPES = {"string": str, "object": dict, "list": list}
 
 
 def norm(path):
@@ -40,9 +43,12 @@ def load(root):
 
 
 def save(root, m):
-    with open(os.path.join(root, NAME), "w", encoding="utf-8", newline="\n") as f:
+    """先写临时文件再替换：清单里有全部答案，不能留下半截文件。"""
+    p = os.path.join(root, NAME)
+    with open(p + ".tmp", "w", encoding="utf-8", newline="\n") as f:
         json.dump(m, f, ensure_ascii=False, indent=1)
         f.write("\n")
+    os.replace(p + ".tmp", p)
 
 
 def sha(path):
@@ -78,49 +84,55 @@ def questions(stage=None):
     return [q for q in qs if stage is None or q["stage"] == stage]
 
 
-def check_profiles(p):
-    problems = []
-    if not isinstance(p, dict):
-        return ["profiles 必须是 {角色: agent profile id} 的对象"]
-    missing = [r for r in REQUIRED_ROLES if not p.get(r) or "<" in str(p.get(r))]
-    if missing:
-        problems.append(f"profiles 缺少必填角色或还是占位：{missing}")
-    unknown = set(p) - set(REQUIRED_ROLES) - set(OPTIONAL_ROLES)
-    if unknown:
-        problems.append(f"profiles 中有不认识的角色：{sorted(unknown)}")
+def full_profiles(p):
+    """补上可选角色的缺省值。"""
     full = dict(p)
     for role, fallback in OPTIONAL_ROLES.items():
         full.setdefault(role, full.get(fallback))
-    for a, b in DISTINCT:
-        if full.get(a) and full.get(a) == full.get(b):
-            problems.append(f"profiles 的 {a} 与 {b} 必须是不同的 profile")
+    return full
+
+
+def check_profiles(p):
+    if not isinstance(p, dict):
+        return ["必须是 {角色: agent profile id} 的对象"]
+    problems = []
+    missing = [r for r in REQUIRED_ROLES if not p.get(r) or "<" in str(p.get(r))]
+    if missing:
+        problems.append(f"缺少必填角色或还是占位：{missing}")
+    unknown = set(p) - set(REQUIRED_ROLES) - set(OPTIONAL_ROLES)
+    if unknown:
+        problems.append(f"有不认识的角色：{sorted(unknown)}")
+    full = full_profiles(p)
+    problems += [f"{a} 与 {b} 必须是不同的 profile" for a, b in DISTINCT if full.get(a) and full.get(a) == full.get(b)]
     return problems
 
 
-def validate(answers, stage="install"):
-    """按提问清单校验答案。返回 (补全了推荐值的答案, 问题列表)。"""
+def validate(answers):
+    """按提问清单校验 install 阶段的答案（只有这一阶段的答案会被记录）。
+    返回 (补全了推荐值的答案, [(key, 问题说明)])。"""
     out, problems = dict(answers), []
-    custom = answers.get("setup_style") == "custom"
-    for q in questions(stage):
-        key, has = q["key"], q["key"] in answers and answers[q["key"]] not in (None, "")
-        if not has:
-            if q["ask"] == "always" or (custom and "recommended" not in q):
-                problems.append(f"{key}：必须向用户确认——{q['question']}")
-                continue
-            if custom:
-                problems.append(f"{key}：用户选了自定义，这一项也要问——{q['question']}（推荐：{q.get('recommended')}）")
-                continue
-            out[key] = q.get("recommended")
+    qs = {q["key"]: q for q in questions("install")}
+    problems += [(k, f"不认识的键（可用：{sorted(qs)}）") for k in answers if k not in qs]
+    custom, link = answers.get("setup_style") == "custom", answers.get("install_mode") == "link"
+    for key, q in qs.items():
+        if key == "home" and link:              # 链接模式的安装目录就是本仓库
+            out.pop("home", None)
+            continue
+        if answers.get(key) in (None, ""):
+            if q["ask"] == "always":
+                problems.append((key, f"必须向用户确认——{q['question']}"))
+            elif custom:
+                problems.append((key, f"用户选了自定义，这一项也要问——{q['question']}（推荐：{q['recommended']}）"))
+            else:
+                out[key] = q["recommended"]
             continue
         val = answers[key]
-        if q.get("type") == "list":
-            bad = [v for v in (val if isinstance(val, list) else [val]) if v not in q.get("options", [])]
-            if bad or not isinstance(val, list):
-                problems.append(f"{key}：应为列表，可选值 {q.get('options')}，收到 {val!r}")
+        if not isinstance(val, TYPES.get(q.get("type"), str)):
+            problems.append((key, f"类型应为 {q.get('type', 'string')}，收到 {val!r}"))
         elif q.get("options") and val not in q["options"]:
-            problems.append(f"{key}：可选值 {q['options']}，收到 {val!r}")
-    if stage == "install" and "profiles" in answers:
-        problems += check_profiles(answers["profiles"])
+            problems.append((key, f"可选值 {q['options']}，收到 {val!r}"))
+        elif key == "profiles":
+            problems += [(key, p) for p in check_profiles(val)]
     return out, problems
 
 
@@ -133,4 +145,4 @@ def missing_answers(root, workspace):
     dep = deployment(load(root), workspace)
     if not dep:
         return [f"{q['key']}：{q['question']}" for q in questions("install") if q["ask"] == "always"]
-    return validate(dep.get("answers", {}), "install")[1]
+    return [f"{k}：{msg}" for k, msg in validate(dep.get("answers", {}))[1]]

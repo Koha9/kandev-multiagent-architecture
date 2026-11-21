@@ -1,8 +1,9 @@
 {
   "_readme": [
     "部署提问清单：部署 AI 必须向用户确认的事项的唯一来源。用 `python kandev/ma.py questions --stage <阶段>` 查看。",
-    "ask=always：每次都必须问用户，不能替用户决定。ask=custom：用户在 setup_style 选了 custom 才问，否则用 recommended。",
-    "答案写成一个 JSON 文件（键 = key），交给 ma.py 的 --answers；ma.py 把它记进 ma-manifest.json，缺必问项时拒绝执行。",
+    "ask=always：安装时必须问用户，不能替用户决定。ask=custom：用户在 setup_style 选了 custom 才问，否则用 recommended。",
+    "这两类（install 阶段）的答案写成一个 JSON 文件（键 = key），交给 ma.py install --answers；ma.py 把它记进 ma-manifest.json，缺必问项时拒绝执行。",
+    "ask=when_prompted：平时不用问。ma.py 遇到这种情况会停下并说明，这时再问用户，得到同意后带上 flag 重新运行；答案不记录。",
     "新增槽位（rules/*.md、params.json 的键）时必须在 customize 阶段登记（covers），check_docs.py 会检查。"
   ],
   "questions": [
@@ -21,25 +22,14 @@
     {
       "key": "profiles", "stage": "install", "ask": "always",
       "question": "各角色用哪个 agent profile？",
-      "how": "先调用 list_agent_profiles_kandev，按 docs/workflow.md「角色与 profile」为 5 个必填角色（pm、auditor、developer、reviewer、mechanical）各选一个，4 个可选角色（module、module_auditor、plan_auditor、intake）按需要选；把选择列成表给用户确认。缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建。",
+      "how": "先调用 list_agent_profiles_kandev，按 docs/workflow.md「角色与 profile」为 5 个必填角色（pm、auditor、developer、reviewer、mechanical）各选一个，4 个可选角色（module、module_auditor、plan_auditor、intake）按需要选；把选择列成表给用户确认。必填、缺省和「必须不同」的约束由 ma.py 校验，报错照着改。缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建。",
       "type": "object"
     },
     {
-      "key": "existing_workflows", "stage": "install", "ask": "always",
-      "question": "workspace 中已有同名 workflow 时怎么处理？",
-      "how": "先调用 list_workflows_kandev。没有同名的填 none（仍要告诉用户将新建三套 workflow）。同一系列（major.minor 相同）只能 update（就地更新，步骤 ID 和任务不变）；其他系列只能 retire（旧版改名保留，任务留在旧版上跑完）。有进行中的项目时要说明影响。",
-      "options": ["none", "update", "retire"]
-    },
-    {
       "key": "guard_automation", "stage": "install", "ask": "always",
-      "question": "守护 automation（每 20 分钟巡检一次，每次消耗少量模型额度）怎么建？",
-      "how": "create：你在 Kandev 内部且有 create_automation_kandev 时由你创建；manual：把 ma.py 生成的 kandev/handoff/guard-automation.local.md 交给用户；skip：不建（项目卡住时没有告警）。",
-      "options": ["create", "manual", "skip"], "recommended": "create"
-    },
-    {
-      "key": "acceptance_run", "stage": "install", "ask": "always",
-      "question": "部署后是否做「待开发」行为验收？它会启动一次真实的 agent 会话，消耗模型额度。",
-      "options": ["yes", "no"], "recommended": "yes"
+      "question": "要建守护 automation 吗？它每 20 分钟巡检一次，项目卡住时告警、用量上限重置后自动恢复，每次消耗少量模型额度。",
+      "how": "yes：部署后按 ma.py apply 打印的交接文件创建（你在 Kandev 内部且有 create_automation_kandev 时由你做，否则把交接文件交给用户）。skip：不建，告诉用户项目卡住时不会有告警。",
+      "options": ["yes", "skip"], "recommended": "yes"
     },
     {
       "key": "install_mode", "stage": "install", "ask": "custom",
@@ -48,14 +38,15 @@
     },
     {
       "key": "home", "stage": "install", "ask": "custom",
-      "question": "安装目录放在哪里？（链接模式不需要）",
+      "question": "安装目录放在哪里？（链接模式不用问）",
       "type": "string", "recommended": "~/.kandev-ma/<workspace id 前 8 位>",
-      "why": "它必须在运行 Kandev 的那台机器上，守护每 20 分钟要运行其中的脚本。"
+      "why": "它必须在运行 Kandev 的那台机器上，守护每 20 分钟要运行其中的脚本。路径不能含空格。"
     },
     {
       "key": "python", "stage": "install", "ask": "custom",
       "question": "守护用哪个 Python 解释器（3.9+，只用标准库）？",
-      "type": "string", "recommended": "<运行 ma.py 的解释器>"
+      "type": "string", "recommended": "<运行 ma.py 的解释器>",
+      "why": "写绝对路径，路径不能含空格。"
     },
     {
       "key": "kandev_url", "stage": "install", "ask": "custom",
@@ -64,36 +55,41 @@
     },
     {
       "key": "customize", "stage": "customize", "ask": "custom",
-      "question": "要定制哪些规则？（可多选，不选表示全部用出厂规则）",
-      "how": "逐项问清用户的具体要求后，把内容写进 custom/rules/ 下的同名文件（params 只写要改的键），不改 rules/ 里的出厂文件。角色卡和项目模板在 mgmt-template/，「接收」的参数缺省值在 docs/intake.md：独立安装时直接改安装目录里的文件。改完用 ma.py diff 给用户看差异。",
-      "type": "list",
-      "options": ["git", "coding", "testing", "workspace", "quality", "params", "role_cards", "intake_defaults"],
-      "recommended": [],
+      "question": "要定制哪些规则？git、编码、测试、工作区、质量五段规则，数值参数，角色卡，「接收」的参数缺省值。",
+      "how": "逐项问清用户的具体要求后写文件，不记录答案（doctor 会从磁盘列出定制了哪些）。规则槽位和参数写进安装目录的 custom/rules/ 下的同名文件（params.json 只写要改的键），不改 rules/ 里的出厂文件。角色卡和项目模板在 mgmt-template/，「接收」的参数缺省值在 docs/intake.md：独立安装时直接改安装目录里的文件。改完用 ma.py diff 给用户看差异。",
+      "recommended": "不定制",
       "covers": ["rules/git.md", "rules/coding.md", "rules/testing.md", "rules/workspace.md", "rules/quality.md",
                  "rules/params.json:dev_wip", "rules/params.json:refresh_wakes", "rules/params.json:guard"]
     },
     {
-      "key": "confirm_prompt_diff", "stage": "redeploy", "ask": "always",
-      "question": "这些 prompt 变化要写入 Kandev 吗？",
-      "how": "运行 ma.py diff，把有变化的步骤和要点讲给用户；用户同意后把 diff 末尾打印的 confirm 值传给 ma.py apply --confirmed。"
+      "key": "confirm_prompt_diff", "stage": "redeploy", "ask": "when_prompted", "flag": "ma.py apply --confirmed <值>",
+      "question": "这些变化要写入 Kandev 吗？",
+      "how": "就地更新已部署的 workflow 时，ma.py apply 会要求先运行 ma.py diff。把有变化的步骤和要点讲给用户，同意后带上 diff 末尾打印的 confirm 值。"
     },
     {
-      "key": "running_projects", "stage": "redeploy", "ask": "always",
+      "key": "running_projects", "stage": "redeploy", "ask": "when_prompted", "flag": "ma.py apply --with-running",
       "question": "有进行中的项目，它们从下一轮起会用新的 prompt（管理目录里的角色卡仍是启动时的版本）。继续吗？",
-      "how": "ma.py apply 发现有进行中的项目时会停下并列出；用户同意后加 --with-running。没有进行中的项目时不用问。",
-      "options": ["continue", "stop"]
+      "how": "ma.py apply 发现有进行中的项目时会停下并列出。"
     },
     {
-      "key": "upgrade_conflicts", "stage": "upgrade", "ask": "always",
+      "key": "retire_existing", "stage": "redeploy", "ask": "when_prompted", "flag": "ma.py apply --retire",
+      "question": "workspace 里的同名 workflow 属于另一个系列（major.minor 不同），不能就地更新。把旧版改名保留、再导入新版吗？",
+      "how": "ma.py apply 发现这种情况时会停下。旧版改名为「<名称> (<旧版本号>)」，任务都保留；旧版上进行中的项目会在旧 workflow 上跑完，但守护不再巡检它们，要向用户说明。"
+    },
+    {
+      "key": "acceptance_run", "stage": "redeploy", "ask": "when_prompted",
+      "question": "要做「待开发」行为验收吗？它会启动一次真实的 agent 会话，消耗模型额度。",
+      "how": "做 AGENTS.md「B. 验收部署」第 3 项之前问。不做时该项记为 unverified。"
+    },
+    {
+      "key": "upgrade_conflicts", "stage": "upgrade", "ask": "when_prompted", "flag": "ma.py upgrade --conflicts keep|take-new",
       "question": "这些文件你改过，新版也改了。保留你的版本（新版写成 .new 供合并）还是采用新版（你的版本另存为 .mine）？",
-      "how": "ma.py upgrade 有冲突时会停下并列出文件；没有冲突时不用问。保留后可以让 AI 逐个合并 .new。",
-      "options": ["keep", "take-new"], "recommended": "keep"
+      "how": "ma.py upgrade 有冲突时会停下并列出文件。选 keep 后可以帮用户逐个合并 .new。"
     },
     {
-      "key": "upgrade_running_projects", "stage": "upgrade", "ask": "always",
+      "key": "upgrade_running_projects", "stage": "upgrade", "ask": "when_prompted", "flag": "ma.py upgrade --with-running",
       "question": "有进行中的项目，升级安装目录会立刻影响它们的守护和「接收」步骤。继续吗？",
-      "how": "ma.py upgrade 发现有进行中的项目时会停下并列出；用户同意后加 --with-running。新版属于另一个系列（major.minor 不同）时建议等项目结束。",
-      "options": ["continue", "stop"]
+      "how": "ma.py upgrade 发现守护最近巡检时有进行中的项目会停下并列出。新版属于另一个系列（major.minor 不同）时建议等项目结束。"
     }
   ]
 }

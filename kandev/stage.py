@@ -113,6 +113,7 @@ GUARD_NAME = "多Agent 守护"
 RESUME_TEXT = ("continue\n\n（守护 guard：本会话上一轮因到达用量上限而中断，上限已于 {reset} 重置。请从中断处继续当前步骤："
                "先核对 NOW / now、磁盘与 git 的实际状态，已经完成的操作不要重复。）")
 UUID = r"[0-9a-fA-F-]{36}"
+BEAT_NAME = "last_run.json"              # 心跳文件名；main() 按 workspace 改（见 beat_name）
 KANDEV_URL = None                        # main() 从 ids 文件的 _meta.url 取；None 表示默认地址
 
 
@@ -120,13 +121,9 @@ KANDEV_URL = None                        # main() 从 ids 文件的 _meta.url �
 def ts(s):
     if not s:
         return None
-    s = s.replace("Z", "+00:00")
-    if "." in s:
-        head, tail = s.split(".", 1)
-        tz = tail[tail.index("+"):] if "+" in tail else "+00:00"
-        frac = "".join(c for c in tail.split("+")[0] if c.isdigit())[:6]
-        s = f"{head}.{frac}{tz}"
-    dt = datetime.fromisoformat(s)
+    m = re.match(r"^(.*?)(\.\d+)?(Z|[+-]\d\d:?\d\d)?$", s.strip())
+    head, frac, tz = m.group(1), m.group(2) or "", m.group(3) or ""
+    dt = datetime.fromisoformat(head + frac[:7] + ("+00:00" if tz == "Z" else tz))   # 小数秒截到 6 位
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
@@ -145,7 +142,7 @@ def prereq_state(t, by_id):
     两个来源：t["blocker_status"]（tasks.json 中 blocked_by 各任务的 status，None 表示读不到）、
     t["blockers"]（v3.1：Kandev 中的前置任务 id，用它们的 step / state 判断）。"""
     statuses, kblockers = t.get("blocker_status") or [], t.get("blockers") or []
-    known = bool(statuses or kblockers)
+    known = t.get("blocker_status") is not None or bool(kblockers)   # []：tasks.json 里登记了、没有前置；None：查不到
     kb = [by_id.get(b) for b in kblockers]
     failed = "failed" in statuses or any(b and b["state"] in ("FAILED", "CANCELLED") for b in kb)
     done = (all(s in PREREQ_DONE for s in statuses)
@@ -397,85 +394,76 @@ def evaluate(tasks, now, state, pm_task):
 
 
 # ------------------------------------------------------------------ data collection
-def load_blockers(mgmt_root):
-    """kandev task id -> [blocked_by 各任务的 status]，取自 modules/*/tasks.json（含 -fix-<n> 修复模块）。
-    blocked_by 中查不到的任务记为 None（视为未完成）。文件不存在或解析失败的模块跳过，不报错。"""
-    out = {}
+def read_json(path, default=None):
+    """读 JSON 文件；不存在、编码不对（带 BOM 可以）、内容损坏都返回 default，不抛错。"""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, obj):
+    """先写临时文件再替换：中途被杀不会留下半截文件。"""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def load_modules(mgmt_root):
+    """读一遍 modules/*/tasks.json（含 -fix-<n> 修复模块），返回：
+      blockers   kandev task id -> [blocked_by 各任务的 status]（查不到的任务记为 None，视为未完成）
+      statuses   kandev task id -> 该任务自己的 status（没有 status 字段记为 ""）
+      sessions   模块任务的 kandev task id -> 模块 agent 的会话 id（顶层 module_task_id / module_session_id）
+      unreadable 读不了或形状不对的模块名：这些模块的放行和未登记检查这次不生效，stage.md 里会提示
+    """
+    out = {"blockers": {}, "statuses": {}, "sessions": {}, "unreadable": []}
     mods = os.path.join(mgmt_root, "modules")
     if not os.path.isdir(mods):
         return out
-    for m in os.listdir(mods):
+    for m in sorted(os.listdir(mods)):
         p = os.path.join(mods, m, "tasks.json")
         if m.startswith("_") or not os.path.exists(p):
             continue
+        doc = read_json(p)
         try:
-            tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
-        except (OSError, json.JSONDecodeError):
-            continue
-        try:
+            tasks = doc.get("tasks", [])
             status = {t["id"]: t.get("status") for t in tasks}
-            for t in tasks:
-                if t.get("kandev_task_id"):
-                    out[t["kandev_task_id"]] = [status.get(b) for b in t.get("blocked_by") or []]
+            blockers = {t["kandev_task_id"]: [status.get(b) for b in t.get("blocked_by") or []]
+                        for t in tasks if t.get("kandev_task_id")}
+            statuses = {t["kandev_task_id"]: t.get("status") or "" for t in tasks if t.get("kandev_task_id")}
         except (TypeError, KeyError, AttributeError):
+            out["unreadable"].append(m)
             continue
+        out["blockers"].update(blockers)
+        out["statuses"].update(statuses)
+        if doc.get("module_task_id") and doc.get("module_session_id"):
+            out["sessions"][doc["module_task_id"]] = doc["module_session_id"]
     return out
+
+
+def load_blockers(mgmt_root):
+    return load_modules(mgmt_root)["blockers"]
 
 
 def load_statuses(mgmt_root):
-    """kandev task id -> 该任务自己在 tasks.json 中的 status（没有 status 字段记为 ""）。来源和容错同 load_blockers。
-    查不到的任务不在结果里（调用方得到 None，不据此告警）。"""
-    out = {}
-    mods = os.path.join(mgmt_root, "modules")
-    if not os.path.isdir(mods):
-        return out
-    for m in os.listdir(mods):
-        p = os.path.join(mods, m, "tasks.json")
-        if m.startswith("_") or not os.path.exists(p):
-            continue
-        try:
-            tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
-            for t in tasks:
-                if t.get("kandev_task_id"):
-                    out[t["kandev_task_id"]] = t.get("status") or ""
-        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            continue
-    return out
+    return load_modules(mgmt_root)["statuses"]
 
 
 def load_module_sessions(mgmt_root):
-    """模块任务的 kandev task id -> 模块 agent 的会话 id，取自 modules/*/tasks.json 顶层的 module_task_id / module_session_id
-    （v3.3.3 起模块 agent 在「模块规划」写入）。没写的模块不在结果里。容错同 load_blockers。"""
-    out = {}
-    mods = os.path.join(mgmt_root, "modules")
-    if not os.path.isdir(mods):
-        return out
-    for m in os.listdir(mods):
-        p = os.path.join(mods, m, "tasks.json")
-        if m.startswith("_") or not os.path.exists(p):
-            continue
-        try:
-            doc = json.load(open(p, encoding="utf-8"))
-            if doc.get("module_task_id") and doc.get("module_session_id"):
-                out[doc["module_task_id"]] = doc["module_session_id"]
-        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            continue
-    return out
+    return load_modules(mgmt_root)["sessions"]
 
 
 def note_failure(state_dir, now, err):
     """连不上 Kandev 时留痕：心跳文件记连续失败次数（at 不更新，仍表示最后一次成功），并在上次巡检过的各项目
     stage.md 标题下面加一行故障提示（用户看的就是这个文件；下次成功运行会整份重写，提示随之消失）。返回连续失败次数。"""
-    beat_path = os.path.join(state_dir, "last_run.json")
-    try:
-        beat = json.load(open(beat_path, encoding="utf-8")) if os.path.exists(beat_path) else {}
-    except (OSError, json.JSONDecodeError):
-        beat = {}
+    beat_path = os.path.join(state_dir, BEAT_NAME)
+    beat = read_json(beat_path, {}) or {}
     beat["failures"] = int(beat.get("failures") or 0) + 1
     beat["failed_at"], beat["last_error"] = now.isoformat(), str(err)[:300]
-    os.makedirs(state_dir, exist_ok=True)
-    with open(beat_path, "w", encoding="utf-8") as f:
-        json.dump(beat, f, ensure_ascii=False, indent=1)
+    write_json(beat_path, beat)
     banner = (f"{FAIL_MARK} 守护连不上 Kandev，已连续 {beat['failures']} 次（最近一次 "
               f"{now.astimezone().strftime('%Y-%m-%d %H:%M')}）：{beat['last_error']}。下面的内容是最后一次成功巡检时的，可能已经过时。")
     for root in beat.get("mgmt_roots") or []:
@@ -619,6 +607,13 @@ def disable_guard(workspace_id):
     return [x["resource_id"] for x in targets]
 
 
+def beat_name(ids_path, ids):
+    """心跳文件名。缺省的 ids 文件（kandev_ids.json）用 last_run.json；同一目录部署了多个 workspace 时，
+    其他 workspace 的 ids 文件名带前 8 位 id，心跳也带，避免互相覆盖（自动停用和故障计数都读它）。"""
+    ws = (ids.get("_meta") or {}).get("workspace_id") or ""
+    return "last_run.json" if os.path.basename(ids_path) == "kandev_ids.json" or not ws else f"last_run.{ws[:8]}.json"
+
+
 def norm(path):
     return os.path.normcase(os.path.normpath(path)) if path else ""
 
@@ -653,7 +648,10 @@ def initialized(mgmt_root):
 ORDER = ["等人", "等上限", "等上级", "排队", "待开发", "常驻", "运行中", "完成"]
 
 
-def render(rows, alerts, now_local):
+NOTICE_MARKS = ("未登记", "查不到前置", "会话过长")     # 分类名里带这些字样的行在 stage.md 单列出来
+
+
+def render(rows, alerts, now_local, unreadable=None):
     groups = {g: [r for r in rows if r["category"].startswith(g)] for g in ORDER}
     out = ["# 现在在等谁", "", f"> 由 kandev/stage.py 生成，不要手改。更新：{now_local}", ""]
     if not groups["等人"] and not groups["等上级"] and not groups["等上限"]:
@@ -665,6 +663,11 @@ def render(rows, alerts, now_local):
             out += [f"| {r['title']} | {r['step']} | {r['category']} | {r['value'] if r['value'] is not None else ''} |"
                     for r in groups[g]]
             out.append("")
+    notice = [r for r in rows if any(k in r["category"] for k in NOTICE_MARKS)]
+    if notice or unreadable:
+        out += ["## 留意（不告警）", ""] + [f"- {r['title']}（{r['step']}）：{r['category']}" for r in notice]
+        out += [f"- modules/{m}/tasks.json 读不了或格式不对：这个模块的放行和未登记检查这次没有生效" for m in unreadable or []]
+        out.append("")
     counts = " · ".join(f"{g} {len(groups[g])}" for g in ORDER[3:] if groups[g])
     out += ["## 其他", "", counts or "无", ""]
     if alerts:
@@ -681,6 +684,8 @@ def main():
     p.add_argument("--snapshot", help="离线测试：从 JSON 读取任务列表，不连 Kandev")
     p.add_argument("--now", help="离线测试：当前时间（ISO 8601）")
     p.add_argument("--json", action="store_true", help="标准输出每行一个告警 JSON")
+    p.add_argument("--dry-run", action="store_true",
+                   help="只看不记：不写去重状态、心跳和 stage.md。人工查看或验收时用，否则这次看到的告警会被记为已发，守护 60 分钟内不再发")
     p.add_argument("--disable-when-done", action="store_true",
                    help=f"所有项目正常结束后把「{GUARD_NAME}」automation 设为停用（只由守护 automation 传入）")
     a = p.parse_args()
@@ -697,49 +702,61 @@ def main():
     else:
         try:
             tasks = collect(ids)
-        except (OSError, RuntimeError) as e:      # 连不上 Kandev MCP（URLError 是 OSError）或工具调用失败
-            n = note_failure(a.state_dir, now, e)
+        except Exception as e:      # 连不上 Kandev MCP、工具调用失败、响应缺字段：都留痕，不让守护无声退出
+            n = note_failure(a.state_dir, now, e) if not a.dry_run else 0
             print(f"stage.py：连不上 Kandev 或查询失败（连续第 {n} 次）：{e}", file=sys.stderr)
             return 1
 
+    global BEAT_NAME
+    BEAT_NAME = beat_name(a.ids, ids)
+    explicit_state = any(x == "--state-dir" or x.startswith("--state-dir=") for x in sys.argv[1:])
+    write = not a.dry_run and not (a.snapshot and not explicit_state)     # 离线快照不往真实状态目录写
+    unknown = [t["title"] for t in tasks if t["step"] == "?"]
+    if unknown:
+        print(f"stage.py：{len(unknown)} 个任务所在的步骤不在 ids 文件 {a.ids} 里（ids 可能过期或指错了 workspace），"
+              f"它们不会被正确分类：{'、'.join(unknown[:5])}", file=sys.stderr)
     projects = group_projects(tasks)
     if a.mgmt_root:
         projects = [pr for pr in projects if norm(pr["mgmt_root"]) == norm(a.mgmt_root)]
-    os.makedirs(a.state_dir, exist_ok=True)
-    texts, n_alerts = [], 0
+    texts, n_alerts, failed = [], 0, 0
     for pr in projects:
-        root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
-        if ready and not a.snapshot:
-            blockers, statuses, mod_sessions = load_blockers(root), load_statuses(root), load_module_sessions(root)
-            for t in pr["tasks"]:
-                t["blocker_status"] = blockers.get(t["id"])
-                t["own_status"] = statuses.get(t["id"])
-                t["module_session"] = mod_sessions.get(t["id"])
-        state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
-        state = json.load(open(state_path, encoding="utf-8")) if os.path.exists(state_path) else {}
-        rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])
-        n_alerts += len(alerts)
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(new_state, f, ensure_ascii=False, indent=1)
-        text = render(rows, alerts, now.astimezone().strftime("%Y-%m-%d %H:%M"))
-        if ready:
-            out = os.path.join(root, "agents", "guard", "stage.md")
-            os.makedirs(os.path.dirname(out), exist_ok=True)
-            with open(out, "w", encoding="utf-8") as f:
-                f.write(text)
-        journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
-                   else os.path.join(a.state_dir, "journal.md"))
-        for al in alerts:
-            al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
-            if al["signal"] == "pm_unresponsive":
-                al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
-            if a.json:
-                print(json.dumps(al, ensure_ascii=False))
-        texts.append(f"===== {pr['title']} · {root or '（未写 mgmt_root）'}\n{text}")
-    beat_path = os.path.join(a.state_dir, "last_run.json")
+        try:
+            root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
+            mods = load_modules(root) if ready and not a.snapshot else None
+            if mods:
+                for t in pr["tasks"]:
+                    t["blocker_status"] = mods["blockers"].get(t["id"])
+                    t["own_status"] = mods["statuses"].get(t["id"])
+                    t["module_session"] = mods["sessions"].get(t["id"])
+            state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
+            state = read_json(state_path, {}) or {}       # 损坏的状态文件按空处理：代价是告警重发一次
+            rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])
+            text = render(rows, alerts, now.astimezone().strftime("%Y-%m-%d %H:%M"), mods and mods["unreadable"])
+            journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
+                       else os.path.join(a.state_dir, "journal.md"))
+            for al in alerts:
+                al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
+                if al["signal"] == "pm_unresponsive":
+                    al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
+                if a.json:
+                    print(json.dumps(al, ensure_ascii=False))
+            n_alerts += len(alerts)
+            # 告警已经输出，再记"已发"和 stage.md：这两步失败最多让告警重发一次，不会把没发出的告警记成已发
+            if write:
+                if ready:
+                    out = os.path.join(root, "agents", "guard", "stage.md")
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write(text)
+                write_json(state_path, new_state)
+            texts.append(f"===== {pr['title']} · {root or '（未写 mgmt_root）'}\n{text}")
+        except Exception as e:      # 一个项目的管理目录有问题不能挡住其他项目
+            failed += 1
+            print(f"stage.py：项目「{pr.get('title')}」巡检失败，已跳过：{type(e).__name__}: {e}", file=sys.stderr)
+    beat_path = os.path.join(a.state_dir, BEAT_NAME)
     disabled = None
-    if a.disable_when_done and not a.snapshot and not a.mgmt_root:
-        prev = json.load(open(beat_path, encoding="utf-8")) if os.path.exists(beat_path) else {}
+    if a.disable_when_done and write and not a.snapshot and not a.mgmt_root and not failed:
+        prev = read_json(beat_path, {}) or {}
         ok, reason = should_disable(prev, projects, tasks, now)
         if ok:
             ws = ids.get("_meta", {}).get("workspace_id")
@@ -751,15 +768,14 @@ def main():
             if a.json:
                 print(json.dumps(disabled, ensure_ascii=False))
             texts.append(f"已停用守护 automation：{reason}")
-    if not a.snapshot:   # 心跳：守护是否还在运行，看这个文件的 at 即可
+    if write and not a.snapshot and not a.mgmt_root:   # 心跳：守护是否还在运行，看这个文件的 at 即可
         beat = {"at": now.isoformat(), "projects": [pr["title"] for pr in projects], "alerts": n_alerts,
-                "disabled": bool(disabled),
+                "disabled": bool(disabled), "failed_projects": failed,
                 "mgmt_roots": [pr["mgmt_root"] for pr in projects if initialized(pr["mgmt_root"])]}   # note_failure 用
-        with open(beat_path, "w", encoding="utf-8") as f:
-            json.dump(beat, f, ensure_ascii=False, indent=1)
+        write_json(beat_path, beat)
     if not a.json:
         print("\n".join(texts) if texts else "没有进行中的项目。")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

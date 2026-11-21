@@ -15,7 +15,7 @@ project: bench-todo
 mode: unattended
 plan_only: false
 mgmt_root: <working directory>/bench/todo-mgmt-<version>-<date>
-mgmt_template: <absolute path of this repo>/mgmt-template
+mgmt_template: <install directory>/mgmt-template
 repo: <working directory>/bench/todo
 role: pm
 scope: pm

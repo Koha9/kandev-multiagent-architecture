@@ -38,11 +38,11 @@
 
 | 用途 | 工具 | 注意 |
 |---|---|---|
-| 跨任务消息 | `message_task_kandev` | 参数是 `task_id`（接收方任务的 UUID，不能写 `self`；上级的 UUID 在 [TASK v1] 头 parent 行 `task` 之后）和 `prompt`（消息全文），回复某个会话时加 `session_id`。**发给模块任务的消息一律带 `session_id`=模块 agent 的会话 id**（上级模块：[TASK v1] 头 parent 行 `session` 之后；其他模块：`modules/<模块>/tasks.json` 顶层的 `module_session_id`）：不带时消息进任务的主会话，模块进过「验收调查」后那是验收者的会话，没人处理。已完成（COMPLETED）的模块任务不发消息，需要它再做事由 pm 建修复模块任务。没有返回错误才算已发出，失败按报错改正后用同一个 id 加 `resend: 1` 重试。对方运行中：排队；空闲或已完成：开启新的一轮；失败或已取消：报错 |
+| 跨任务消息 | `message_task_kandev` | 参数是 `task_id`（接收方任务的 UUID，不能写 `self`；上级的 UUID 在 [TASK v1] 头 parent 行 `task` 之后）和 `prompt`（消息全文），回复某个会话时加 `session_id`。**发给模块任务的消息一律带 `session_id`=模块 agent 的会话 id**（上级模块：[TASK v1] 头 parent 行 `session` 之后；其他模块：`modules/<模块>/tasks.json` 顶层的 `module_session_id`）：不带时消息进任务的主会话，模块进过「验收调查」后那是验收者的会话，没人处理。已完成（COMPLETED）的模块任务不发消息，需要它再做事由 pm 建修复模块任务。没有返回错误才算已发出；报错怎么处理见步骤 prompt 的【工具报错】，重试沿用同一个 id 并加 `resend: 1`。对方运行中：排队；空闲：开启新的一轮；任务已完成（COMPLETED）：只会排队，没人处理；失败或已取消：报错 |
 | 子任务问父任务 | `ask_parent_question_kandev` | 父任务用 `message_task_kandev` 并带 `reply_to_question_id` 回答 |
 | 退回 | `move_task_kandev` + `instructions` | instructions 只写摘要和 review 文档指针 |
 | 步骤交接 | `step_complete_kandev` 的 `handoff` | 只传给下一步，≤8KB |
-| 问用户 | `ask_user_question_kandev` | 只有 pm 能用 |
+| 问用户 | `ask_user_question_kandev` | 只有 pm 和「接收」步骤能用 |
 | 打断 | `delivery_mode: interrupt` | 只有直接父任务能用，只用于紧急止损 |
 
 ## 3. 消息信封
@@ -186,7 +186,7 @@ must_know:          # ≤5 条，下一步不知道就会做错的事
 | 审核 → 合并 | `review` | 无（verdict=pass） |
 | 模块规划 → 等待开发 | `modules/<m>/tasks.json` | 关键路径上的任务 |
 | 验收调查 → 完成 | `modules/<m>/acceptance.md` | 上报消息的 id |
-| 立项规划 → 人工确认 | `project/charter.md` | 需要用户确认的点 |
+| 立项规划 → 立项评审 → 立项确认 | `project/charter.md` | 需要用户确认的点 |
 
 ## 7. 示例
 

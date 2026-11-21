@@ -5,7 +5,7 @@
 - updated：YYYY-MM-DD HH:MM
 - kandev：task <uuid> · step <步骤名> · entry <n>
 - role：roles/<role>.md
-- 唤醒计数：0  <!-- 常驻角色（pm、模块 agent）：每轮开始加 1；达到 15 就刷新；上下文重置后写回 0。其他角色不用 -->
+- 唤醒计数：0  <!-- 常驻角色（pm、模块 agent）：每轮开始加 1；达到步骤 prompt 给出的次数就刷新；上下文重置后写回 0。其他角色不用 -->
 
 ## 当前目标
 <一句话>

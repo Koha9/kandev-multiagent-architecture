@@ -23,12 +23,12 @@
 | `roles/` | 角色卡 | 只读 |
 | `protocol/message.md` | 消息与交接格式 | 只读 |
 | `project/charter.md` | 需求原文（R-n）、目标、范围、模块、模块边界（B-n）、项目验收标准 | pm |
-| `project/attention.md` | 需要用户处理的事：待确认的问题（附推荐答案）、无法验证的项 | pm |
+| `project/attention.md` | 需要用户处理的事：待确认的问题（附推荐答案）、无法验证的项、遗留建议 | pm |
 | `project/feedback.md` | 用户在门禁中的意见原话及去向 | pm |
 | `project/conventions.md` | 协作规范 | pm |
 | `project/environment.md` | 环境、命令、冒烟测试、合并门禁、共享文件 | baseline 模块 agent（mod:baseline 或 mod:baseline-fix-<n>） |
 | `project/registry.json` | 担当表：谁负责什么 | pm |
-| `project/status.json` | 全局状态 | pm |
+| `project/status.json` | 全局状态 | pm（收尾合并步骤以 pm 的 scope 写 phase） |
 | `project/final-report.md` | 项目验收报告 | 项目验收者（audit）；「收尾」节由收尾合并步骤写 |
 | `project/decisions/` | ADR | pm |
 | `agents/<scope>/` | NOW.md、journal.md | 本人 |
@@ -43,7 +43,7 @@
 
 ## 任务文档存储
 
-任务文档 `now`、`report`、`review`、`charter-review` 是 Kandev 任务计划中的命名章节 `## task-doc: <名称>`：先读完整计划及版本，只改或追加自己的章节，保留其他章节和用户内容，冲突重读合并，保存后读回；refs / handoff 写 task_id 与章节名。开发写 now/report，审核写 review，立项评审写 charter-review；读子任务的交付物用它的 task_id。`task-docs/` 是章节内容模板。
+任务文档 `now`、`report`、`review`、`charter-review`、`intake` 是 Kandev 任务计划中的命名章节 `## task-doc: <名称>`：先读完整计划及版本，只改或追加自己的章节，保留其他章节和用户内容，冲突重读合并，保存后读回；refs / handoff 写 task_id 与章节名。开发写 now/report，审核写 review，立项评审写 charter-review，「接收」写 intake；读子任务的交付物用它的 task_id。`task-docs/` 是章节内容模板。
 
 ## 单写者与找担当者
 

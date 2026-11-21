@@ -9,7 +9,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_workflows import ARCH_PLACEHOLDER, DEFAULT_URL, W1_NAME, W2_NAME, W3_NAME, Kandev, arch_root  # noqa: E402
+from build_workflows import ARCH_PLACEHOLDER, W1_NAME, W2_NAME, W3_NAME, arch_root  # noqa: E402
+from kandev_client import DEFAULT_URL, Kandev  # noqa: E402
 
 FILES = {W1_NAME: ("W1-project.json", "W1"), W2_NAME: ("W2-module.json", "W2"), W3_NAME: ("W3-dev.json", "W3")}
 # Same names as the placeholders in docs/prompts.md (build_workflows.py dump)

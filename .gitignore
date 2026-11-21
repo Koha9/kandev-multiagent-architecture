@@ -23,6 +23,10 @@ evaluation/pilot-*/
 ma-manifest.json
 kandev/answers*.local.json
 custom/
+kandev/export.local/
+*.new.*
+*.mine.*
+*.tmp
 *.bak
 *.new
 *.mine

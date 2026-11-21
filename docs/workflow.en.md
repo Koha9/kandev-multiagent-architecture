@@ -195,7 +195,7 @@ For deployment steps see [kandev/README.en.md](../kandev/README.en.md); to have 
 
 **Upgrading**: in the new source repository run `ma.py upgrade --home <install directory>`. Untouched shipped files are updated, files the user changed are kept (when the new version changed them too, it is written next to them as `.new`), and `custom/` is left alone; then `ma.py diff` shows the prompt changes and `ma.py apply` deploys them once confirmed. Each project's management directory has a `VERSION` file recording which template version it came from.
 
-**Questions before deploying**: what must be confirmed with the user is collected in `kandev/deploy_questions.json` (workspace, the profile for each role, what to do with existing workflows of the same name, the guard, whether to run the acceptance check that costs quota, and so on). Answers are recorded in the install directory's `ma-manifest.json`; the scripts refuse to deploy while a must-ask item is missing, and updating deployed workflows in place additionally requires having looked at `ma.py diff`.
+**Questions before deploying**: what must be confirmed with the user is collected in `kandev/deploy_questions.json`. Four items are always asked at install time (quick or custom setup, the workspace, the profile for each role, whether to create the guard); the answers are recorded in the install directory's `ma-manifest.json` and the scripts refuse to deploy while one is missing. In a few other situations the scripts stop and wait for the user's consent before being re-run with a flag: updating deployed workflows in place (after looking at `ma.py diff`), projects in progress, existing workflows from another series, and upgrade conflicts with files the user changed.
 
 To launch a project: create a task in 「多Agent · 项目管理」 (W1 Project management), select the repository and baseline branch, write the requirements in the description, then choose Start task.
 
@@ -239,13 +239,15 @@ branch: mod/baseline base <baseline branch>   # regular module: mod/<module> bas
 
 ## 12. Known limitations
 
+> This section was last synced at v3.3 and is incomplete. The Chinese [workflow.md](workflow.md) section 12 is authoritative.
+
+
 - The external MCP has no `message_task_kandev` and cannot create automations. An external guard or observer can only move tasks and answer questions and permission requests on an agent's behalf. Work that needs these capabilities is written as a handoff prompt (`kandev/handoff/`) and given to an agent inside Kandev to execute.
 - `on_children_completed` only fires while the task is in Waiting on development (「等待开发」). The Refresh step checks subtask status to close this gap.
 - Kandev records context usage within a session, but MCP cannot read it, so the guard can only look at indirect signals.
 - Exported workflow files record profiles only by model / mode. With several profiles on the same model they may be matched incorrectly, so deployment uses `build_workflows.py`, which binds by ID.
 - A user message in a gate is delivered to the session tab the user is in, not to the next step's session, and a move triggered by a user message does not reliably deliver the next step's prompt. So: gate steps are bound to the pm profile (entering the gate closes the reviewer session and makes the pm session current); when the pm receives a direct user message it works out which step it is in and handles it (【用户直接消息】); if a reviewer session receives one anyway, it forwards it to the pm session (`kandev_session_id` in the registry); and on re-entering Project planning or Module dispatch the pm collects comments from several sources. If the pm still does not start, move the task to the gate and back to that step, with the comments verbatim in the move instructions.
 - Queued (「待开发」) relies on two Kandev behaviors that must be verified after deployment (see "B. 验收部署" (Verify the deployment) in [AGENTS.md](../AGENTS.md)): when `create_task_kandev` is called with `workflow_step_id` and `start_agent=false`, the task stays in that step without starting a session; moving from a step with no agent to Develop (「开发」) triggers the on_enter auto_start.
-- The Merge step sends its REPORT before calling step_complete_kandev, so the release condition is "the prerequisite's REPORT has arrived and its commit is on the module branch", not the Kandev state; Queued tasks have no blocked_by, so the move is not affected by the platform's dependency checks.
 - When Waiting on development and Acceptance check alternate, the module agent's session (profile `module`) and the auditor's session (profile `module_auditor`) take turns within the same Kandev task; Waiting on development goes by NOW and the files and does not rely on the earlier conversation.
 
 ### Platform behaviors to verify after deployment

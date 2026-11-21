@@ -17,11 +17,11 @@ These three files were exported with `export_workflow_kandev` from a real deploy
   1. On import, profiles are matched by model / mode. When the same model has several profiles, the match may be wrong, so check every step after importing.
   2. The W1 and W2 prompts reference the IDs of the next-level workflow, which must be replaced by hand after importing:
      - W2 Module planning (模块规划) prompt: `<W3_ID>`, `<W3_DEV_STEP_ID>`, `<W3_HOLD_STEP_ID>`
-     - W1 Intake (接收) prompt: `<ARCH_ROOT>` (absolute path of this repository on the machine running Kandev, with forward slashes)
+     - W1 Intake (接收) prompt: `<ARCH_ROOT>` (absolute path of the install directory on the machine running Kandev, with forward slashes; this repository in link mode)
      - W1 Module dispatch (模块下发) prompt: `<W2_ID>`, `<W2_PLAN_STEP_ID>`
 
-Deploying with `python kandev/build_workflows.py apply` is recommended; it handles both points above automatically, see [kandev/README.en.md](../README.en.md).
+Deploying with `ma.py install` + `ma.py apply` is recommended; it handles both points above automatically, see [kandev/README.en.md](../README.en.md).
 
 ## Re-exporting
 
-After deploying, run `python verify_export.py` in `kandev/`. It overwrites the three files here and automatically replaces the IDs from `kandev_ids.json` with placeholders.
+`ma.py apply` re-exports after deploying: it overwrites the three files here and replaces this machine's IDs and paths with placeholders (by hand: `python kandev/verify_export.py`).

@@ -55,7 +55,73 @@ def main():
     test_stuck_and_parent_done()
     test_module_session_routing()
     test_note_failure()
+    test_ts()
+    test_load_modules_tolerant()
+    test_main_isolation()
     print("OK test_stage")
+
+
+def test_ts():
+    assert ts("2026-11-09T05:00:00Z") == ts("2026-11-09T05:00:00+00:00") == ts("2026-11-09T05:00:00")
+    assert ts("2026-11-09T05:00:00.123456789Z") == ts("2026-11-09T05:00:00.123456+00:00")
+    assert ts("2026-11-09T05:00:00.123-05:00") == ts("2026-11-09T10:00:00.123Z")       # 负时区 + 小数秒
+    assert ts("2026-11-09T14:00:00.5+09:00") == ts("2026-11-09T05:00:00.5Z") and ts("") is None
+
+
+def test_load_modules_tolerant():
+    """tasks.json 带 BOM 能读；编码不对或形状不对的模块记入 unreadable，不抛错，也不影响其他模块。"""
+    import tempfile
+    from stage import load_modules
+    doc = {"module_task_id": "M1", "module_session_id": "S1",
+           "tasks": [{"id": "a-1", "status": "merged", "kandev_task_id": "K1"},
+                     {"id": "a-2", "status": "held", "kandev_task_id": "K2", "blocked_by": ["a-1"]}]}
+    with tempfile.TemporaryDirectory() as root:
+        for name, data in (("bom", json.dumps(doc).encode("utf-8-sig")), ("utf16", json.dumps(doc).encode("utf-16")),
+                           ("list", b"[1, 2]"), ("cut", b'{"tasks": [')):
+            os.makedirs(os.path.join(root, "modules", name))
+            with open(os.path.join(root, "modules", name, "tasks.json"), "wb") as f:
+                f.write(data)
+        got = load_modules(root)
+        assert got["blockers"] == {"K1": [], "K2": ["merged"]} and got["statuses"] == {"K1": "merged", "K2": "held"}, got
+        assert got["sessions"] == {"M1": "S1"} and got["unreadable"] == ["cut", "list", "utf16"], got
+
+
+def test_main_isolation():
+    """一个项目的管理目录写不进去：其他项目照常巡检，告警照常输出；损坏的去重状态按空处理；--dry-run 什么都不写。"""
+    import subprocess
+    import tempfile
+    stage_py = os.path.join(os.path.dirname(HERE), "stage.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        bad, good, state = (os.path.join(tmp, n) for n in ("bad", "good", "state"))
+        for root in (bad, good):
+            os.makedirs(root)
+            open(os.path.join(root, "README.md"), "w").close()
+        open(os.path.join(bad, "agents"), "w").close()            # agents 是文件：stage.md 写不进去
+        idle = [{"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "s"}]     # 卡住 2 小时 → running_stale
+        tasks = [{"id": uid(n), "title": f"pm-{name}", "workflow": "多Agent · 项目管理", "step": "调度", "state": "IN_PROGRESS",
+                  "description": f"mgmt_root: {root}", "sessions": idle} for n, (name, root) in enumerate((("bad", bad), ("good", good)), 1)]
+        snap = os.path.join(tmp, "snap.json")
+        json.dump({"tasks": tasks}, open(snap, "w", encoding="utf-8"))
+
+        def cli(*extra, now="2026-11-09T05:00:00+00:00"):
+            r = subprocess.run([sys.executable, stage_py, "--snapshot", snap, "--now", now, "--json", *extra],
+                               capture_output=True, text=True, encoding="utf-8")
+            return r.returncode, [json.loads(l) for l in r.stdout.splitlines() if l.strip()], r.stderr
+
+        out_md = os.path.join(good, "agents", "guard", "stage.md")
+        code, alerts, err = cli("--state-dir", state, "--dry-run")
+        assert code == 0 and len(alerts) == 2 and not os.path.exists(state) and not os.path.exists(out_md), (code, alerts, err)
+        code, alerts, err = cli()                                  # 快照模式不带 --state-dir：也不写
+        assert code == 0 and not os.path.exists(out_md), (code, err)
+        code, alerts, err = cli("--state-dir", state)
+        assert code == 1 and "pm-bad" in err and os.path.exists(out_md), (code, err)
+        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # 出错的项目告警也已输出
+        assert not os.path.exists(os.path.join(state, f"{uid(1)}.json")), "写不进去的项目不应记为已告警"
+        with open(os.path.join(state, f"{uid(2)}.json"), "w") as f:
+            f.write('{"0000')                                      # 写到一半的状态文件
+        code, alerts, err = cli("--state-dir", state, now="2026-11-09T05:20:00+00:00")
+        assert code == 1 and "pm-good" in {a["project"] for a in alerts}, (code, alerts, err)
+        assert json.load(open(os.path.join(state, f"{uid(2)}.json"), encoding="utf-8")), "状态文件应被重新写好"
 
 
 def test_stuck_and_parent_done():
@@ -480,6 +546,7 @@ def test_hold_from_tasks_json():
     assert cat(["merged", None]) == ("待开发", [])                                   # blocked_by 在 tasks.json 里查不到
     assert cat(["merged", "failed"]) == ("等上级：前置失败", [("hold_broken", uid(11))])
     assert cat(["held"]) == ("待开发", [])
+    assert cat([]) == ("等上级：可放行", [("hold_ready", uid(11))])                    # 登记了、没有前置，却一直停在「待开发」
     assert cat(None) == ("待开发（tasks.json 中查不到前置）", [])                      # 读不到 tasks.json：只显示，不告警
     # v3.1：Kandev 里的前置
     k_done = task(40, "开发", "完成", "", state="COMPLETED")

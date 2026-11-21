@@ -198,7 +198,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 **升级**：在新版源仓库中运行 `ma.py upgrade --home <安装目录>`。没改过的出厂文件直接更新，用户改过的保留（新版也改了的写成 `.new` 供合并），`custom/` 不动；然后 `ma.py diff` 看 prompt 的变化，确认后 `ma.py apply`。每个项目的管理目录里有 `VERSION`，记录它来自哪个版本的模板。
 
-**部署前的提问**：必须向用户确认的事项集中在 `kandev/deploy_questions.json`（workspace、各角色的 profile、已有同名 workflow 的处理、守护、是否做消耗额度的验收等）。答案记在安装目录的 `ma-manifest.json`，缺必问项时脚本拒绝部署；就地更新已部署的 workflow 时还要先看过 `ma.py diff`。
+**部署前的提问**：必须向用户确认的事项集中在 `kandev/deploy_questions.json`。安装时必问四项（快速还是自定义、workspace、各角色的 profile、要不要守护），答案记在安装目录的 `ma-manifest.json`，缺项时脚本拒绝部署。另外几种情况脚本会停下来等用户同意后再带参数运行：就地更新已部署的 workflow（先看 `ma.py diff`）、有进行中的项目、同名 workflow 属于另一个系列、升级时用户改过的文件与新版冲突。
 
 启动项目：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。
 
@@ -246,7 +246,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - `on_children_completed` 只在任务处于「等待开发」时生效。刷新步骤会检查子任务状态，补上这个缺口。
 - 会话里的上下文用量 Kandev 有记录，但 MCP 读不到，所以守护只能看间接信号。
 - Kandev 只在步骤没有后继步骤时才执行 `complete_task_on_enter`（任务状态变为 COMPLETED），而模块之间的 blocked_by 只在前置任务 COMPLETED 时解除。所以每个 workflow 的「完成」都排在最后，「刷新」在它前面；进入「完成」的事件用 `move_to_step` 指定位置，不用 `move_to_next`。`build_workflows.py` 和 `check_docs.py` 会检查这条约束。在设置里保存这个选项不会回头处理已经停在「完成」里的任务：v3.3 上已经进入「完成」但状态不是 COMPLETED 的模块任务，要手动把状态改成 COMPLETED，依赖它的模块才会启动。
-- 导出的 workflow 文件只按 model / mode 记录 profile。同模型的 profile 有多个时可能匹配错，所以部署用 `build_workflows.py`，它按 ID 绑定。
+- 导出的 workflow 文件只按 model / mode 记录 profile。同模型的 profile 有多个时可能匹配错，所以部署用 `ma.py apply`（内部是 `build_workflows.py`），它按 ID 绑定。
 - 门禁中的用户消息投递给用户所在的会话标签，而不是下一步骤的会话；由用户消息触发的移动也不一定会把下一步的步骤 prompt 送达。所以：门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的）；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】）；评审会话万一收到，就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。如果 pm 仍没有开始工作，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
 - 「待开发」依赖两点 Kandev 行为，部署后要先验证（见 [AGENTS.md](../AGENTS.md)「验收部署」）：`create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在该步骤、不启动会话；从无 agent 步骤移到「开发」会触发 on_enter 的 auto_start。
 - 放行不只靠 REPORT（v3.3.2）：合并步骤的 REPORT 是一条消息，可能发不出去（v3.3.1 出现过：参数写错后没有重试就推进了步骤，依赖它的任务停了 4 小时）；而 `on_children_completed` 只在全部子任务终态时触发，还有 held 任务时单个子任务完成唤醒不了模块 agent。所以：REPORT 发送失败时合并步骤照实写进 summary 后仍进入「完成」；模块 agent 每次被唤醒都先按 Kandev 状态对账（子任务已在「完成」而 tasks.json 没有登记时，`mod/<模块>` 上有以任务 id 开头的提交才补记 merged，不猜）；「验收调查」和「刷新」遇到这种任务先退回「等待开发」对账；守护的 `child_unrecorded` 负责在没有其他事件时唤醒模块 agent。待开发任务不设 blocked_by，移动不受平台依赖检查影响。
@@ -265,7 +265,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 
 ### 部署后需要实测的平台行为
 
-下面几条是设计依赖、但还没有在本机 Kandev 上实测的行为；每条写明测不通时的退路。
+下面几条是设计依赖的平台行为；写明了实测日期的已经测过，其余还没有在本机 Kandev 上实测。每条写明测不通时的退路。
 
 - a. 把任务从「待开发」移到「开发」会触发自动启动（on_enter auto_start）。2026-11-13 在 Codex 和 Claude 两种 agent 上实测通过。退路：有前置的任务等前置合并后，由模块 agent 直接创建到「开发」。
 - b. agent 把自己移到「等待决策」后开发会话保留，移回时沿用。2026-11-13 实测通过（同上）。退路：移回的 instructions 里写明先读任务文档 now 和 report（已写）。

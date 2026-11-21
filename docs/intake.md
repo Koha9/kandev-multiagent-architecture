@@ -147,7 +147,7 @@ mode: unattended
 plan_only: false
 integration_test: auto
 mgmt_root: D:\work\todo-app-mgmt
-mgmt_template: D:/tools/kandev-multiagent-architecture/mgmt-template
+mgmt_template: C:/Users/me/.kandev-ma/7f64865e/mgmt-template
 repo: D:\work\todo-app
 role: pm
 scope: pm

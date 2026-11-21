@@ -10,6 +10,9 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RULES, CUSTOM = os.path.join(ROOT, "rules"), os.path.join(ROOT, "custom", "rules")
 SLOTS = ("workspace", "git", "coding", "testing", "quality")
+CUSTOMIZABLE = SLOTS + ("params",)
+# 链接模式的源仓库里，docs/prompts.md 和自检按出厂规则生成（定制是本机的事，不进版本库）：check_docs.py 设这个变量
+USE_CUSTOM = not os.environ.get("MA_NO_CUSTOM")
 TITLES = {"git": "Git 规则", "coding": "编码规则"}
 GUARD_PARAMS = ("T_IDLE", "T_DECISION", "T_HOLD", "T_STALE", "T_DEDUP")
 
@@ -18,7 +21,7 @@ def slot_path(name, root=None):
     """生效的槽位文件：custom 中有就用 custom 的。"""
     rules, custom = (os.path.join(root, "rules"), os.path.join(root, "custom", "rules")) if root else (RULES, CUSTOM)
     p = os.path.join(custom, name + ".md")
-    return p if os.path.exists(p) else os.path.join(rules, name + ".md")
+    return p if USE_CUSTOM and os.path.exists(p) else os.path.join(rules, name + ".md")
 
 
 def body(text):
@@ -43,8 +46,8 @@ def params(root=None):
     r = root or ROOT
     out = json.load(open(os.path.join(r, "rules", "params.json"), encoding="utf-8"))
     p = os.path.join(r, "custom", "rules", "params.json")
-    if os.path.exists(p):
-        mine = json.load(open(p, encoding="utf-8"))
+    if USE_CUSTOM and os.path.exists(p):
+        mine = json.load(open(p, encoding="utf-8-sig"))
         unknown = set(mine) - set(out)
         if unknown:
             raise SystemExit(f"custom/rules/params.json 中有不认识的键：{sorted(unknown)}")
@@ -53,6 +56,11 @@ def params(root=None):
             raise SystemExit(f"custom/rules/params.json 的 guard 中有不认识的键：{sorted(bad)}（可用：{GUARD_PARAMS}）")
         out.update({k: v for k, v in mine.items() if k != "guard"})
         out["guard"] = {**out.get("guard", {}), **mine.get("guard", {})}
+    nums = {k: v for k, v in out.items() if k != "guard"}
+    nums.update(out.get("guard", {}))
+    bad = [k for k, v in nums.items() if type(v) is not int or v <= 0]
+    if bad:
+        raise SystemExit(f"rules/params.json（或 custom 中的覆盖）里这些值必须是正整数：{bad}")
     return out
 
 

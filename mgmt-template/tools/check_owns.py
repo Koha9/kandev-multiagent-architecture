@@ -17,15 +17,18 @@ import sys
 
 
 def git(repo, *args):
-    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, encoding="utf-8")
+    # quotepath=false：非 ASCII 文件名（中文截图名等）原样输出，不转成 "\346\210…" 这样的转义
+    r = subprocess.run(["git", "-C", repo, "-c", "core.quotepath=false", *args],
+                       capture_output=True, text=True, encoding="utf-8")
     if r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} 失败：{r.stderr.strip()}")
     return [line.strip().replace("\\", "/") for line in r.stdout.splitlines() if line.strip()]
 
 
 def changed_files(repo, base):
-    files = set(git(repo, "diff", "--name-only", f"{base}...HEAD"))
-    files |= set(git(repo, "diff", "--name-only", "HEAD"))
+    # --no-renames：把别人范围里的文件移进自己的范围，按"删除原文件 + 新增文件"算，原路径也要在范围内
+    files = set(git(repo, "diff", "--no-renames", "--name-only", f"{base}...HEAD"))
+    files |= set(git(repo, "diff", "--no-renames", "--name-only", "HEAD"))
     files |= set(git(repo, "ls-files", "--others", "--exclude-standard"))
     return sorted(files)
 

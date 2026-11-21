@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3.4。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。
 
 ## 简介
 
@@ -51,7 +51,9 @@
 
 ### 方式一：交给 agent（推荐）
 
-把下面的 prompt 复制给一个能访问本机文件和 Kandev MCP 的 agent（例如 Claude Code、Codex，或 Kandev 里的任务 agent）。agent 的入口文档是 [AGENTS.md](AGENTS.md)，里面写了部署、验收、启动项目、跑基准、修改 workflow 的具体步骤和需要先问你的地方。
+把下面的 prompt 复制给一个能访问本机文件和 Kandev MCP 的 agent（例如 Claude Code、Codex，或 Kandev 里的任务 agent）。agent 的入口文档是 [AGENTS.md](AGENTS.md)，里面写了部署、验收、启动项目、跑基准、定制、升级、修改 workflow 的具体步骤和需要先问你的地方。
+
+部署时 agent 会问你四件事：快速安装还是自定义、部署到哪个 workspace、各角色用哪个 profile、要不要建守护。缺省是独立安装：运行所需的文件复制到安装目录（`~/.kandev-ma/<workspace id 前 8 位>/`），之后删除本仓库也能运行；下面提示词里的 <安装目录> 就是它（选了链接模式时是本仓库）。有一步可能要你自己动手：外部的 agent 建不了 Kandev automation，它会给你一个交接文件，请你在任一 Kandev 任务里把其中的「交接 prompt」交给 agent。
 
 **部署并验收**
 
@@ -66,7 +68,7 @@
 **启动一个项目**
 
 ```text
-按 <本仓库的本机路径>/AGENTS.md 的 C 节，在 Kandev 里用多 Agent workflow 启动一个新项目：
+按 <安装目录>/AGENTS.md 的 C 节，在 Kandev 里用多 Agent workflow 启动一个新项目：
 - 仓库：<本机绝对路径>，基线分支：<main>
 - 模式：attended（关键节点等我确认）
 - 需求（按重要度排序）：
@@ -78,7 +80,7 @@
 **跑基准项目，检验部署效果**
 
 ```text
-按 <本仓库的本机路径>/AGENTS.md 的 D 节跑一次基准项目，结束后把指标追加到 evaluation/bench/results.md，
+按 <安装目录>/AGENTS.md 的 D 节跑一次基准项目，结束后把指标追加到 evaluation/bench/results.md，
 并告诉我总时长、审核退回次数、守护告警次数和需求覆盖情况。开始前先告诉我预计的费用和时长。
 ```
 
@@ -121,11 +123,12 @@
 ## 目录结构
 
 ```
-├─ AGENTS.md         给 agent 的入口：部署、验收、启动项目、跑基准、修改 workflow
+├─ AGENTS.md         给 agent 的入口：部署、验收、启动项目、跑基准、定制、升级、修改 workflow
 ├─ docs/             架构文档、流程图、生成的 prompt、管理目录与项目约定
-├─ kandev/           部署脚本、守护脚本、示例 workflow（export/）、交接 prompt
+├─ kandev/           安装与部署入口（ma.py）、守护脚本、示例 workflow（export/）、交接 prompt
+├─ rules/            可定制的规则槽位（git、编码、测试等）和参数的出厂版本
 ├─ mgmt-template/    每个项目的管理目录模板：角色卡、消息协议、检查脚本
 ├─ evaluation/       基准项目与指标采集
-├─ reports/          调研报告
-└─ research_notes/   调研笔记
+├─ reports/          调研报告（只在源仓库，不随安装复制）
+└─ research_notes/   调研笔记（同上）
 ```

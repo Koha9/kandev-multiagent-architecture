@@ -40,7 +40,7 @@
 - 给其他模块发消息时同样带对方的 `module_session_id`
 
 ## 待开发与放行
-- 子任务一律先创建到「待开发」（`workspace_mode=new_workspace`、`base_branch=mod/<模块>`、`autopilot=true`、`start_agent=false`，不设 Kandev 的 `blocked_by`：前置只记在 tasks.json），读回核对工作区模式、autopilot、base 后：没有前置的移到「开发」（`status=todo`），有前置的留下（`status=held`）。参数不符 → 换新 id（加 `-r<n>`）重建，原任务移到「完成」、`status=failed`。「待开发」不占 WIP。参数一个都不能省；报错时按报错改正后重试，不要删参数来消除报错
+- 子任务一律先创建到「待开发」（`workspace_mode=new_workspace`、`base_branch=mod/<模块>`、`autopilot=true`、`start_agent=false`，不设 Kandev 的 `blocked_by`：前置只记在 tasks.json），读回核对工作区模式、autopilot、base 后：没有前置的移到「开发」（`status=todo`），有前置的留下（`status=held`）。参数不符 → 换新 id（加 `-r<n>`）重建，原任务移到「完成」、`status=failed`。「待开发」不占 WIP。参数一个都不能省；报错怎么处理见步骤 prompt 的【工具报错】
 - 合并步骤的 REPORT 到达 → 核对提交已在 `mod/<模块>` 上（`git merge-base --is-ancestor`）后设 `status=merged`。REPORT 可能发不出去，所以每次被唤醒都先按 Kandev 状态对账：子任务已在「完成」而 tasks.json 没有登记 → `mod/<模块>` 上有以任务 id 开头的提交才补记 merged，没有就查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm（不猜 merged）。然后检查：`held` 任务的前置在 tasks.json 中都是 merged 或 dropped → 移到「开发」，`status=todo`
 - 「完成」中的任务不移出：需要再做一轮时新建任务（id 加 `-r<n>`），依赖原任务的改为依赖新任务
 - 守护 `child_unrecorded` → 按上面对账；`session_not_started` → 先移到「等待决策」再移回原步骤一次，再次告警就新建任务取代它
@@ -70,6 +70,6 @@
 - 结合测试任务上报缺陷（任务在「等待决策」）：不自己修、不自行确认，ESCALATE 给 pm（refs 指向 report 的 defects）。pm 通知修复完成后，把修复分支合并进集成分支和 `mod/<模块>`，再把该任务移回「开发」重跑；pm 转来 misrouted 时同样移回，让它重新判断；pm 把缺陷接受为已知问题（DECISION + ADR）时也移回，instructions=把对应的失败用例标成预期失败并引用 ADR 编号，然后正常上报
 
 ## 刷新、上限与每轮必做
-- 会话过长（NOW 开头的「唤醒计数」每轮加 1，达到 15；或收到守护的 refresh / session_long 告警）：处理完本轮事件后，状态写入 NOW，「注意」节写 `刷新返回：等待开发`，move 到「刷新」；刷新后先核对「未确认的意图」，子任务已全部终态（且没有 held）时直接进入「验收调查」
+- 会话过长（NOW 开头的「唤醒计数」每轮加 1，达到步骤 prompt 给出的次数；或收到守护的 refresh / session_long 告警）：处理完本轮事件后，状态写入 NOW，「注意」节写 `刷新返回：等待开发`，move 到「刷新」；刷新后先核对「未确认的意图」，子任务已全部终态（且没有 held）时直接进入「验收调查」
 - 审核退回 3 次、合并门禁失败 3 次 → 当作方向性问题处理；模块验收第 3 轮仍不通过 → 验收者 ESCALATE 给 pm，你等 DECISION；涉及其他模块的接口或决策 → ESCALATE 给 pm
 - 每轮只处理本次事件，不 sleep、不轮询；先写后做；一轮结束前刷新 NOW

@@ -50,7 +50,10 @@ def allowed_prefixes(scope):
 
 
 def staged_files():
-    r = subprocess.run(["git", "diff", "--cached", "--name-only"], capture_output=True, text=True, encoding="utf-8")
+    r = subprocess.run(["git", "-c", "core.quotepath=false", "diff", "--cached", "--no-renames", "--name-only"],
+                       capture_output=True, text=True, encoding="utf-8")
+    if r.returncode != 0:      # 读不到暂存区时拒绝提交，不放行
+        sys.exit(f"mgmt_precommit：git diff --cached 失败，拒绝提交：{r.stderr.strip()}")
     return [line.strip() for line in r.stdout.splitlines() if line.strip()]
 
 

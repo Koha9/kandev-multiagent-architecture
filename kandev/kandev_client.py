@@ -30,6 +30,8 @@ class Kandev:
     def call(self, name, args):
         _, res = self._post({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                              "params": {"name": name, "arguments": args}}, self.sid)
+        if not isinstance(res, dict):
+            raise RuntimeError(f"{name} failed: unexpected response {res!r}")
         r = res.get("result", {})
         txt = "\n".join(c.get("text", "") for c in r.get("content", []))
         if "error" in res or r.get("isError"):

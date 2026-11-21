@@ -13,7 +13,7 @@ project: bench-todo
 mode: unattended
 plan_only: false
 mgmt_root: <工作目录>/bench/todo-mgmt-<版本>-<日期>
-mgmt_template: <本仓库的绝对路径>/mgmt-template
+mgmt_template: <安装目录>/mgmt-template
 repo: <工作目录>/bench/todo
 role: pm
 scope: pm

@@ -15,6 +15,9 @@
  12. mgmt-template/VERSION 与 VERSION 一致（项目的管理目录由它记录来自哪个版本）
  13. 部署提问清单（deploy_questions.json）格式正确，并登记了每个规则槽位和参数
  14. ma.py（安装、定制、升级）的离线测试通过
+ 15. stage.py 里写死的步骤名、workflow 名与 build_workflows.py 一致（守护靠步骤名分类）
+ 16. 步骤 prompt 里的 {…} 只有 Kandev 认识的变量（花括号转义写错时不会报错，只会把错的占位符部署出去）
+源仓库和链接模式下按出厂规则检查（docs/prompts.md 是版本库里的文件）；独立安装目录里按本机的定制检查。
 在安装目录（ma.py install 复制出来的目录）里也可以运行：没有随安装复制的调研材料的链接不检查。
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
 """
@@ -25,12 +28,16 @@ import re
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
-import build_workflows as bw  # noqa: E402
 import manifest as mf  # noqa: E402
+
+if (mf.load(ROOT) or {}).get("mode") != "standalone":
+    os.environ["MA_NO_CUSTOM"] = "1"          # 必须在导入 slots / build_workflows 之前
+import build_workflows as bw  # noqa: E402
 import slots  # noqa: E402
 
 TEMPLATE = os.path.join(ROOT, "mgmt-template")
@@ -51,12 +58,8 @@ def check_prompts():
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "prompts.md")
 
-        class A:
-            pass
-        a = A()
-        a.out = out
         with contextlib.redirect_stdout(io.StringIO()):
-            bw.cmd_dump(a)
+            bw.cmd_dump(SimpleNamespace(out=out))
         fresh = open(out, encoding="utf-8").read()
     cur_path = os.path.join(ROOT, "docs", "prompts.md")
     cur = open(cur_path, encoding="utf-8").read() if os.path.exists(cur_path) else ""
@@ -156,16 +159,14 @@ def check_version():
     return [] if f"（{bw.VERSION}）" in first else [f"docs/workflow.md 标题版本与 VERSION={bw.VERSION} 不一致：{first.strip()}"]
 
 
-def check_stage_test():
-    r = subprocess.run([sys.executable, os.path.join(HERE, "tests", "test_stage.py")],
-                       capture_output=True, text=True, encoding="utf-8")
-    return [] if r.returncode == 0 else [f"stage.py 回归测试失败：{(r.stdout + r.stderr).strip()[-500:]}"]
-
-
 def run_test(name, script):
     r = subprocess.run([sys.executable, os.path.join(HERE, "tests", script)],
                        capture_output=True, text=True, encoding="utf-8")
     return [] if r.returncode == 0 else [f"{name} 测试失败：{(r.stdout + r.stderr).strip()[-500:]}"]
+
+
+def check_stage_test():
+    return run_test("stage.py", "test_stage.py")
 
 
 def check_tasks_test():
@@ -192,12 +193,14 @@ def check_questions():
         for f in ("key", "stage", "ask", "question"):
             if not q.get(f):
                 problems.append(f"deploy_questions.json：{q.get('key', '?')} 缺少 {f}")
-        if q.get("stage") not in mf.STAGES or q.get("ask") not in ("always", "custom"):
+        if q.get("stage") not in mf.STAGES or q.get("ask") not in mf.ASKS:
             problems.append(f"deploy_questions.json：{q.get('key')} 的 stage / ask 取值不对")
         if q.get("key") in keys:
             problems.append(f"deploy_questions.json：key 重复 {q.get('key')}")
         if q.get("ask") == "custom" and "recommended" not in q:
             problems.append(f"deploy_questions.json：{q.get('key')} 是可选项，必须给 recommended")
+        if q.get("ask") != "when_prompted" and q.get("stage") not in ("install", "customize"):
+            problems.append(f"deploy_questions.json：{q.get('key')} 的答案不会被记录（只有 install 阶段记录），ask 应为 when_prompted")
         keys.add(q.get("key"))
         covers |= set(q.get("covers", []))
     want = {f"rules/{n}.md" for n in slots.SLOTS} | {f"rules/params.json:{k}" for k in slots.params()}
@@ -206,6 +209,39 @@ def check_questions():
     for n in slots.SLOTS:
         if not os.path.exists(os.path.join(ROOT, "rules", n + ".md")):
             problems.append(f"缺少槽位文件 rules/{n}.md")
+    return problems
+
+
+def check_stage_names():
+    """stage.py 按步骤名和 workflow 名分类；这些名字在 build_workflows.py 里改了而 stage.py 没跟上时，守护会无声失效。"""
+    import stage
+    wfs = bw.all_workflows()
+    names = {s["name"] for wf in wfs for s in wf["steps"]}
+    signal = {s["name"] for wf in wfs for s in wf["steps"] if s["auto_advance_requires_signal"]}
+    problems = []
+    if signal != stage.SIGNAL_STEPS - stage.LEGACY_SIGNAL_STEPS:
+        problems.append(f"stage.SIGNAL_STEPS 与要求完成信号的步骤不一致：{sorted(signal ^ (stage.SIGNAL_STEPS - stage.LEGACY_SIGNAL_STEPS))}")
+    used = stage.GATES | stage.RESIDENT | stage.MOD_LIVE | {stage.HOLD, stage.DECISION, stage.DONE, stage.INTAKE, "刷新"}
+    if used - names:
+        problems.append(f"stage.py 用到的步骤名在 workflow 里不存在：{sorted(used - names)}")
+    for name, suffix in ((bw.W1_NAME, "项目管理"), (bw.W2_NAME, "模块管理"), (bw.W3_NAME, "开发")):
+        if not name.endswith(suffix):
+            problems.append(f"workflow 名 {name} 不以「{suffix}」结尾：stage.py 靠这个后缀区分三套 workflow")
+    if stage.GUARD_NAME not in bw.GUARD_PROMPT:
+        problems.append("守护 automation 的名称在 stage.py 和守护 prompt 里不一致")
+    return problems
+
+
+KANDEV_VARS = {"{task_id}", "{task_title}", "{step_entry_number}", "{{task_prompt}}"}
+
+
+def check_placeholders():
+    problems = []
+    for wf in bw.all_workflows():
+        for s in wf["steps"]:
+            for m in re.finditer(r"\{+[A-Za-z_][A-Za-z0-9_]*\}+", s.get("prompt", "")):
+                if m.group(0) not in KANDEV_VARS:
+                    problems.append(f"{wf['name']}「{s['name']}」的 prompt 里有不认识的占位符 {m.group(0)}")
     return problems
 
 
@@ -222,7 +258,8 @@ def main():
               ("check_tasks 测试", check_tasks_test),
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
               ("接收文档", check_arch_refs), ("步骤结构", check_structure),
-              ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test)]
+              ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test),
+              ("步骤名同步", check_stage_names), ("占位符", check_placeholders)]
     failed = 0
     for name, fn in checks:
         problems = fn()
