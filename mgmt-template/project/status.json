@@ -1,18 +1,17 @@
 {
   "phase": "planning",
+  "_phase_values": "planning（立项规划起）| developing（模块下发完成起）| done（收尾合并完成）",
   "updated": "2026-11-09 10:00",
   "modules": [
     {
       "name": "auth",
       "kandev_task_id": null,
-      "status": "blocked",
-      "done": 0,
-      "total": 0,
-      "last_report": null,
-      "blocked_reason": null
+      "status": "planned"
     }
   ],
+  "_module_status_values": "planned（在 charter 模块清单里，任务还没建）| active（任务已建，进行中）| done（已收到它的验收 REPORT，result=partial 也算）| dropped（修复模块报告 misrouted 后自己结束）",
   "fix_rounds": 0,
   "open_escalations": [],
-  "open_decisions": []
+  "misrouted": [],
+  "_misrouted": "修复模块报告 misrouted、来源是项目验收修复项时记一条：{module: 修复模块名, source: final-report 第 n 轮 F-n, evidence: 证据指针}；下一轮项目验收按证据重新判断担当"
 }

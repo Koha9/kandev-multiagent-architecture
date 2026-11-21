@@ -18,6 +18,7 @@
  15. stage.py 里写死的步骤名、workflow 名与 build_workflows.py 一致（守护靠步骤名分类）
  16. 步骤 prompt 里的 {…} 只有 Kandev 认识的变量（花括号转义写错时不会报错，只会把错的占位符部署出去）
  17. stage.py 的信号表与 mgmt-template/roles/guard.md 的两张表一致（信号名、发给谁、是否升级）
+ 18. 共享块的位置：【刷新】规则只在常驻步骤里；【定级】每个 prompt 最多一份，且模板里不再另写一份；prompt 里没有反斜杠
 源仓库和链接模式下按出厂规则检查（docs/prompts.md 是版本库里的文件）；独立安装目录里按本机的定制检查。
 在安装目录（ma.py install 复制出来的目录）里也可以运行：没有随安装复制的调研材料的链接不检查。
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
@@ -282,6 +283,29 @@ def check_placeholders():
     return problems
 
 
+def check_block_placement():
+    """改措辞时容易悄悄回退的三件事。"""
+    import stage
+    problems = []
+    refresh = (bw.BLOCKS["REFRESH_PM"], bw.BLOCKS["REFRESH_MOD"])
+    for wf in bw.all_workflows():
+        for s in wf["steps"]:
+            p, where = s.get("prompt", ""), f"{wf['name']}「{s['name']}」"
+            if any(r in p for r in refresh) and s["name"] not in stage.RESIDENT:
+                problems.append(f"{where}带着【刷新】规则，但它不是常驻步骤（守护只在 {sorted(stage.RESIDENT)} 里数唤醒次数）")
+            if s["name"] in stage.RESIDENT and not any(r in p for r in refresh):
+                problems.append(f"{where}是常驻步骤，却没有【刷新】规则")
+            if p.count(bw.BLOCKS["SEVERITY_DEF"]) > 1:
+                problems.append(f"{where}里【定级】出现了不止一次")
+            if "\\" in p:
+                problems.append(f"{where}的 prompt 里有反斜杠（多半是没被解释的 \\n）")
+    first = bw.BLOCKS["SEVERITY_DEF"].split("\n")[1][:12]       # 定义正文的开头几个字
+    for f in md_files():
+        if os.path.relpath(f, ROOT).replace("\\", "/").startswith("mgmt-template/") and first in open(f, encoding="utf-8").read():
+            problems.append(f"{os.path.relpath(f, ROOT)} 里又写了一份定级定义（只应在步骤 prompt 的【定级】里）")
+    return problems
+
+
 def check_ma_test():
     if os.environ.get("MA_TEST_NESTED"):      # test_ma.py 在临时安装目录里运行本自检时不再递归
         return []
@@ -296,7 +320,7 @@ def main():
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
               ("接收文档", check_arch_refs), ("步骤结构", check_structure),
               ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test),
-              ("步骤名同步", check_stage_names), ("占位符", check_placeholders), ("信号表", check_guard_signals)]
+              ("步骤名同步", check_stage_names), ("占位符", check_placeholders), ("共享块位置", check_block_placement), ("信号表", check_guard_signals)]
     failed = 0
     for name, fn in checks:
         problems = fn()

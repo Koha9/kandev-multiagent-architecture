@@ -4,14 +4,6 @@
   "repo": "<D:/WorkSpace/<project>>",
   "base_branch": "main",
   "updated": "2026-11-09 10:00",
-  "kandev_ids": {
-    "workspace": "<uuid>",
-    "w2_module_workflow": "<uuid>",
-    "w2_module_plan_step": "<uuid>",
-    "w3_dev_workflow": "<uuid>",
-    "w3_dev_step": "<uuid>",
-    "w3_hold_step": "<uuid>"
-  },
   "agents": [
     {
       "scope": "pm",
@@ -19,8 +11,7 @@
       "kandev_task_id": "<uuid>",
       "kandev_session_id": "<pm 会话 uuid；其他会话收到用户意见时转发到这里>",
       "owns": ["project/*", "跨模块决策", "项目规范", "与用户沟通"],
-      "branch": null,
-      "status": "active"
+      "branch": null
     },
     {
       "scope": "mod:baseline",
@@ -28,8 +19,7 @@
       "kandev_task_id": null,
       "owns": ["modules/baseline/*", "project/environment.md", "仓库骨架、冒烟测试、检查脚本、约束落实"],
       "branch": "mod/baseline",
-      "current_branch": "mod/baseline",
-      "status": "active"
+      "current_branch": "mod/baseline"
     },
     {
       "scope": "mod:auth",
@@ -37,16 +27,7 @@
       "kandev_task_id": null,
       "owns": ["modules/auth/*", "auth 模块对外接口", "auth 子任务的契约与验收"],
       "branch": "mod/auth",
-      "current_branch": "mod/auth",
-      "status": "active"
-    },
-    {
-      "scope": "guard",
-      "role": "guard",
-      "kandev_task_id": null,
-      "owns": ["上下文巡检"],
-      "branch": null,
-      "status": "active"
+      "current_branch": "mod/auth"
     }
   ]
 }

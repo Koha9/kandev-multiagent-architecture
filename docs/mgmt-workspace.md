@@ -134,12 +134,11 @@ ID 规则：
 |---|---|---|
 | `project`、`mgmt_root`、`repo`、`base_branch` | 项目常量 | 初始化后不改 |
 | `agents[].scope` | 唯一标识 | 否 |
-| `agents[].role` | `pm` / `module` / `guard` | 否 |
+| `agents[].role` | `pm` / `module` | 否 |
 | `agents[].kandev_task_id` | 创建后回填 | 是 |
 | `agents[].owns` | 担当范围（文件或职责），用于"问谁" | 需 ADR |
 | `agents[].branch` | 模块分支 | 否 |
 | `agents[].current_branch` | 当前分支：原分支，或最新的修复分支；所有合并各模块分支的地方只合它 | 是（修复模块完成时 pm 更新） |
-| `agents[].status` | `active` / `done` / `failed` | 是 |
 
 开发任务的担当关系不进 registry，记在对应模块的 `tasks.json`。
 
@@ -148,9 +147,9 @@ ID 规则：
 | 字段 | 说明 |
 |---|---|
 | `phase` | `planning` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
-| `modules[]` | `name`、`kandev_task_id`、`status`（`blocked` / `planning` / `developing` / `accepting` / `reported` / `done` / `failed`）、`done`、`total`、`last_report`（消息 id）、`blocked_reason` |
+| `modules[]` | `name`、`kandev_task_id`、`status`（`planned` / `active` / `done` / `dropped`） |
 | `open_escalations[]` | 待处理的升级：`msg`、`from`、`topic`、`since` |
-| `open_decisions[]` | 讨论中的 ADR 编号 |
+| `misrouted[]` | 修复模块报告"缺陷不归本模块"的记录（调度步骤写） |
 
 ### tasks.json（模块任务清单，模块 agent 写）
 
@@ -160,7 +159,6 @@ ID 规则：
 | `owns` | 这个任务允许修改的路径，也就是它的担当范围 | 需重新规划 |
 | `blocked_by` | 前置任务 id（只记在这里，Kandev 的「待开发」任务不设 blocked_by） | 需重新规划 |
 | `acceptance` | AC 列表，每条写 `covers: MA-n` | 需重新规划，并在 acceptance.md 记一笔 |
-| `refs` | 需求出处（charter 的 R 编号） | 需重新规划 |
 | `tests` | 可直接执行的测试命令列表（契约中的测试命令与它一致） | 需重新规划 |
 | `boundaries` | 本任务落实的 B-n（本模块是提供方），可为空 | 需重新规划 |
 | `shared` | 可选；environment.md「共享文件」中本任务要追加条目的文件（多个任务可共有，只追加自己的条目，不算 owns 重叠） | 需重新规划 |
@@ -168,8 +166,6 @@ ID 规则：
 | `ui` | 是否改动界面；true 时 report 要附截图 | 需重新规划 |
 | `kandev_task_id` | 创建后回填 | 是 |
 | `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged`（合并步骤的 REPORT 到达后）/ `dropped` / `failed`（含被拆分取代，note 写取代它的任务） | 是 |
-| `passes` | 验收被退回时，模块 agent 按 acceptance.md 回写；验收通过后模块随即结束，以 acceptance.md 最后一轮为准（验收者不写 tasks.json） | 是 |
-| `review_rounds` | 审核轮数 | 是 |
 | `note` | 一行备注 | 是 |
 
 ---

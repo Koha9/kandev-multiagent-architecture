@@ -8,7 +8,8 @@
 |---|---|
 | `ma.py` | 入口：部署前的提问清单、安装到独立目录、查看 prompt 差异、部署、检查（doctor）、升级 |
 | `deploy_questions.json` | 部署、定制、升级前必须向用户确认的事项（`ma.py questions` 查看） |
-| `build_workflows.py` | 唯一的配置来源：三套 workflow 的结构、prompt（规则槽位取自 `../rules/`），以及 `apply` / `dump` 命令 |
+| `prompts.py` | 唯一的配置来源：三套 workflow 的结构和 prompt（规则槽位取自 `../rules/`） |
+| `build_workflows.py` | 部署逻辑：导入、就地更新、绑定 profile，以及 `dump`（生成 prompts.md）、`stats`（每个步骤的字符数和携带的共享块）命令 |
 | `manifest.py`、`slots.py`、`kandev_client.py` | 安装清单与答案校验、规则槽位的读取、Kandev MCP 客户端 |
 | `check_docs.py` | 自检：prompts.md 是否最新、链接、步骤名、模板路径、版本号、stage 回归测试。改完 workflow、部署前运行 |
 | `stage.py` | 守护用的阶段分类：从 Kandev 状态判断每个任务"在等谁"，生成 `agents/guard/stage.md` 和告警 |

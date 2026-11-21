@@ -32,7 +32,7 @@
 - **改动 Kandev 之前先说明**要做什么、影响哪个 workspace。导入或更新 workflow 由上面的清单覆盖；清单之外的改动（创建任务、启动会话、创建 automation）单独征得同意。只读查询不用问。
 - **会产生费用的操作单独确认**：启动 agent 会话（验收 B3、启动项目、跑基准）会消耗用户的模型额度。
 - **不删除任何东西**。脚本也不删除。需要删除的（临时任务、旧 workflow、合并后的 `.new` 文件）列出来交给用户，或在用户明确同意后再做。
-- **生成的文件不手改**：`docs/prompts.md`、`kandev/export/*.json` 由脚本生成，prompt 的来源是 `kandev/build_workflows.py` 和 `rules/`。
+- **生成的文件不手改**：`docs/prompts.md`、`kandev/export/*.json` 由脚本生成，prompt 的来源是 `kandev/prompts.py` 和 `rules/`。
 - **本机文件不提交、不手改**：`.gitignore` 列出的那些（`ma-manifest.json`、ids、答案、`custom/`、`*.local.*`、`.new` / `.mine` / `.bak`）。
 - 运行脚本用本机的 Python 3 解释器（只用标准库），下文写作 `python`。
 - Kandev 外部 MCP 默认在 `http://localhost:38429/mcp`。你自己有 kandev MCP 工具时直接调用；没有时用脚本里的客户端：
@@ -97,10 +97,10 @@
 
 在源仓库里做（用它直接部署时用链接模式）。只想调整规则、角色卡或参数的用户不需要做这一节，做 F。
 
-1. 只改 `kandev/build_workflows.py`（结构和 prompt）、`rules/`（槽位的出厂内容）与 `mgmt-template/`（模板、角色卡）。改了 `[TASK v1]` 头的字段或缺省值时同步 [docs/intake.md](docs/intake.md)；改结构或改了需要用户知道的行为时同步 [docs/workflow.md](docs/workflow.md)。
+1. 只改 `kandev/prompts.py`（结构和 prompt；写法见它开头的说明，`python kandev/build_workflows.py stats` 看每个步骤的字符数和携带的共享块）、`rules/`（槽位的出厂内容）与 `mgmt-template/`（模板、角色卡）。改了 `[TASK v1]` 头的字段或缺省值时同步 [docs/intake.md](docs/intake.md)；改结构或改了需要用户知道的行为时同步 [docs/workflow.md](docs/workflow.md)。
 2. `python kandev/build_workflows.py dump --out docs/prompts.md`
 3. `python kandev/check_docs.py` 全部 OK。它会检查：步骤名与 `stage.py`、文档一致，prompt 里的占位符，新增的规则槽位已在 `kandev/deploy_questions.json` 登记。改了 `stage.py` 或 `ma.py` 时同步更新 `kandev/tests/`。
-4. 改了版本号（`build_workflows.py` 的 `VERSION`）时，同步 `docs/workflow.md` 标题和 `mgmt-template/VERSION`。
+4. 改了版本号（`prompts.py` 的 `VERSION`）时，同步 `docs/workflow.md` 标题和 `mgmt-template/VERSION`，并在 `CHANGELOG.md` 写一节（改了什么、为什么、代价、升级注意、守护 prompt 是否变化）。
 5. 部署：`ma.py diff` → 问用户 → `ma.py apply --confirmed <值>`，然后做 B。已有独立安装目录的，按 G 升级它。
 
 ## F. 定制规则、角色卡和参数

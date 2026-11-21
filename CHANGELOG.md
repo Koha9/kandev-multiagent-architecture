@@ -2,13 +2,35 @@
 
 每个版本写四件事：改了什么、为什么改（触发它的事故和当时记录的数字）、代价、升级时要做什么。现在的行为以 [docs/workflow.md](docs/workflow.md) 为准，这里只记历史。评估后放弃的方案在 workflow.md「已否决的设计」。
 
-版本号是 `kandev/build_workflows.py` 的 `VERSION`。同一系列（major.minor 相同，例如 v3.3 和 v3.3.4）用 `ma.py apply` 就地更新，步骤 ID 和任务不变；跨系列要 `--retire`，旧 workflow 改名保留。「守护 prompt」一项按 `docs/prompts.md`「守护 automation」一节在 git 历史中的差异填写：有变化时要把新的交接 prompt 再交给 Kandev 内部的 agent 执行一次（见 [kandev/README.md](kandev/README.md)「守护 automation」）。
+版本号是 `kandev/prompts.py` 的 `VERSION`。同一系列（major.minor 相同，例如 v3.3 和 v3.3.4）用 `ma.py apply` 就地更新，步骤 ID 和任务不变；跨系列要 `--retire`，旧 workflow 改名保留。「守护 prompt」一项按 `docs/prompts.md`「守护 automation」一节在 git 历史中的差异填写：有变化时要把新的交接 prompt 再交给 Kandev 内部的 agent 执行一次（见 [kandev/README.md](kandev/README.md)「守护 automation」）。
 
 ## 未发布
 
 （进行中的改动，发布时移到新版本一节。）
 
 - 文档重组：新增本文件；`docs/workflow.md` 只描述现在的行为；英文只保留 `README.en.md` 和 `docs/overview.en.md`；流程图和架构图更新到现在的步骤。
+
+下面几项改变了 agent 收到的指示，还没有在真实项目上跑过（部署后做一次基准运行来验证）：
+
+- **角色卡只留职责、读写范围和质量要求**；流程、参数和判定标准只写在步骤 prompt 里（五张角色卡从约 15K 减到约 4.5K 字符）。原因：角色卡 50–80% 是步骤 prompt 的压缩复述，已经出现多处不一致，而进行中的项目用的是启动时复制的旧角色卡。只在角色卡里有的规则先搬进了 prompt：审核的 verdict 定义和"只限功能层面"、baseline 模块验收第 3 轮不通过的处理、ESCALATE 无法决策时的处理。
+- **常驻步骤（调度、等待开发）改成三段**：每轮固定动作 / 按事件 / 何时自己移动。原来开头写"只处理本次事件"，后面又有"每次被唤醒都先做"的条目；唤醒计数何时清零、何时加 1 的先后也不明确。现在：进入的那一轮先清零再加 1，每轮都先做对账与放行（等待开发）或检查守护（调度）。
+- **【刷新】规则只出现在常驻步骤里**。原来在 pm 和模块 agent 的头部，立项规划、模块下发、模块规划和「刷新」步骤自己也会收到"达到 15 次就移到刷新"。
+- **定级只有一份定义（【定级】）**，评审、模块验收、项目验收和 pm 给结合测试缺陷定级时都用它。「阻塞」统一为：功能不可用、结果错误、数据丢失或误导用户；或本步骤所依据的上一层标准明确要求的没达到（项目层是需求原文和 PA，模块层是模块契约的验收要点和 B-n）。原来 prompt 和模块验收角色卡的说法不同；pm 一侧没有"拿不准按轻微"这条，而修复模块过多正是在 pm 一侧放大的。
+- **等待开发收到合并的 REPORT 后先用 `git merge-base --is-ancestor` 核对**，提交确实在模块分支上才记 merged。
+- **合并步骤的 REPORT / ESCALATE 全文内联在 prompt 里**，不再为一条消息去读 message.md；修正了 prompt 里一处没被解释的 `\n`。
+- **建任务的参数一行一个**（模块任务、开发子任务、修复模块任务），修复模块的参数成为具名块【建修复模块】。参数和取值没有增减。
+- **「接收」原样放行前做两项检查**（仓库存在且是 git 仓库；模板目录有 README.md，否则改用安装目录的模板）。
+- **评审者不再读 pm 的角色卡**；不发消息的步骤（接收、收尾合并）不再带【发消息】，不给模块发消息的步骤不再带"带 session_id"那一段。
+- **管理目录的 JSON 模板删掉没有读者或写者的字段**：tasks.json 的 `branch`、`updated`、`refs`、`passes`、`review_rounds`；registry.json 的 `kandev_ids`、`agents[].status`、守护条目；status.json 的 `done`、`total`、`last_report`、`blocked_reason`、`open_decisions`。status.json 新增 `misrouted` 和模块状态的取值说明（planned / active / done / dropped）。只影响新启动的项目。
+
+守护（不需要重新部署 workflow，升级安装目录后生效）：
+
+- 同一任务的同一信号 60 分钟内只告警一次，信号中途消失再出现也不重发（原来信号消失一次就清空记录，抖动的信号每次都重发）。
+- 升级为 `pm_unresponsive` 要求同一个信号从上次告警起一直存在。
+- 信号的路由、是否升级收成一张表；规则表只在 `mgmt-template/roles/guard.md` 保留一份，自检核对它与代码一致。
+- 删除 v3.1 兼容：停在「环境基线」的任务、只在 Kandev 里设了 blocked_by 的「待开发」任务不再被特殊处理（v3.2 起不会出现）。
+
+内部整理（不改变行为）：prompt 文本和 workflow 定义移到 `kandev/prompts.py`，统一成"普通字符串 + `<<标记>>`"，漏填多填都报错；`build_workflows.py stats` 打印每个步骤的字符数和携带的共享块。守护 prompt：无变化。
 
 ## v3.3.4（2026-11-22）
 
