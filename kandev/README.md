@@ -1,7 +1,5 @@
 # Kandev 部署
 
-**中文** | [English](README.en.md)
-
 把 [多 Agent 开发 Workflow](../docs/workflow.md) 部署到任意 Kandev workspace。想让 agent 代为部署和验收，见 [../AGENTS.md](../AGENTS.md)。
 
 ## 文件
@@ -26,7 +24,7 @@
 
 - Kandev 正在运行，外部 MCP 端点可用（默认 `http://localhost:38429/mcp`；不同时在答案里写 `kandev_url`）。
 - Python 3.9+。脚本只用标准库，不需要安装依赖。
-- 已在 Kandev 里为各角色准备好 agent profile：5 个必填角色（pm、auditor、developer、reviewer、mechanical）和 4 个可选角色，选法见 [docs/workflow.md](../docs/workflow.md)「角色与 profile」。必填、缺省和"必须不同"的约束由 `ma.py install` 校验。
+- 已在 Kandev 里为各角色准备好 agent profile，选法和约束见 [docs/workflow.md](../docs/workflow.md)「角色与 profile」；`ma.py install` 会校验。
 
 ## 部署
 
@@ -58,7 +56,7 @@ python <home>/kandev/ma.py doctor                      # 检查安装目录、�
   - 同一系列（major.minor 相同，例如 v3.3 和 v3.3.4）：就地更新 prompt、profile、description 和步骤结构，步骤 ID 和任务不变。必须带 `--confirmed <ma.py diff 打印的值>`；有进行中的项目时还要 `--with-running`。
   - 其他系列：必须带 `--retire`。旧版改名为"<名称> (<旧版本号>)"，任务都保留，再导入新版；旧版上进行中的项目在旧 workflow 上跑完，但守护不再巡检它们。
 - **定制**：规则槽位见 [../rules/README.md](../rules/README.md)，覆盖文件放在 `<home>/custom/rules/`，改完重新 `diff` + `apply`。
-- **升级**：在新版仓库中运行 `python kandev/ma.py upgrade --home <home>`（先 `--dry-run` 看会改什么），再在 `<home>` 中 `diff` + `apply`。
+- **升级**：在新版仓库中运行 `python kandev/ma.py upgrade --home <home>`（先 `--dry-run` 看会改什么），再在 `<home>` 中 `diff` + `apply`。各版本要注意的事（包括守护 prompt 有没有变、要不要重新交接）见 [../CHANGELOG.md](../CHANGELOG.md)。
 - **改答案**：`ma.py answer --set key=value`（可改 profiles、guard_automation、python、kandev_url、setup_style；workspace 和安装方式要改就重新安装）。
 - 部署后按 [AGENTS.md](../AGENTS.md)「B. 验收部署」核对。
 

@@ -4,7 +4,7 @@
 
 A workflow for [Kandev](https://github.com/kdlbs/kandev) that lets several coding agents split up and finish medium-to-large software projects, unattended or with light supervision. It consists of three Kandev workflows, a per-project management directory template, and deployment and guard scripts.
 
-> Chinese is the primary language of this repository. The English docs cover the human-facing parts; the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), the role cards and templates, and the research reports are in Chinese. The Kandev workflow and step names are Chinese too, so the English docs give each step's Chinese name next to its English one.
+> Chinese is the primary language of this repository. English is limited to this README and a design overview, [docs/overview.en.md](docs/overview.en.md); everything else (the full design, the prompts the agents receive, the agent entry point [AGENTS.md](AGENTS.md), role cards, templates, research reports) is in Chinese. The Kandev workflow and step names are Chinese too, so the English pages give each step's Chinese name next to its English one.
 
 ## Introduction
 
@@ -39,9 +39,9 @@ The full research and comparisons are in [reports/](reports/) and [research_note
 
 ## Architecture
 
-![Architecture: three layers (W1 project management, W2 module management, W3 development) plus the management directory and the guard](docs/architecture.en.svg)
+![Architecture: three layers (W1 project management, W2 module management, W3 development) plus the management directory and the guard](docs/architecture.svg)
 
-(The diagram shows v3.1; the step tables in [docs/workflow.en.md](docs/workflow.en.md) are authoritative: v3.2 removed the Environment baseline step, whose work is now done by the baseline module.) Yellow steps are human gates. Plan approval (立项确认) only stops in attended or plan_only mode, while final human review (人工终审) always needs a person's approval. What each step does, how tasks move, and how sessions are managed: [docs/workflow.en.md](docs/workflow.en.md). More detailed diagrams, including which agent interactions are allowed: [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md).
+The diagram is labelled in Chinese, like the workflows themselves. W1 runs 接收 (Intake) → 立项规划 (Planning) → 立项评审 (Plan review) → 立项确认 (Plan approval) → 模块下发 (Module dispatch) → 调度 (Scheduling) → 项目验收 (Project acceptance) → 人工终审 (Final human review) → 收尾合并 (Final merge). Yellow steps are human gates: plan approval only stops in attended or plan_only mode, while final human review always needs a person's approval. What each step does and how tasks move: [docs/overview.en.md](docs/overview.en.md), or the full design in [docs/workflow.md](docs/workflow.md) (Chinese). Flow diagrams for each workflow and the allowed message paths between agents: [docs/workflow-diagrams.md](docs/workflow-diagrams.md) (Chinese).
 
 ## Usage
 
@@ -49,17 +49,18 @@ The full research and comparisons are in [reports/](reports/) and [research_note
 
 - Kandev running on your machine with its external MCP available (default `http://localhost:38429/mcp`).
 - Python 3 (the scripts use only the standard library).
-- Five required agent profiles:
-  - `pm`, and `auditor` (different from pm)
-  - `developer`, and `reviewer` (different from developer, ideally from another vendor)
-  - `mechanical` (runs the merge gate; a coding model)
-- Optional: `plan_auditor` (plan review, the strongest model; defaults to auditor), `module` (defaults to pm), `module_auditor` (different from module; defaults to auditor), `intake` (the Intake entry step; a light model is enough; defaults to mechanical)
+- Agent profiles in Kandev for each role: five required roles and four optional ones; planning and verification, and development and review, must use different profiles. How to choose: "Roles and profiles" in [docs/overview.en.md](docs/overview.en.md).
 
 ### Option 1: hand it to an agent (recommended)
 
-Copy one of the prompts below to an agent that can access your local files and the Kandev MCP, such as Claude Code, Codex, or a task agent inside Kandev. The agent's entry point is [AGENTS.md](AGENTS.md) (Chinese; agents read it fine). It has the steps for deploying, verifying, starting a project, running the benchmark and changing the workflow, and says where the agent must ask you first.
+Copy one of the prompts below to an agent that can access your local files and the Kandev MCP, such as Claude Code, Codex, or a task agent inside Kandev. The agent's entry point is [AGENTS.md](AGENTS.md) (Chinese; agents read it fine). It has the steps for deploying, verifying, starting a project, running the benchmark, customizing, upgrading and changing the workflow, and says where the agent must ask you first.
 
-While deploying, the agent asks you four things: quick or custom setup, which workspace, which profile for each role, and whether to create the guard. The default is a standalone install: everything needed at run time is copied to the install directory (`~/.kandev-ma/<first 8 chars of the workspace id>/`), so the workflows keep working after this repository is deleted; `<install directory>` in the prompts below means that directory (or this repository in link mode). One step may need you: an agent outside Kandev cannot create a Kandev automation, so it hands you a handoff file and asks you to give its "handoff prompt" (交接 prompt) to an agent in any Kandev task.
+What happens during deployment:
+
+1. **The agent asks you four things**: quick or custom setup, which workspace, which profile for each role, and whether to create the guard.
+2. **Where the files go**: the default is a standalone install. Everything needed at run time is copied to the install directory `~/.kandev-ma/<first 8 chars of the workspace id>/`, and the workflows in Kandev refer only to it, so they keep working after this repository is deleted or moved. `<install directory>` in the prompts below means that directory (or this repository in link mode).
+3. **One step is yours**: an agent outside Kandev cannot create a Kandev automation. It hands you a handoff file; give its "handoff prompt" (交接 prompt) to an agent in any Kandev task and the guard is created.
+4. **Once a project is running** you only watch two files and two gates; see "Where to look while it runs" below.
 
 **Deploy and verify**
 
@@ -92,13 +93,13 @@ and tell me the total duration, how many times review sent work back, how many g
 
 ### Option 2: deploy by hand
 
-1. Follow [kandev/README.en.md](kandev/README.en.md): write the answers file, then run `ma.py install`, `ma.py apply` and `ma.py doctor`. The default is a standalone install: everything needed at run time is copied to `~/.kandev-ma/<first 8 chars of the workspace id>/`, so the workflows keep working after this repository is deleted.
+1. Follow [kandev/README.md](kandev/README.md) (Chinese): write the answers file, then run `ma.py install`, `ma.py apply` and `ma.py doctor`.
 2. Create the guard automation following [kandev/handoff/guard-automation.md](kandev/handoff/guard-automation.md) (Chinese).
-3. Create a task in `多Agent · 项目管理` (the W1 project management workflow), select the repository, write your requirements in the description, then click Start task. The task starts in the Intake step (「接收」): it derives the repository, branch, management directory and similar parameters, asks you for the rest (run mode, whether to stop after planning, ...), then hands over to the pm. To skip the questions, write the complete description using the `[TASK v1]` template from the "Deployment and launch" section of [docs/workflow.en.md](docs/workflow.en.md); parameters and defaults are described in [docs/intake.md](docs/intake.md) (Chinese).
+3. Create a task in `多Agent · 项目管理` (the W1 project management workflow), select the repository, write your requirements in the description, then click Start task. The task starts in the Intake step (「接收」): it derives the repository, branch, management directory and similar parameters, asks you for the rest (run mode, whether to stop after planning, ...), then hands over to the pm. To skip the questions, write the complete description using the `[TASK v1]` template in [docs/intake.md](docs/intake.md) (Chinese), which also describes every parameter and its default.
 
 Customizing and upgrading: the rules (git, coding, testing, workspace, quality), role cards and parameters can all be changed; see [rules/README.md](rules/README.md) (Chinese) and sections F and G of [AGENTS.md](AGENTS.md). An agent doing this for you first confirms the items on the question list with you.
 
-To see what the workflows look like first: [kandev/export/](kandev/export/README.en.md) has the three workflows exported from a real deployment.
+To see what the workflows look like first: [kandev/export/](kandev/export/README.md) (Chinese) has the three workflows exported from a real deployment.
 
 ### Where to look while it runs
 
@@ -111,30 +112,35 @@ To see what the workflows look like first: [kandev/export/](kandev/export/README
 
 | Topic | Where |
 |---|---|
-| Overall design: roles, steps, gates, concurrency, known limitations, rejected designs | [docs/workflow.en.md](docs/workflow.en.md) |
-| Diagrams | [docs/workflow-diagrams.en.md](docs/workflow-diagrams.en.md) (diagrams show v3.1; the step tables in workflow.en.md are authoritative) |
+| Design overview in English: principles, structure, roles, run modes, step tables | [docs/overview.en.md](docs/overview.en.md) |
+| Full design: roles, steps, gates, concurrency, known limitations, rejected designs | [docs/workflow.md](docs/workflow.md) (Chinese) |
+| Diagrams | [docs/workflow-diagrams.md](docs/workflow-diagrams.md) (Chinese) |
+| What changed in each version, why, and upgrade notes | [CHANGELOG.md](CHANGELOG.md) (Chinese) |
+| Launch parameters (the `[TASK v1]` header) | [docs/intake.md](docs/intake.md) (Chinese) |
 | Full prompt and configuration of every step | [docs/prompts.md](docs/prompts.md) (Chinese, generated by `kandev/build_workflows.py`) |
-| Structure of the management directory and its doc formats | [docs/mgmt-workspace.en.md](docs/mgmt-workspace.en.md) |
+| Design of the management directory and its doc formats | [docs/mgmt-workspace.md](docs/mgmt-workspace.md) (Chinese) |
 | How agents message each other | [mgmt-template/protocol/message.md](mgmt-template/protocol/message.md) (Chinese) |
-| Conventions for the project being built: quota, side effects, constraint list, tests, screenshots, merging and pushing | [docs/project-conventions.en.md](docs/project-conventions.en.md) |
-| Templates, role cards and check scripts copied into every project | [mgmt-template/](docs/mgmt-template.en.md) |
-| Deployment scripts | [kandev/README.en.md](kandev/README.en.md) |
-| Example workflows (Kandev export) | [kandev/export/](kandev/export/README.en.md) |
-| Benchmark project and metrics collection | [evaluation/](evaluation/README.en.md) |
+| Conventions for the project being built: quota, side effects, constraint list, tests, screenshots, merging and pushing | [docs/project-conventions.md](docs/project-conventions.md) (Chinese) |
+| Templates (directory layout, recovery protocol), role cards and check scripts copied into every project | [mgmt-template/](mgmt-template/README.md) (Chinese) |
+| Customizable rules and parameters | [rules/README.md](rules/README.md) (Chinese) |
+| Install, deploy and upgrade commands | [kandev/README.md](kandev/README.md) (Chinese) |
+| Example workflows (Kandev export) | [kandev/export/](kandev/export/README.md) (Chinese) |
+| Benchmark project and metrics collection | [evaluation/](evaluation/README.md) (Chinese) |
 | Research: success stories, saving tokens, Kandev mechanics, GitHub as a collaboration platform | [reports/多Agent协作与Kandev工作流调研.md](reports/多Agent协作与Kandev工作流调研.md) (Chinese) |
 | Comparison with dsh-superagent | [reports/借鉴-dsh-superagent.md](reports/借鉴-dsh-superagent.md) (Chinese) |
 | Platform choice: should we replace Kandev? | [reports/平台选型-是否替换Kandev.md](reports/平台选型-是否替换Kandev.md) (Chinese) |
-| Early design drafts | [docs/history/](docs/history/) (Chinese) |
+| Early design drafts and the responsibility-split comparison | [docs/history/](docs/history/) (Chinese) |
 
 ## Repository layout
 
 ```
-├─ AGENTS.md         Entry point for agents: deploy, verify, start a project, run the benchmark, change the workflow
-├─ docs/             Architecture docs, diagrams, generated prompts, management directory and project conventions
-├─ kandev/           Deployment scripts, guard script, example workflows (export/), handoff prompts
+├─ AGENTS.md         Entry point for agents: deploy, verify, start a project, run the benchmark, customize, upgrade, change the workflow
+├─ CHANGELOG.md      What changed in each version
+├─ docs/             Architecture docs, diagrams, generated prompts, launch parameters, management directory and project conventions, English overview
+├─ kandev/           Install and deploy entry point (ma.py), guard script, example workflows (export/), handoff prompts
 ├─ rules/            Factory versions of the customizable rule slots (git, coding, testing, …) and parameters
 ├─ mgmt-template/    Per-project management directory template: role cards, message protocol, check scripts
 ├─ evaluation/       Benchmark project and metrics collection
-├─ reports/          Research reports
-└─ research_notes/   Research notes
+├─ reports/          Research reports (source repository only; not copied by an install)
+└─ research_notes/   Research notes (same)
 ```

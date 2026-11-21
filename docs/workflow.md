@@ -1,16 +1,18 @@
 # 多 Agent 开发 Workflow（v3.3.4）
 
-**中文** | [English](workflow.en.md)
+**中文** | [English overview](overview.en.md)
 
-> 本文件讲多 agent 架构本身：角色、workflow、步骤、通信、状态与恢复、门禁、并发。
+> 本文件讲多 agent 架构现在的行为：角色、workflow、步骤、通信、状态与恢复、门禁、并发、平台限制。它是这些内容的唯一来源；各版本改了什么、为什么改，见 [CHANGELOG.md](../CHANGELOG.md)。
 > 配套文档：
-> - [workflow-diagrams.md](workflow-diagrams.md)：流程图（图为 v3.1，步骤以本文件的表格为准）
+> - [workflow-diagrams.md](workflow-diagrams.md)：流程图
 > - [prompts.md](prompts.md)：各步骤 prompt 与配置，由脚本生成
-> - [mgmt-workspace.md](mgmt-workspace.md)：管理目录的构造
-> - [intake.md](intake.md)：启动项目的参数（`[TASK v1]` 头各字段、缺省值、提问方式），「接收」步骤的 agent 直接读它
+> - [intake.md](intake.md)：启动项目的参数（pm 任务的 `[TASK v1]` 头：字段、缺省值、提问方式、模板），「接收」步骤的 agent 直接读它
+> - [mgmt-workspace.md](mgmt-workspace.md)：管理目录的设计（抗压缩规则、任务文档、格式约定、JSON 字段）
 > - [project-conventions.md](project-conventions.md)：被开发项目一侧的约定（额度、副作用、约束清单、测试、截图、合并与推送）
-> - [../mgmt-template/](../mgmt-template/README.md)：文档模板、角色卡、消息协议
-> - [../kandev/](../kandev/README.md)：部署脚本
+> - [../mgmt-template/](../mgmt-template/README.md)：管理目录模板（目录结构、恢复协议）、角色卡、消息协议
+> - [../rules/](../rules/README.md)：可定制的规则槽位和参数
+> - [../kandev/](../kandev/README.md)：安装与部署
+> - [overview.en.md](overview.en.md)：英文概览
 
 ## 1. 设计原则
 
@@ -26,7 +28,7 @@
 10. **能用代码强制的约束不只写在 prompt 里**：每条约束标明执行方式（代码强制 / 检查脚本 / 仅 prompt），被代码拦下时停下上报，不绕过。
 11. **结论如实**：验收结论只有 pass / fail / unverified(原因)；部分完成写 partial；无需改动可以如实 dropped。需要用户处理的事集中到一处，每项附推荐答案。
 12. **边界要硬，方案要松**：边界（owns、单写者、额度开关、上报规则）管"能改哪里"，不管"怎么做"。prompt 只写边界、交付物和完成条件，规划与方案交给 agent 自己判断；需求和 AC 是下限，按意图做好。charter 用「产品意图」写出对需求的理解，契约写 intent。
-13. **按知识边界分工**：项目层（pm）只持有需求原文、产品意图、模块清单、模块之间的边界（B-n）、项目验收标准和决策；模块层持有本模块的规格、接口、任务和代码，其他模块只看公开接口；开发任务只需要一份自包含的契约和自己的 owns。常驻会话（调度、等待开发）只做路由，调查、验收、写代码都在一次性会话里做，结果写成文件。
+13. **按知识边界分工**：每一层只持有自己这一层的知识（第 2 节「知识分层」）。常驻会话（调度、等待开发）只做路由：不论对话历史是否还在，都以 NOW 和文件为准，按事件转交；调查、验收、写代码都在一次性会话里做，结果写成文件。
 
 ## 2. 整体结构
 
@@ -49,12 +51,19 @@
   跨模块信息按顺序取得：① 读对方的 `interfaces.md` 和 charter「模块边界」；② 不够 → 向担当模块发 QUESTION，只问事实，回答给文件指针，提问方记进自己 spec 的「依赖」节；③ 对方已完成 → 读它的 `acceptance.md` 和模块分支上的代码，仍不清楚问 pm；④ 变更接口只能经 pm（ESCALATE → DECISION + ADR）。
 - **baseline 模块**：模块清单第一个固定是 `baseline`（`kind: baseline`），走普通的 W2 + W3，契约是原「环境基线」步骤的要求（environment.md、AGENTS.md、冒烟测试、检查脚本、共享骨架、显式开关、约束落实、结合测试工具）。环境和骨架因此也经过审核和验收。其他模块都依赖它，分支从 `mod/baseline`（或所依赖的功能模块的分支）切出。
 - **结合测试模块**（`integration_test` 不是 off 时）：模块清单最后一个模块 `integration-test`，依赖全部其他模块。其他模块完成后它自动启动，把所有模块分支合并到集成分支，对组装起来的产品写并运行自动化结合测试；测出的缺陷经 pm 交给担当模块的修复模块任务。见第 4–6 节。
-- **常驻会话只做路由**：W1「调度」和 W2「等待开发」不论对话历史是否还在，都以 NOW 和文件为准，按事件转交；调查、验收、写代码都在一次性会话里做，结果写成文件。
 - **合并冲突也是修复项**：只涉及 environment.md「共享文件」的冲突就地解决（保留双方追加的条目，生成文件按命令重新生成）。涉及其他文件的，结合测试模块、多依赖的模块规划、重新合并、项目验收都不自行解决：`merge --abort`，写成修复项（冲突的文件、两个模块，担当 = 后合入的模块），由 pm 建修复模块任务（owns = 担当模块在 charter 模块清单里的源码路径 + 冲突文件，合入担当模块的分支并解决冲突）。
 - **每个模块只有一个当前分支**：registry.json 的 `current_branch` 记录原分支或最新的修复分支；所有"合并各模块分支"的地方只合当前分支，同一个冲突不会因为先合旧分支再合修复分支而重复出现。修复模块完成后，pm 更新 `current_branch`，并给依赖该模块且仍在进行中的模块发 NOTICE，它们在「等待开发」把修复分支合进自己的模块分支。
 - **修复模块做轻**：scope `mod:<模块>-fix-<n>`，用自己的 `modules/<模块>-fix-<n>/`，原模块目录只读；通常一个任务；验收只复跑修复项对应的失败测试和合并门禁。认为缺陷归属判错（不归本模块或是测试写错）时带证据报 misrouted 并自己移到「完成」；pm 在 status.json 把它标为 dropped。来源是结合测试缺陷的转回结合测试模块，由报告缺陷的测试任务重新判断，这一轮不计入修复轮数；来源是项目验收修复项的记入 status.json，留给下一轮项目验收判断。
 - **已知问题**：pm 用 DECISION + ADR 接受某个结合测试缺陷为已知问题后，结合测试模块把测试任务移回「开发」，把对应的失败用例标成预期失败并引用 ADR 编号后正常上报；审核不把它算作弱化测试，模块验收和项目验收都记 unverified(已知问题，ADR)，列入「需要用户处理」，不判 fail。
 - **修复项与路由备注**：验证者（审核、模块验收、项目验收）把每个不通过项写成可直接下发的修复项（编号、担当模块或任务、复现步骤、期望、实际、疑似位置、对应的失败测试或验收条目）；与本步骤无关的 KMSG 不处理，原文记入本轮记录的「转交」节。常驻会话和 pm 下发修复时，契约 = 指向原修复项或缺陷的指针（文件 + 编号）+ 不超过两句的备注，不改写、不追加要求。
+
+- **验收分级**：验收者（立项评审、模块验收、项目验收）先给不通过项定级。**阻塞**（按需求的用法功能不可用、结果错误、误导用户，或需求 / PA 明确要求的没达到）才判 fail、写修复项 F-n；**轻微**（外观、文案偏差，或只在需求没提到的条件下出现）该条照常 pass，记进「已知问题」K-n，不触发修复；**测试缺陷**（测试、判定脚本或 harness 自身不稳定、依赖运行时刻或负载）判 unverified(测试缺陷)，记进「测试缺陷」T-n，只有属于正在验收的模块时才退回（只改测试）。项目验收的 K-n、T-n 由 pm 登记到 attention.md，留给用户在「人工终审」决定。
+- **硬性判定的来源**：只有需求原文和 charter 的 PA 能成为 pass / fail 的依据。需求没有提到的视口 × 语言矩阵、像素级或计算样式级判定不写进 PA、验收要点和 MA，想检查的写成「建议检查」（不通过只记建议）；评审、设计这类模块产出的检查清单是工作材料，PA 不写"清单逐条 pass"。立项评审第 7 项检查这一点，加码即为阻塞问题。
+- **修复的规模**：只有 fail（F-n、阻塞级的结合测试缺陷）才建修复模块；「建议」「已知问题」和别的模块的「测试缺陷」记进 attention.md「遗留建议」，留给人工终审。同一次事件里担当相同的修复项合成一个修复模块，修复带来的文档、规格、判定脚本同步写进它的「同步范围」一起改（owns 可以跨原模块边界）；不建单独的重判模块。修复轮数按整个项目计（status.json 的 `fix_rounds`），到 2 轮后剩余缺陷写 ADR 作为已知问题。
+- **规模分档**：立项时先定档（小 = 在已有产品上打磨或修补；中 = 新增 1–3 个子系统；大 = 其他），功能模块上限为小 2、中 5；评审、设计、复评、文档不单独成模块，写成功能模块里的开发任务。小档的结合测试只写 3–5 个关键场景。立项评审把超过上限、无理由的独立评审 / 设计模块算作阻塞问题。
+- **已完成的模块不再派活**：修复完成时结合测试模块还在进行中才通知它重跑；它已完成时，由「项目验收」在集成分支上合并修复分支并重跑结合测试。守护用 `parent_done` 告警"模块已完成而子任务还在跑"。
+
+验收分级、硬性判定的来源、修复的规模和规模分档是从一次失控的项目里总结出来的，来由和代价见 [CHANGELOG.md](../CHANGELOG.md) v3.3.3。
 
 ### 角色与 profile
 
@@ -146,15 +155,19 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 任务文档通过当前 Kandev 的任务计划保存：`## task-doc: now` / `report` / `review` / `charter-review`。先读取完整计划和版本，创建或精确更新所属命名章节；保留其他章节及用户内容，冲突重读合并，保存后读回。开发写 now/report，审核写 review，立项评审写 charter-review；模块按子任务 ID 读取交付章节。旧的 `write_task_document_kandev` / `get_task_document_kandev` 不作为必需接口。
 
 - **预防**：按知识边界分工，每个 agent 只读自己这一层需要的文件；一个任务一个会话；跨步骤靠 handoff、任务文档和管理目录传递信息；常驻上下文保持很小（AGENTS.md ≤150 行，prompt 稳定、不含时间戳，这样有利于缓存命中）。
-- **常驻步骤以文件为准**：「调度」「等待开发」的 on_enter 带 reset_agent_context；但从「验收调查」回到「等待开发」时发生 profile 切换，平台可能不执行重置，所以 prompt 写的是"不论对话历史是否还在，都以 NOW 和文件为准"。
-- **刷新**：常驻会话在 NOW 开头记「唤醒计数」（自上次上下文重置以来被唤醒的次数），每轮加 1；达到 15 次或收到守护的 refresh 告警时（v3.3.3，不再靠 agent 自己判断"会话明显变长"），agent 先把 `刷新返回：<步骤>` 写进 NOW，再移到「刷新」步骤；守护把无响应的 pm 移到「刷新」时，把 `刷新返回：<原步骤>` 写在移动的 instructions 里（刷新步骤优先读它）。刷新步骤进入时重置上下文，然后移回原步骤。Kandev 不允许把任务移到当前步骤，所以必须经过这个中转步骤。
-- **守护**：每个 workspace 一个 Kandev automation，每 15–20 分钟运行一次，自己发现所有进行中的项目，只读巡检，向上级发 ALERT。由 `kandev/stage.py` 按固定的规则表判断每个任务"在等谁"（第一条匹配的生效），守护只执行脚本给出的告警，并生成 `agents/guard/stage.md` 给用户看。规则见 `mgmt-template/roles/guard.md`「阶段分类」。
+- **常驻步骤以文件为准**：「调度」「等待开发」的 on_enter 带 reset_agent_context，但平台不一定执行（第 12 节），所以 prompt 不依赖之前的对话。
+- **刷新**：常驻会话每次被唤醒大约增加 9K 字符上下文，所以按次数刷新，不靠 agent 自己判断会话是否变长。常驻会话在 NOW 开头记「唤醒计数」（自上次上下文重置以来被唤醒的次数），每轮加 1；达到阈值（出厂值 15，`rules/params.json` 的 `refresh_wakes`）或收到守护的 refresh 告警时，先把 `刷新返回：<步骤>` 写进 NOW，再移到「刷新」步骤。刷新步骤进入时重置上下文，然后移回原步骤（移动 instructions 里的 `刷新返回：` 优先，其次 NOW）。Kandev 不允许把任务移到当前步骤，所以必须经过这个中转步骤。常驻步骤每轮的回复限 3 行，任务计划一轮只整份读一次。
+- **守护也独立地数**：常驻会话自上次重置以来的用户侧消息达到同一阈值 → `session_long`，告警发到该任务的常驻会话，建议 refresh。pm 60 分钟内不处理则升级为 `pm_unresponsive`，守护把它移到「刷新」，并把 `刷新返回：<原步骤>` 写在移动的 instructions 里；模块任务只重发告警，不由守护移动。
+- **消息带会话 id**：模块 agent 规划时把自己的任务 id 和会话 id 写进 tasks.json 顶层（`module_task_id`、`module_session_id`）和子任务头的 parent 行（`session <id>`）；所有发给模块的消息和守护告警都带这个 `session_id`；验收者收到 `to: mod:<模块>` 的消息时转给模块会话。
+- **守护**：每个 workspace 一个 Kandev automation，每 20 分钟运行一次，自己发现所有进行中的项目，只读巡检，向上级发 ALERT。由 `kandev/stage.py` 按固定的规则表判断每个任务"在等谁"（第一条匹配的生效），守护只执行脚本给出的告警，并生成 `agents/guard/stage.md` 给用户看。规则和告警种类见 `mgmt-template/roles/guard.md`「阶段分类」和「信号」，阈值可在 `rules/params.json` 的 `guard` 修改。连不上 Kandev 时，脚本在各项目 stage.md 标题下留一行"守护故障"（含连续失败次数和错误），`last_run.json` 的 `at` 保持为最后一次成功的时间。所有项目结束后守护自动停用；同一 workspace 再开项目时「接收」步骤检查并重新启用它，pm 在「调度」中发现 stage.md 超过 60 分钟没更新时登记 attention.md。
 - **恢复时先核对外部状态**：重复创建任务、合并、推送、真实调用、删除资源之前，先查实际状态，已经生效的不再做。刷新步骤先核对 NOW「未确认的意图」。
 
 ## 8. 并发与 WIP
 
-- 「开发」步骤的 WIP 是所有模块共用的全局上限（默认 4），用来控制本机同时运行的 agent 数量。
-- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**，前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置在 tasks.json 中都是 merged（REPORT 已到，或按 Kandev 状态对账补记；提交都已在 `mod/<模块>` 上）或 dropped 时，模块 agent 把它移到「开发」。没有前置的子任务也先建在「待开发」，读回核对参数后再移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
+- 「开发」步骤的 WIP 是所有模块共用的全局上限，用来控制本机同时运行的 agent 数量。出厂值 4（本文其他地方写的"WIP 4"都指它），在 `rules/params.json` 的 `dev_wip` 修改。
+- Kandev 的 WIP 按"任务在这个步骤里"计数，被 blocked_by 阻塞的任务也会占名额，并行会被依赖链拖成串行。所以 W3 有一个不计 WIP 的「待开发」步骤：有前置的任务以 `start_agent=false` 创建在那里，**不设 Kandev 的 blocked_by**（移动因此不受平台依赖检查影响），前置关系只记在 tasks.json（守护也从 tasks.json 判断）。前置在 tasks.json 中都是 merged 或 dropped 时，模块 agent 把它移到「开发」。模块之间（W2 任务）的 blocked_by 保留不变。
+- **建子任务先停放再核对**：所有子任务（包括没有前置的）一律先建在「待开发」，读回核对工作区模式、autopilot、base 后再移到「开发」；不一致就换新 id 重建。守护的 `session_not_started` 兜底发现停在 SCHEDULING 的任务。
+- **放行不只靠 REPORT**：合并步骤合入后向模块 agent 发 REPORT，发送失败时照实写进 summary 后仍进入「完成」。模块 agent 每次被唤醒都先按 Kandev 状态对账：子任务已在「完成」而 tasks.json 没有登记时，`mod/<模块>` 上有以任务 id 开头的提交才补记 merged，不猜。「验收调查」和「刷新」遇到这种任务先退回「等待开发」对账；没有其他事件时由守护的 `child_unrecorded` 唤醒模块 agent。
 - 依赖链仍建议尽量浅，必须串行的工作合并成一个任务。
 - 所有模块都 blocked_by baseline；其余模块之间有依赖关系的用 blocked_by（并从依赖模块的分支切出），能在骨架上并行的不设依赖。
 - 等模块 agent 决定的开发任务（blocked / dropped / 缺陷上报）移到不计 WIP 的「等待决策」，不占「开发」的名额。
@@ -192,38 +205,17 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 部署步骤见 [kandev/README.md](../kandev/README.md)，让 agent 代为部署和验收见 [AGENTS.md](../AGENTS.md)。
 
-**安装目录（v3.3.4）**：部署时 `kandev/ma.py install` 把运行所需的文件（守护脚本、「接收」的参数说明、管理目录模板、规则槽位、构建脚本）复制到一个安装目录（缺省 `~/.kandev-ma/<workspace id 前 8 位>/`），写进 Kandev 的路径都指向它。之后删除、移动源仓库或在源仓库里切换分支，都不影响已部署的 workflow。想直接使用源仓库（改 workflow 本身时）选链接模式。
+**安装目录**：部署时 `kandev/ma.py install` 把运行所需的文件（守护脚本、「接收」的参数说明、管理目录模板、规则槽位、构建脚本）复制到一个安装目录（缺省 `~/.kandev-ma/<workspace id 前 8 位>/`），写进 Kandev 的路径都指向它。之后删除、移动源仓库或在源仓库里切换分支，都不影响已部署的 workflow。想直接使用源仓库（改 workflow 本身时）选链接模式。
 
-**定制**：规则槽位在 [rules/](../rules/README.md)（工作区、测试、质量、git、编码五段规则和数值参数），用户的覆盖写在安装目录的 `custom/rules/`，部署时内联进步骤 prompt；角色卡和项目模板直接改安装目录里的 `mgmt-template/`。步骤结构、消息协议、分支拓扑和守护的判断规则属于引擎，不在定制范围内。
+**定制**：规则槽位在 [rules/](../rules/README.md)（工作区、测试、质量、git、编码五段规则，以及 `params.json` 里的数值参数：「开发」的 WIP、刷新阈值、守护阈值），用户的覆盖写在安装目录的 `custom/rules/`，部署时内联进步骤 prompt；角色卡和项目模板直接改安装目录里的 `mgmt-template/`。步骤结构、消息协议、分支拓扑和守护的判断规则属于引擎，不在定制范围内。
 
-**升级**：在新版源仓库中运行 `ma.py upgrade --home <安装目录>`。没改过的出厂文件直接更新，用户改过的保留（新版也改了的写成 `.new` 供合并），`custom/` 不动；然后 `ma.py diff` 看 prompt 的变化，确认后 `ma.py apply`。每个项目的管理目录里有 `VERSION`，记录它来自哪个版本的模板。
+**升级**：在新版源仓库中运行 `ma.py upgrade --home <安装目录>`。没改过的出厂文件直接更新，用户改过的保留（新版也改了的写成 `.new` 供合并），`custom/` 不动；然后 `ma.py diff` 看 prompt 的变化，确认后 `ma.py apply`。每个项目的管理目录里有 `VERSION`，记录它来自哪个版本的模板。各版本升级时要注意的事见 [CHANGELOG.md](../CHANGELOG.md)。
 
 **部署前的提问**：必须向用户确认的事项集中在 `kandev/deploy_questions.json`。安装时必问四项（快速还是自定义、workspace、各角色的 profile、要不要守护），答案记在安装目录的 `ma-manifest.json`，缺项时脚本拒绝部署。另外几种情况脚本会停下来等用户同意后再带参数运行：就地更新已部署的 workflow（先看 `ma.py diff`）、有进行中的项目、同名 workflow 属于另一个系列、升级时用户改过的文件与新版冲突。
 
-启动项目：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。
+**启动项目**：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数（运行模式、是否先看计划、是否做结合测试等）向你提问，然后把描述改写成 `[TASK v1]` 头 + 需求原文交给 pm。
 
-描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数（运行模式、是否先看计划、是否做结合测试等）向你提问，然后把描述改写成下面的格式交给 pm。字段、缺省值和提问方式见 [intake.md](intake.md)。
-
-已经按下面的格式写好完整描述时（例如由 agent 按 [AGENTS.md](../AGENTS.md) C 节创建的任务），「接收」不改、不提问，直接进入立项规划。
-
-```
-[TASK v1]
-project: <项目名>
-mode: attended | unattended
-plan_only: false            # true：立项评审通过后停在「立项确认」
-integration_test: auto      # auto：其他模块完成后自动做结合测试；off：不做
-mgmt_root: <管理目录绝对路径，放在仓库与 worktree 之外>
-mgmt_template: <安装目录（链接模式下是本仓库）中 mgmt-template 的绝对路径>
-repo: <主仓库绝对路径>
-role: pm
-scope: pm
-parent: user
-pm: self
-branch: <自动> base <基线分支>
----
-<项目目标、需求（按重要度排序，一条一行，pm 会逐条摘录为 R-n）、约束、技术栈与环境要求（交给 baseline 模块落实）、额度约定（见开发项目约定）>
-```
-
+pm 任务的 `[TASK v1]` 头（字段、缺省值、提问方式、完整模板和例子）只在 [intake.md](intake.md) 维护。已经按那个格式写好完整描述时（例如由 agent 按 [AGENTS.md](../AGENTS.md) C 节创建的任务），「接收」不改、不提问，直接进入立项规划。
 pm 创建的模块任务头示例（baseline / 普通模块）：
 
 ```
@@ -242,40 +234,37 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 
 ## 12. 已知限制
 
-- 外部 MCP 没有 `message_task_kandev`，也不能创建 automation。外部的守护或观察者只能移动任务、代答提问和权限请求。需要这些能力的工作写成交接 prompt（`kandev/handoff/`），交给 Kandev 内部的 agent 执行。
-- `on_children_completed` 只在任务处于「等待开发」时生效。刷新步骤会检查子任务状态，补上这个缺口。
-- 会话里的上下文用量 Kandev 有记录，但 MCP 读不到，所以守护只能看间接信号。
-- Kandev 只在步骤没有后继步骤时才执行 `complete_task_on_enter`（任务状态变为 COMPLETED），而模块之间的 blocked_by 只在前置任务 COMPLETED 时解除。所以每个 workflow 的「完成」都排在最后，「刷新」在它前面；进入「完成」的事件用 `move_to_step` 指定位置，不用 `move_to_next`。`build_workflows.py` 和 `check_docs.py` 会检查这条约束。在设置里保存这个选项不会回头处理已经停在「完成」里的任务：v3.3 上已经进入「完成」但状态不是 COMPLETED 的模块任务，要手动把状态改成 COMPLETED，依赖它的模块才会启动。
-- 导出的 workflow 文件只按 model / mode 记录 profile。同模型的 profile 有多个时可能匹配错，所以部署用 `ma.py apply`（内部是 `build_workflows.py`），它按 ID 绑定。
-- 门禁中的用户消息投递给用户所在的会话标签，而不是下一步骤的会话；由用户消息触发的移动也不一定会把下一步的步骤 prompt 送达。所以：门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的）；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】）；评审会话万一收到，就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。如果 pm 仍没有开始工作，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
-- 「待开发」依赖两点 Kandev 行为，部署后要先验证（见 [AGENTS.md](../AGENTS.md)「验收部署」）：`create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在该步骤、不启动会话；从无 agent 步骤移到「开发」会触发 on_enter 的 auto_start。
-- 放行不只靠 REPORT（v3.3.2）：合并步骤的 REPORT 是一条消息，可能发不出去（v3.3.1 出现过：参数写错后没有重试就推进了步骤，依赖它的任务停了 4 小时）；而 `on_children_completed` 只在全部子任务终态时触发，还有 held 任务时单个子任务完成唤醒不了模块 agent。所以：REPORT 发送失败时合并步骤照实写进 summary 后仍进入「完成」；模块 agent 每次被唤醒都先按 Kandev 状态对账（子任务已在「完成」而 tasks.json 没有登记时，`mod/<模块>` 上有以任务 id 开头的提交才补记 merged，不猜）；「验收调查」和「刷新」遇到这种任务先退回「等待开发」对账；守护的 `child_unrecorded` 负责在没有其他事件时唤醒模块 agent。待开发任务不设 blocked_by，移动不受平台依赖检查影响。
-- 建子任务的参数只靠 prompt（v3.3.2 起统一写在【建子任务】一段，三处原文内联）：漏传 `workspace_mode` 时 Kandev 默认 `inherit_parent`，子任务共用模块任务的 worktree，换 profile 开新会话（「审核」）会失败并静默停在 SCHEDULING。所以子任务一律先建在「待开发」，读回核对工作区模式、autopilot、base 后再移到「开发」；不一致就换新 id 重建。守护的 `session_not_started` 兜底发现停在 SCHEDULING 的任务。
-- 消息发到哪个会话（v3.3.3）：`message_task_kandev` 不带 `session_id` 时消息进任务的主会话。模块任务进过「验收调查」后，主会话是验收者的，发给模块的 REPORT、INSTRUCT、ALERT 都落到验收者那里，没人处理（出现过两次，各停 3–4 小时，靠用户手动转发）。现在：模块 agent 规划时把自己的任务 id 和会话 id 写进 tasks.json 顶层（`module_task_id`、`module_session_id`）和子任务头的 parent 行（`session <id>`）；所有发给模块的消息带这个 `session_id`；守护发给模块的告警也带；验收者收到 `to: mod:<模块>` 的消息时转给模块会话。
-- 已完成的模块不再派活（v3.3.3）：COMPLETED 的任务不能移回前面的步骤，发给它的消息只会排队。修复完成时结合测试模块还在进行中才通知它重跑，已完成就由「项目验收」在集成分支上合并修复分支并重跑结合测试。守护新增两条发给 pm 的告警：`parent_done`（模块已完成而子任务还在跑）、`session_stuck`（任务有一个旧会话一直 RUNNING 不结束，发给它的消息永久排队；出现过一次，停了 9 小时）。`session_stuck` 只能由用户在界面取消那一轮，pm 登记到 attention.md。
-- 修复的规模（v3.3.3）：v3.3.2 中一次 UX 打磨生出 14 个修复模块，6 个来自验收报告的"建议"，8 个只是文档、规格、判定脚本的同步或重判，每个都走完整的规划 → 开发 → 审核 → 合并 → 验收。现在：只有 fail（F-n、阻塞级的结合测试缺陷）才建修复模块，「建议」「已知问题」和别的模块的「测试缺陷」记进 attention.md「遗留建议」留给人工终审；同一次事件里担当相同的修复项合成一个修复模块，修复带来的同步写进它的「同步范围」一起改（owns 可以跨原模块边界）；不建单独的重判模块；修复轮数按整个项目计（status.json 的 `fix_rounds`），到 2 轮后剩余缺陷写 ADR 作为已知问题。代价：小改进和轻微问题要用户在终审时过一遍「遗留建议」；修复任务的审核要覆盖多个模块的文件。
-- 规模分档（v3.3.3）：立项时先定档（小 = 在已有产品上打磨或修补；中 = 新增 1–3 个子系统；大 = 其他），功能模块上限为小 2、中 5；评审、设计、复评、文档不单独成模块，写成功能模块里的开发任务。小档的结合测试只写 3–5 个关键场景。立项评审把超过上限、无理由的独立评审 / 设计模块算作阻塞问题。代价：小项目里评审和设计不再有独立的模块验收。
-- 守护自身的故障（v3.3.3）：连不上 Kandev 时脚本在各项目 stage.md 标题下留一行"守护故障"（含连续失败次数和错误），`last_run.json` 的 `at` 保持为最后一次成功的时间。用量上限的识别修了一处漏判（上限文字以普通消息再出现一次时，旧版把任务判成"空闲未推进"，没有自动恢复）。
-- 验收分级（v3.3.3）：v3.3.2 及之前，验收中任何不通过项都判 fail 并触发修复，一次 UX 打磨项目因此生出 14 个修复模块，其中只有 3 个修的是用户会遇到的功能缺陷。现在验收者（立项评审、模块验收、项目验收）先给不通过项定级：**阻塞**（按需求的用法功能不可用、结果错误、误导用户，或需求 / PA 明确要求的没达到）才判 fail、写修复项 F-n；**轻微**（外观、文案偏差，或只在需求没提到的条件下出现）该条照常 pass，记进「已知问题」K-n，不触发修复；**测试缺陷**（测试、判定脚本或 harness 自身不稳定、依赖运行时刻或负载）判 unverified(测试缺陷)，记进「测试缺陷」T-n，只有属于正在验收的模块时才退回（只改测试）。项目验收的 K-n、T-n 由 pm 登记到 attention.md，留给用户在「人工终审」决定，不建修复模块。代价：几像素的溢出、文案小偏差这类问题会随版本交付，需要用户在终审时看一眼「已知问题」。
-- 硬性判定的来源（v3.3.3）：只有需求原文和 charter 的 PA 能成为 pass / fail 的依据。需求没有提到的视口 × 语言矩阵、像素级或计算样式级判定不写进 PA、验收要点和 MA，想检查的写成「建议检查」（不通过只记建议）；评审、设计这类模块产出的检查清单是工作材料，PA 不写"清单逐条 pass"。立项评审第 7 项检查这一点，加码即为阻塞问题。
-- 常驻会话的长度（v3.3.3）：pm 在「调度」、模块 agent 在「等待开发」每次被唤醒大约增加 9K 字符上下文，一直不重置会线性累加（实际出现过 46 小时、57 次唤醒没有刷新）。除了上面的唤醒计数，守护也独立地数：常驻会话自上次重置以来的用户侧消息 ≥15 条 → `session_long`，告警发到该任务的常驻会话（带 session_id），建议 refresh；pm 60 分钟内不处理则升级为 `pm_unresponsive`，由守护把它移到「刷新」。模块任务只重发告警，不由守护移动。另外，常驻步骤每轮的回复限 3 行，任务计划一轮只整份读一次。
-- 安装目录（v3.3.4）：v3.3.3 及之前，「接收」步骤、守护和新项目的模板直接读源仓库的工作区，而步骤 prompt 是部署时的快照：在仓库里改文件或切换分支会让两者错位，删除或移动仓库会让新项目无法启动、守护停止工作且没有告警。现在它们读安装目录；`ma.py doctor` 检查路径、已部署的 prompt 与安装目录是否一致、守护心跳。仍然存在的错位：进行中的项目用的是启动时复制到管理目录的角色卡，就地更新 prompt 后两者可能不同版本（`doctor` 会列出）。安装目录必须在运行 Kandev 的机器上；它被删除时的表现和以前删除仓库一样。
-- 守护在上一个项目结束时会自动停用；同一 workspace 再开项目时，「接收」步骤会检查并重新启用它，pm 在「调度」中发现 stage.md 超过 60 分钟没更新时登记 attention.md。
-- 「等待开发」和「验收调查」交替时，模块 agent 的会话（profile `module`）和验收者的会话（profile `module_auditor`）在同一个 Kandev 任务里轮换；等待开发以 NOW 和文件为准，不依赖之前的对话。
+现在仍然存在的平台限制和由它决定的做法。各条的来由（事故和当时的数字）见 [CHANGELOG.md](../CHANGELOG.md)。
+
+- **外部 MCP 能力不全**：没有 `message_task_kandev`，也不能创建 automation；外部的守护或观察者只能移动任务、代答提问和权限请求。需要这些能力的工作写成交接 prompt（`kandev/handoff/`），交给 Kandev 内部的 agent 执行。
+- **`on_children_completed`** 只在任务处于「等待开发」、且子任务全部终态时触发；还有 held 任务时，单个子任务完成唤醒不了模块 agent。对策：「刷新」检查子任务状态，放行靠对账和守护（第 8 节）。
+- **上下文用量读不到**：Kandev 有记录，但 MCP 读不到，守护只能数唤醒次数这类间接信号（第 7 节）。
+- **只有最后一个步骤会完成任务**：Kandev 只在步骤没有后继时执行 `complete_task_on_enter`，而模块之间的 blocked_by 只在前置任务 COMPLETED 时解除。所以每个 workflow 的「完成」排在最后，「刷新」在它前面，进入「完成」用 `move_to_step` 指定位置；`build_workflows.py` 和 `check_docs.py` 检查这条约束。
+- **COMPLETED 的任务不能再用**：不能移回前面的步骤，发给它的消息只会排队（对策见第 2 节「已完成的模块不再派活」）。
+- **不带 `session_id` 的消息进任务的主会话**，而模块任务里模块 agent 和验收者的会话在同一个任务中轮换，主会话不一定是收件人的；从「验收调查」回到「等待开发」时发生 profile 切换，平台也可能不执行上下文重置（对策见第 7 节）。
+- **一直 RUNNING 的旧会话**会让发给该任务的消息永久排队；只能由用户在界面取消那一轮。守护用 `session_stuck` 告警，pm 登记到 attention.md。
+- **门禁中的用户消息**投递给用户所在的会话标签，不是下一步骤的会话；由用户消息触发的移动也不一定把下一步的步骤 prompt 送达。所以门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的）；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】）；评审会话万一收到就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。pm 仍没有开始工作时，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
+- **建子任务的参数只靠 prompt**：漏传 `workspace_mode` 时 Kandev 默认 `inherit_parent`，子任务共用模块任务的 worktree，换 profile 开新会话（「审核」）会失败并静默停在 SCHEDULING（对策见第 8 节）。
+- **导出文件不能代替部署脚本**：导出的 workflow 只按 model / mode 记录 profile，同模型的 profile 有多个时可能匹配错；部署用 `ma.py apply`，它按 ID 绑定。
+- **prompt 是部署时的快照**：规则槽位和参数改完要重新部署才生效。进行中的项目用的是启动时复制到管理目录的角色卡，就地更新 prompt 后两者可能不同版本（`ma.py doctor` 会列出；不一致时 agent 以步骤 prompt 为准）。安装目录必须在运行 Kandev 的机器上，它被删除后新项目无法启动、守护停止工作。
 
 ### 部署后需要实测的平台行为
 
-下面几条是设计依赖的平台行为；写明了实测日期的已经测过，其余还没有在本机 Kandev 上实测。每条写明测不通时的退路。
+设计依赖下面这些平台行为。已实测的写明日期；未实测的在本机 Kandev 上还没有验证，测不通时按退路处理。a、b 的验收步骤见 [AGENTS.md](../AGENTS.md)「验收部署」。
 
-- a. 把任务从「待开发」移到「开发」会触发自动启动（on_enter auto_start）。2026-11-13 在 Codex 和 Claude 两种 agent 上实测通过。退路：有前置的任务等前置合并后，由模块 agent 直接创建到「开发」。
-- b. agent 把自己移到「等待决策」后开发会话保留，移回时沿用。2026-11-13 实测通过（同上）。退路：移回的 instructions 里写明先读任务文档 now 和 report（已写）。
-- c. on_children_completed 在新一批修复子任务全部完成后能再次触发。退路：把模块自己移到「验收调查」的条件放宽为"子任务全部终态"。
-- d. 多会话任务里不带 session_id 的消息投给当前步骤的会话；同一任务上的多个移动按发出顺序执行。退路：发消息时带 registry 登记的 session_id，守护的告警兜底。
-- e. 所有 worktree 共享本地的 `mod/*` 分支。退路：改为推送到一个本地 bare 远端。
-- f. 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达。退路：`agents/guard/stage.md` 会显示这些状态，由用户手动操作。
-- g. 「接收」步骤的 agent 能用 `update_task_kandev` 改写自己任务的描述，且之后「立项规划」的 `{{task_prompt}}` 取到的是新描述。退路：接收步骤把新描述同时写进任务文档 `intake`，pm 在描述没有 `[TASK v1]` 头时重新读任务、再读这个章节；改写失败时接收步骤在回复里给出全文，由用户粘贴到任务描述后把任务拖到「立项规划」。
-- h. （v3.3.2）`list_tasks_kandev` 返回子任务的工作区模式、autopilot、base 分支（字段名未确认，报告中见过 `metadata.workspace.mode`）；Kandev 准备会话失败时任务 state 是 `SCHEDULING`；Kandev 内部 agent 能用 `list_settings_resources_kandev` / `update_settings_kandev` 启用 automation。退路：读回核对时字段不存在就记 unverified 继续；`session_not_started` 不触发时由 stage.md 显示，用户处理；「接收」启用不了守护时在摘要第一行提醒用户。
-- i. （v3.3.4，未实测，目前不依赖）Kandev 的共享 prompt（步骤 prompt 里写 `@名称` 引用，用户可在 Settings → Prompts 直接修改）和 workflow 级 prompt（`workflow.prompt`）。如果 `@名称` 在自动启动的步骤 prompt 里会被展开，规则槽位可以改为存在 Kandev 里，改完不需要重新部署；公共头部也可以移到 workflow 级 prompt。要测的是：自动启动（on_enter auto_start）的步骤里 `@名称` 是否展开、展开发生在发送时还是保存时、agent 创建的子任务里是否同样生效、共享 prompt 是否按 workspace 隔离。现在的做法（构建时内联）不依赖它。2026-11-22 只读调查（另一台机器上的 Kandev 实例，本机的当时没有运行）：有 `list / get / create / update_shared_prompt_kandev`，共享 prompt 按名称全局保存（接口没有 workspace 参数），单个上限 1 MiB，可以设为不允许 agent 修改；`workflow.prompt` 是可写的设置项（`update_settings_kandev`，target 为 workflow），`export_workflow_kandev` 的导出里没有这个字段（未设置时）。展开行为要启动一次真实会话才能测，还没有做。
+| # | 行为 | 状态 | 测不通时的退路 |
+|---|---|---|---|
+| a | `create_task_kandev` 带 `workflow_step_id`、`start_agent=false` 时任务停在「待开发」、不启动会话；把它移到「开发」会触发自动启动（on_enter auto_start） | 移动后自动启动：已实测 2026-11-13（Codex 和 Claude 两种 agent）；创建后停住：每次部署验收时核对 | 有前置的任务等前置合并后，由模块 agent 直接创建到「开发」 |
+| b | agent 把自己移到「等待决策」后开发会话保留，移回时沿用 | 已实测 2026-11-13（同上） | 移回的 instructions 里写明先读任务文档 now 和 report（已写） |
+| c | `on_children_completed` 在新一批修复子任务全部完成后能再次触发 | 未实测 | 把模块自己移到「验收调查」的条件放宽为"子任务全部终态" |
+| d | 多会话任务里不带 session_id 的消息投给当前步骤的会话；同一任务上的多个移动按发出顺序执行 | 未实测（前半句在模块任务上不成立，已改为带 session_id） | 发消息时带登记的 session_id，守护的告警兜底 |
+| e | 所有 worktree 共享本地的 `mod/*` 分支 | 未实测 | 改为推送到一个本地 bare 远端 |
+| f | 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达 | 未实测 | `agents/guard/stage.md` 会显示这些状态，由用户手动操作 |
+| g | 「接收」的 agent 能用 `update_task_kandev` 改写自己任务的描述，之后「立项规划」的 `{{task_prompt}}` 取到新描述 | 未实测 | 接收步骤把新描述同时写进任务文档 `intake`，pm 在描述没有 `[TASK v1]` 头时重新读任务、再读这个章节；改写失败时接收步骤在回复里给出全文，由用户粘贴到任务描述后把任务拖到「立项规划」 |
+| h | `list_tasks_kandev` 返回子任务的工作区模式、autopilot、base 分支（字段名未确认，见过 `metadata.workspace.mode`）；准备会话失败时任务 state 是 `SCHEDULING`；Kandev 内部 agent 能用 `list_settings_resources_kandev` / `update_settings_kandev` 启用 automation | 未实测 | 读回核对时字段不存在就记 unverified 继续；`session_not_started` 不触发时由 stage.md 显示，用户处理；「接收」启用不了守护时在摘要第一行提醒用户 |
+| i | 共享 prompt（步骤 prompt 里写 `@名称` 引用）在自动启动的步骤里会被展开；workflow 级 prompt（`workflow.prompt`）可用 | 未实测，目前不依赖 | 现在的做法：规则槽位和公共头部在构建时内联进每个步骤的 prompt |
+
+关于 i：不使用共享 prompt 和 workflow 级 prompt，是因为还不知道 `@名称` 在自动启动的步骤和 agent 创建的子任务里是否展开、展开发生在发送时还是保存时。测通以后，规则槽位可以改为存在 Kandev 里（改完不需要重新部署），公共头部可以移到 workflow 级 prompt。只读调查的结果见 [CHANGELOG.md](../CHANGELOG.md) v3.3.4。
 
 ## 13. 已否决的设计
 

@@ -91,7 +91,7 @@
 
 ## D. 跑基准项目
 
-按 [evaluation/bench/README.md](evaluation/bench/README.md)：用固定的待办应用需求启动一个 unattended 项目，到达「人工终审」后用 `evaluation/metrics.py` 采集指标。预计 30–45 分钟，会产生真实费用，先征得用户同意。
+按 [evaluation/bench/README.md](evaluation/bench/README.md)：用固定的待办应用需求启动一个 unattended 项目，到达「人工终审」后用 `evaluation/metrics.py` 采集指标。会产生真实费用，先征得用户同意（耗时见该文档；加上 baseline 和结合测试模块后还没有实测）。
 
 ## E. 修改 workflow 本身
 

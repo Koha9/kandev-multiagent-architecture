@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 612" width="1000" height="612" role="img" aria-labelledby="t d">
   <title id="t">Kandev 多 Agent 开发架构</title>
-  <desc id="d">三层 workflow：W1 项目管理、W2 模块管理、W3 开发；管理目录保存状态；守护每 20 分钟检查一次；用户只在立项确认和人工终审两处做决定。</desc>
+  <desc id="d">三层 workflow：W1 项目管理、W2 模块管理、W3 开发；管理目录保存状态；环境与骨架由最先运行的 baseline 模块完成，结合测试模块最后运行；守护每 20 分钟检查一次；用户只在立项确认和人工终审两处做决定。</desc>
   <style>
     svg { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif; }
     .bg { fill: #ffffff; }
@@ -58,10 +58,10 @@
   <text class="s" x="36" y="172">1 个任务，pm 常驻</text>
 
   <g>
-    <rect class="pm" x="170" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="208" y="163">立项规划</text>
-    <rect class="au" x="261" y="140" width="76" height="36" rx="8"/><text class="c tau" x="299" y="163">立项评审</text>
-    <rect class="hu" x="352" y="140" width="76" height="36" rx="8"/><text class="c thu" x="390" y="163">立项确认</text>
-    <rect class="pm" x="443" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="481" y="163">环境基线</text>
+    <rect class="mc" x="170" y="140" width="76" height="36" rx="8"/><text class="c tmc" x="208" y="163">接收</text>
+    <rect class="pm" x="261" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="299" y="163">立项规划</text>
+    <rect class="au" x="352" y="140" width="76" height="36" rx="8"/><text class="c tau" x="390" y="163">立项评审</text>
+    <rect class="hu" x="443" y="140" width="76" height="36" rx="8"/><text class="c thu" x="481" y="163">立项确认</text>
     <rect class="pm" x="534" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="572" y="163">模块下发</text>
     <rect class="pm" x="625" y="140" width="76" height="36" rx="8"/><text class="c tpm" x="663" y="163">调度</text>
     <rect class="au" x="716" y="140" width="76" height="36" rx="8"/><text class="c tau" x="754" y="163">项目验收</text>
@@ -87,17 +87,19 @@
 
   <!-- W2 -->
   <rect class="lane" x="360" y="264" width="620" height="92" rx="10"/>
-  <text class="h" x="376" y="304">W2 模块管理</text>
-  <text class="s" x="376" y="324">每模块 1 个，可并行</text>
+  <text class="h" x="376" y="290">W2 模块管理</text>
+  <text class="s" x="376" y="310">每模块 1 个，可并行</text>
+  <text class="s" x="376" y="328">baseline 模块最先</text>
+  <text class="s" x="376" y="346">结合测试模块最后</text>
   <g>
     <rect class="pm" x="534" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="572" y="315">模块规划</text>
     <rect class="pm" x="625" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="663" y="315">等待开发</text>
-    <rect class="pm" x="716" y="292" width="76" height="36" rx="8"/><text class="c tpm" x="754" y="315">验收调查</text>
+    <rect class="au" x="716" y="292" width="76" height="36" rx="8"/><text class="c tau" x="754" y="315">验收调查</text>
   </g>
   <line class="ln" x1="611" y1="310" x2="624" y2="310" marker-end="url(#a)"/>
   <line class="ln" x1="702" y1="310" x2="715" y2="310" marker-end="url(#a)"/>
   <text class="m" x="808" y="306">子任务全部完成后</text>
-  <text class="m" x="808" y="324">自动进入验收调查</text>
+  <text class="m" x="808" y="324">由独立验收者验收</text>
 
   <!-- 守护 -->
   <rect class="guard" x="20" y="416" width="310" height="110" rx="10"/>
@@ -110,7 +112,7 @@
   <rect class="lane" x="360" y="416" width="620" height="110" rx="10"/>
   <text class="h" x="376" y="456">W3 开发</text>
   <text class="s" x="376" y="476">每任务 1 个 worktree</text>
-  <text class="s" x="376" y="496">同时开发最多 4 个</text>
+  <text class="s" x="376" y="496">同时开发最多 4 个（可调）</text>
   <g>
     <rect class="hold" x="534" y="444" width="76" height="36" rx="8"/><text class="c thold" x="572" y="467">待开发</text>
     <rect class="dv" x="625" y="444" width="76" height="36" rx="8"/><text class="c tdv" x="663" y="467">开发</text>
@@ -130,8 +132,8 @@
   <!-- 用户 ↔ W1 -->
   <line class="ln" x1="208" y1="64" x2="208" y2="138" marker-end="url(#a)"/>
   <text class="m" x="216" y="100">新建项目任务</text>
-  <line class="ln dash" x1="390" y1="66" x2="390" y2="138" marker-start="url(#a)" marker-end="url(#a)"/>
-  <text class="m" x="398" y="100">批准 / 带意见退回</text>
+  <line class="ln dash" x1="481" y1="66" x2="481" y2="138" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text class="m" x="489" y="100">批准 / 带意见退回</text>
   <line class="ln dash" x1="845" y1="66" x2="845" y2="138" marker-start="url(#a)" marker-end="url(#a)"/>
   <text class="m" x="853" y="100">批准 / 带意见退回</text>
 
@@ -155,10 +157,10 @@
 
   <!-- 图例 -->
   <g>
-    <rect class="pm" x="20" y="550" width="16" height="14" rx="3"/><text class="s" x="42" y="562">pm：规划、委派、验收，不写代码</text>
-    <rect class="au" x="250" y="550" width="16" height="14" rx="3"/><text class="s" x="272" y="562">auditor / reviewer：独立审查（新会话、换 profile）</text>
+    <rect class="pm" x="20" y="550" width="16" height="14" rx="3"/><text class="s" x="42" y="562">pm / module：只规划和委派</text>
+    <rect class="au" x="250" y="550" width="16" height="14" rx="3"/><text class="s" x="272" y="562">评审 / 验收 / 审核：独立（新会话、换 profile）</text>
     <rect class="dv" x="580" y="550" width="16" height="14" rx="3"/><text class="s" x="602" y="562">developer</text>
-    <rect class="mc" x="680" y="550" width="16" height="14" rx="3"/><text class="s" x="702" y="562">mechanical（便宜模型）</text>
+    <rect class="mc" x="680" y="550" width="16" height="14" rx="3"/><text class="s" x="702" y="562">intake / mechanical</text>
     <rect class="hu" x="860" y="550" width="16" height="14" rx="3"/><text class="s" x="882" y="562">人工门禁</text>
   </g>
   <g>
