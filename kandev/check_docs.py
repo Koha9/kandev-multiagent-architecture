@@ -17,6 +17,7 @@
  14. ma.py（安装、定制、升级）的离线测试通过
  15. stage.py 里写死的步骤名、workflow 名与 build_workflows.py 一致（守护靠步骤名分类）
  16. 步骤 prompt 里的 {…} 只有 Kandev 认识的变量（花括号转义写错时不会报错，只会把错的占位符部署出去）
+ 17. stage.py 的信号表与 mgmt-template/roles/guard.md 的两张表一致（信号名、发给谁、是否升级）
 源仓库和链接模式下按出厂规则检查（docs/prompts.md 是版本库里的文件）；独立安装目录里按本机的定制检查。
 在安装目录（ma.py install 复制出来的目录）里也可以运行：没有随安装复制的调研材料的链接不检查。
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
@@ -219,8 +220,8 @@ def check_stage_names():
     names = {s["name"] for wf in wfs for s in wf["steps"]}
     signal = {s["name"] for wf in wfs for s in wf["steps"] if s["auto_advance_requires_signal"]}
     problems = []
-    if signal != stage.SIGNAL_STEPS - stage.LEGACY_SIGNAL_STEPS:
-        problems.append(f"stage.SIGNAL_STEPS 与要求完成信号的步骤不一致：{sorted(signal ^ (stage.SIGNAL_STEPS - stage.LEGACY_SIGNAL_STEPS))}")
+    if signal != stage.SIGNAL_STEPS:
+        problems.append(f"stage.SIGNAL_STEPS 与要求完成信号的步骤不一致：{sorted(signal ^ stage.SIGNAL_STEPS)}")
     used = stage.GATES | stage.RESIDENT | stage.MOD_LIVE | {stage.HOLD, stage.DECISION, stage.DONE, stage.INTAKE, "刷新"}
     if used - names:
         problems.append(f"stage.py 用到的步骤名在 workflow 里不存在：{sorted(used - names)}")
@@ -229,6 +230,42 @@ def check_stage_names():
             problems.append(f"workflow 名 {name} 不以「{suffix}」结尾：stage.py 靠这个后缀区分三套 workflow")
     if stage.GUARD_NAME not in bw.GUARD_PROMPT:
         problems.append("守护 automation 的名称在 stage.py 和守护 prompt 里不一致")
+    return problems
+
+
+def check_guard_signals():
+    """守护的规则只有一份给人看的说明（mgmt-template/roles/guard.md）；它列出的信号、发给谁、是否升级要与 stage.SIGNALS 一致。
+    「阶段分类」表最后一列、「信号」表第一列里反引号括起来的就是信号名。"""
+    import stage
+    text = open(os.path.join(TEMPLATE, "roles", "guard.md"), encoding="utf-8").read()
+
+    def table(heading):
+        m = re.search(rf"^## {heading}\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+        rows = [[c.strip() for c in l.strip().strip("|").split("|")] for l in (m.group(1) if m else "").split("\n")
+                if l.startswith("|")]
+        return rows[2:]          # 去掉表头和分隔行
+
+    problems = []
+    names = lambda cell: set(re.findall(r"`([a-z_]+)`", cell))     # noqa: E731
+    rules = set().union(*(names(r[-1]) for r in table("阶段分类")))
+    if rules != set(stage.SIGNALS):
+        problems.append(f"guard.md「阶段分类」表最后一列的信号与 stage.SIGNALS 不一致：{sorted(rules ^ set(stage.SIGNALS))}")
+    listed = {}
+    for r in table("信号"):
+        for n in names(r[0]):
+            listed[n] = r
+    want = set(stage.SIGNALS) | {stage.ESCALATED, stage.DISABLED}
+    if set(listed) != want:
+        problems.append(f"guard.md「信号」表第一列的信号与 stage.py 不一致：{sorted(set(listed) ^ want)}")
+    to = {stage.SUPERIOR: "上级", stage.SELF: "任务自己", stage.TO_PM: "pm"}
+    for n, sig in stage.SIGNALS.items():
+        r = listed.get(n)
+        if not r or len(r) < 3:
+            continue
+        if not r[1].startswith(to[sig.to]):
+            problems.append(f"guard.md「信号」表：{n} 的「发给」应以「{to[sig.to]}」开头（stage.SIGNALS 里是 {sig.to}）")
+        if r[2].startswith("升级") != sig.escalate:
+            problems.append(f"guard.md「信号」表：{n} 的第三列应以「{'升级' if sig.escalate else '重发'}」开头")
     return problems
 
 
@@ -259,7 +296,7 @@ def main():
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
               ("接收文档", check_arch_refs), ("步骤结构", check_structure),
               ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test),
-              ("步骤名同步", check_stage_names), ("占位符", check_placeholders)]
+              ("步骤名同步", check_stage_names), ("占位符", check_placeholders), ("信号表", check_guard_signals)]
     failed = 0
     for name, fn in checks:
         problems = fn()
