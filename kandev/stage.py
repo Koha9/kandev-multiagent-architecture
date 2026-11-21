@@ -82,6 +82,9 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import slots  # noqa: E402
+
+PARAMS = slots.params()   # rules/params.json，可被 custom/rules/params.json 覆盖
 
 GATES = {"立项确认", "人工终审"}
 RESIDENT = {"调度", "等待开发"}
@@ -97,7 +100,8 @@ LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会
 ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
-T_WAKES = 15                              # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 相同）
+T_WAKES = PARAMS["refresh_wakes"]         # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 同一个参数）
+globals().update({k: v for k, v in PARAMS.get("guard", {}).items() if k in slots.GUARD_PARAMS})   # 用户定制的守护阈值（分钟）
 WAKE_PAGE, WAKE_PAGES = 100, 5            # 数唤醒次数时每页条数、最多翻几页（实测 Kandev 每页只返回约 40 条，15 次唤醒约 1–2 页）
 FAIL_MARK = "> **守护故障**"              # note_failure 写进 stage.md 的那一行的开头
 RESET_MARK = "Context reset"             # Kandev 重置上下文时写入会话的 status 消息的开头（实测："Context reset — new conversation started"）
@@ -109,6 +113,7 @@ GUARD_NAME = "多Agent 守护"
 RESUME_TEXT = ("continue\n\n（守护 guard：本会话上一轮因到达用量上限而中断，上限已于 {reset} 重置。请从中断处继续当前步骤："
                "先核对 NOW / now、磁盘与 git 的实际状态，已经完成的操作不要重复。）")
 UUID = r"[0-9a-fA-F-]{36}"
+KANDEV_URL = None                        # main() 从 ids 文件的 _meta.url 取；None 表示默认地址
 
 
 # ------------------------------------------------------------------ parsing helpers
@@ -496,8 +501,8 @@ def kandev_blockers(t):
 
 
 def kandev():
-    from build_workflows import Kandev  # noqa: E402
-    return Kandev()
+    from kandev_client import Kandev  # noqa: E402
+    return Kandev(KANDEV_URL, client="ma-guard")
 
 
 def detect_limit(k, task_id, s0):
@@ -682,6 +687,8 @@ def main():
 
     now = ts(a.now) if a.now else datetime.now(timezone.utc)
     ids = json.load(open(a.ids, encoding="utf-8")) if os.path.exists(a.ids) else {}
+    global KANDEV_URL
+    KANDEV_URL = ids.get("_meta", {}).get("url")
     w1 = ids.get("多Agent · 项目管理", {})
     if a.snapshot:
         tasks = json.load(open(a.snapshot, encoding="utf-8"))["tasks"]

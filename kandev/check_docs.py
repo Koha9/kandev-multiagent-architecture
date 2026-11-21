@@ -12,6 +12,10 @@
   9. mgmt_precommit.py（管理目录钩子）的测试通过
  10. prompt 中引用的 <ARCH_ROOT>/... 文件在本仓库中存在；docs/intake.md 列出了 [TASK v1] 头的每个字段
  11. 步骤结构：「完成」（complete_task_on_enter）是每个 workflow 的最后一个步骤，move_to_next 不进入「刷新」
+ 12. mgmt-template/VERSION 与 VERSION 一致（项目的管理目录由它记录来自哪个版本）
+ 13. 部署提问清单（deploy_questions.json）格式正确，并登记了每个规则槽位和参数
+ 14. ma.py（安装、定制、升级）的离线测试通过
+在安装目录（ma.py install 复制出来的目录）里也可以运行：没有随安装复制的调研材料的链接不检查。
 退出码：0 全部通过；1 有问题（逐条列出）。只用标准库。
 """
 import contextlib
@@ -26,6 +30,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import build_workflows as bw  # noqa: E402
+import manifest as mf  # noqa: E402
+import slots  # noqa: E402
 
 TEMPLATE = os.path.join(ROOT, "mgmt-template")
 # 运行时才生成、模板中不存在的管理目录路径
@@ -69,6 +75,9 @@ def check_links():
             if re.match(r"^[a-z]+:", target) or target.startswith("#"):
                 continue
             path = target.split("#")[0]
+            top = os.path.relpath(os.path.normpath(os.path.join(os.path.dirname(f), path)), ROOT).replace("\\", "/").split("/")[0]
+            if top in mf.SKIP_TOP and not os.path.isdir(os.path.join(ROOT, top)):
+                continue      # 安装目录里没有调研材料
             if path and not os.path.exists(os.path.normpath(os.path.join(os.path.dirname(f), path))):
                 problems.append(f"{os.path.relpath(f, ROOT)}: 链接不存在 {target}")
     return problems
@@ -171,13 +180,49 @@ def check_precommit_test():
     return run_test("mgmt_precommit.py", "test_mgmt_precommit.py")
 
 
+def check_template_version():
+    p = os.path.join(TEMPLATE, "VERSION")
+    v = open(p, encoding="utf-8").read().strip() if os.path.exists(p) else None
+    return [] if v == bw.VERSION else [f"mgmt-template/VERSION 是 {v}，应为 {bw.VERSION}"]
+
+
+def check_questions():
+    problems, keys, covers = [], set(), set()
+    for q in mf.questions():
+        for f in ("key", "stage", "ask", "question"):
+            if not q.get(f):
+                problems.append(f"deploy_questions.json：{q.get('key', '?')} 缺少 {f}")
+        if q.get("stage") not in mf.STAGES or q.get("ask") not in ("always", "custom"):
+            problems.append(f"deploy_questions.json：{q.get('key')} 的 stage / ask 取值不对")
+        if q.get("key") in keys:
+            problems.append(f"deploy_questions.json：key 重复 {q.get('key')}")
+        if q.get("ask") == "custom" and "recommended" not in q:
+            problems.append(f"deploy_questions.json：{q.get('key')} 是可选项，必须给 recommended")
+        keys.add(q.get("key"))
+        covers |= set(q.get("covers", []))
+    want = {f"rules/{n}.md" for n in slots.SLOTS} | {f"rules/params.json:{k}" for k in slots.params()}
+    for item in sorted(want - covers):
+        problems.append(f"deploy_questions.json 没有登记槽位 {item}（加到 customize 阶段的 covers）")
+    for n in slots.SLOTS:
+        if not os.path.exists(os.path.join(ROOT, "rules", n + ".md")):
+            problems.append(f"缺少槽位文件 rules/{n}.md")
+    return problems
+
+
+def check_ma_test():
+    if os.environ.get("MA_TEST_NESTED"):      # test_ma.py 在临时安装目录里运行本自检时不再递归
+        return []
+    return run_test("ma.py", "test_ma.py")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     checks = [("prompts.md", check_prompts), ("链接", check_links), ("步骤名", check_steps),
               ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test),
               ("check_tasks 测试", check_tasks_test),
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
-              ("接收文档", check_arch_refs), ("步骤结构", check_structure)]
+              ("接收文档", check_arch_refs), ("步骤结构", check_structure),
+              ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test)]
     failed = 0
     for name, fn in checks:
         problems = fn()

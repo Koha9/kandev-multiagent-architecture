@@ -2,7 +2,7 @@
 
 > **给谁**：Kandev 内部负责配置调试的 agent（它有 Core 包里的 `create_automation_kandev`，外部 MCP 没有）。
 > **频率**：每个 workspace 只做一次。守护自己发现所有进行中的项目（从「多Agent · 项目管理」的 pm 任务读出 mgmt_root），之后启动新项目不需要任何守护配置。
-> **用法**：复制本文件为同目录的 `guard-automation.local.md`（已被 git 忽略），在副本里把所有 `{大写占位}` 替换成本机的值（含义见「本机取值」表），然后把副本的「交接 prompt」整段交给配置 agent。不要把填好的值提交到本文件。
+> **用法**：`python kandev/ma.py apply`（或 `ma.py guard`）会在同目录生成填好本机取值的副本 `guard-handoff.<workspace 前 8 位>.local.md`，以及替换好占位的守护 prompt 正文 `guard-prompt.<workspace 前 8 位>.local.md`（都已被 git 忽略）；把副本的「交接 prompt」整段交给配置 agent。手动填写时：复制本文件为 `guard-automation.local.md`，把所有 `{大写占位}` 替换成本机的值（含义见「本机取值」表）。不要把填好的值提交到本文件。
 > **检查结果**：外部可以用 `list_settings_resources_kandev`（`resource_type=automation`，`workspace_id=…`）看到它创建的 automation。
 
 ## 本机取值（占位）
@@ -12,7 +12,7 @@
 | 占位 | 含义 |
 |---|---|
 | `{WORKSPACE_ID}` | Kandev workspace id |
-| `{ARCH_ROOT}` | 本架构仓库在本机的绝对路径（正斜杠） |
+| `{ARCH_ROOT}` | 安装目录（链接模式下是本架构仓库）在本机的绝对路径（正斜杠） |
 | `{ARCH_REPO_ID}` | 本架构仓库在 Kandev 中的仓库 id（没有登记就留空，见第 3 步） |
 | `{PYTHON}` | 本机 Python 解释器的绝对路径（只用标准库） |
 | `{IDS_FILE}` | 本 workspace 的 ids 文件名（`apply` 写出的）：只有一个 workspace 时是 `kandev_ids.json`；多个 workspace 时是 `apply --ids-out` 指定的那个，例如 `kandev_ids.7f64865e.json` |
@@ -30,7 +30,7 @@
 
 1. 准备
    - kandev 的 MCP 工具可能是延迟加载的：先用工具搜索（查询 "kandev automation"）加载 create_automation_kandev，以及可用的 automation 列表 / 更新 / 运行工具。只有实际调用报错才算不可用；报错时原样回报错误后停止。
-   - 读 {ARCH_ROOT}/docs/prompts.md 末尾「守护 automation」一节，取得 prompt 正文。把其中的 <arch_root> 全部替换为 {ARCH_ROOT}，<python> 全部替换为 {PYTHON}，再把 `kandev/kandev_ids.json` 替换为 `kandev/{IDS_FILE}`（每个 workspace 的守护读自己的 ids 文件）。正文里没有其他需要替换的占位。
+   - 取得 prompt 正文：{ARCH_ROOT}/kandev/handoff/ 下有 guard-prompt.*.local.md 时直接用其中代码块里的全文（占位已替换好，跳过本条其余部分）。没有时读 {ARCH_ROOT}/docs/prompts.md 末尾「守护 automation」一节。把其中的 <arch_root> 全部替换为 {ARCH_ROOT}，<python> 全部替换为 {PYTHON}，再把 `kandev/kandev_ids.json` 替换为 `kandev/{IDS_FILE}`（每个 workspace 的守护读自己的 ids 文件）。正文里没有其他需要替换的占位。
 2. 查重
    - 列出本 workspace 的 automation。已有名称为「多Agent 守护」的 → 更新它，不要新建第二个。名称不同但 prompt 里运行 kandev/stage.py 的旧守护 → 在回报中列出，不要删除，由用户决定。
 3. 创建（或更新）

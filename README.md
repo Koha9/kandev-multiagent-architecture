@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3.3。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3.4。
 
 ## 简介
 
@@ -84,9 +84,11 @@
 
 ### 方式二：手动部署
 
-1. 按 [kandev/README.md](kandev/README.md) 填写 `kandev/profiles.local.json`，运行 `check_docs.py`、`build_workflows.py apply`、`verify_export.py`。
+1. 按 [kandev/README.md](kandev/README.md) 写好答案文件，运行 `ma.py install`、`ma.py apply`、`ma.py doctor`。缺省是独立安装：运行所需的文件复制到 `~/.kandev-ma/<workspace id 前 8 位>/`，之后删除本仓库也能运行。
 2. 按 [kandev/handoff/guard-automation.md](kandev/handoff/guard-automation.md) 创建守护 automation。
 3. 在「多Agent · 项目管理」新建任务，选好仓库，描述里写需求，然后 Start task。任务从「接收」步骤开始：它会推导仓库、分支、管理目录等参数，缺的（运行模式、是否先看计划等）向你提问，再交给 pm。想跳过提问，可以按 [docs/workflow.md](docs/workflow.md)「部署与启动」的 `[TASK v1]` 模板写好完整描述；各参数的含义和缺省值见 [docs/intake.md](docs/intake.md)。
+
+定制与升级：规则（git、编码、测试、工作区、质量）、角色卡和参数都可以改，见 [rules/README.md](rules/README.md) 和 [AGENTS.md](AGENTS.md) 的 F、G 两节；让 agent 代做时，它会先按提问清单向你确认。
 
 想先看看 workflow 长什么样：[kandev/export/](kandev/export/README.md) 是从实际部署导出的三套 workflow。
 

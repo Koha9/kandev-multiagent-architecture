@@ -1,4 +1,4 @@
-# Multi-Agent Development Workflow (v3.3.3)
+# Multi-Agent Development Workflow (v3.3.4)
 
 [中文](workflow.md) | **English**
 
@@ -188,6 +188,14 @@ The architecture only defines **who, at which step, and how** project convention
 ## 11. Deployment and launch
 
 For deployment steps see [kandev/README.en.md](../kandev/README.en.md); to have an agent deploy and verify for you, see [AGENTS.md](../AGENTS.md) (Chinese).
+
+**Install directory (v3.3.4)**: at deployment `kandev/ma.py install` copies everything needed at run time (guard script, the Intake parameter reference, the management directory template, rule slots, build scripts) into an install directory (default `~/.kandev-ma/<first 8 chars of the workspace id>/`), and every path written into Kandev points there. Deleting or moving the source repository, or switching branches in it, no longer affects deployed workflows. Link mode uses the source repository directly, for people changing the workflow itself.
+
+**Customizing**: rule slots live in [rules/](../rules/README.md) (five rule sections: workspace, testing, quality, git, coding; plus numeric parameters). The user's overrides go in `custom/rules/` in the install directory and are inlined into the step prompts at deployment; role cards and project templates are edited directly in the install directory's `mgmt-template/`. Step structure, the message protocol, branch topology and the guard's classification rules are the engine and are not customizable.
+
+**Upgrading**: in the new source repository run `ma.py upgrade --home <install directory>`. Untouched shipped files are updated, files the user changed are kept (when the new version changed them too, it is written next to them as `.new`), and `custom/` is left alone; then `ma.py diff` shows the prompt changes and `ma.py apply` deploys them once confirmed. Each project's management directory has a `VERSION` file recording which template version it came from.
+
+**Questions before deploying**: what must be confirmed with the user is collected in `kandev/deploy_questions.json` (workspace, the profile for each role, what to do with existing workflows of the same name, the guard, whether to run the acceptance check that costs quota, and so on). Answers are recorded in the install directory's `ma-manifest.json`; the scripts refuse to deploy while a must-ask item is missing, and updating deployed workflows in place additionally requires having looked at `ma.py diff`.
 
 To launch a project: create a task in 「多Agent · 项目管理」 (W1 Project management), select the repository and baseline branch, write the requirements in the description, then choose Start task.
 

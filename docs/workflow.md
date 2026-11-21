@@ -1,4 +1,4 @@
-# 多 Agent 开发 Workflow（v3.3.3）
+# 多 Agent 开发 Workflow（v3.3.4）
 
 **中文** | [English](workflow.en.md)
 
@@ -192,6 +192,14 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 部署步骤见 [kandev/README.md](../kandev/README.md)，让 agent 代为部署和验收见 [AGENTS.md](../AGENTS.md)。
 
+**安装目录（v3.3.4）**：部署时 `kandev/ma.py install` 把运行所需的文件（守护脚本、「接收」的参数说明、管理目录模板、规则槽位、构建脚本）复制到一个安装目录（缺省 `~/.kandev-ma/<workspace id 前 8 位>/`），写进 Kandev 的路径都指向它。之后删除、移动源仓库或在源仓库里切换分支，都不影响已部署的 workflow。想直接使用源仓库（改 workflow 本身时）选链接模式。
+
+**定制**：规则槽位在 [rules/](../rules/README.md)（工作区、测试、质量、git、编码五段规则和数值参数），用户的覆盖写在安装目录的 `custom/rules/`，部署时内联进步骤 prompt；角色卡和项目模板直接改安装目录里的 `mgmt-template/`。步骤结构、消息协议、分支拓扑和守护的判断规则属于引擎，不在定制范围内。
+
+**升级**：在新版源仓库中运行 `ma.py upgrade --home <安装目录>`。没改过的出厂文件直接更新，用户改过的保留（新版也改了的写成 `.new` 供合并），`custom/` 不动；然后 `ma.py diff` 看 prompt 的变化，确认后 `ma.py apply`。每个项目的管理目录里有 `VERSION`，记录它来自哪个版本的模板。
+
+**部署前的提问**：必须向用户确认的事项集中在 `kandev/deploy_questions.json`（workspace、各角色的 profile、已有同名 workflow 的处理、守护、是否做消耗额度的验收等）。答案记在安装目录的 `ma-manifest.json`，缺必问项时脚本拒绝部署；就地更新已部署的 workflow 时还要先看过 `ma.py diff`。
+
 启动项目：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。
 
 描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数（运行模式、是否先看计划、是否做结合测试等）向你提问，然后把描述改写成下面的格式交给 pm。字段、缺省值和提问方式见 [intake.md](intake.md)。
@@ -205,7 +213,7 @@ mode: attended | unattended
 plan_only: false            # true：立项评审通过后停在「立项确认」
 integration_test: auto      # auto：其他模块完成后自动做结合测试；off：不做
 mgmt_root: <管理目录绝对路径，放在仓库与 worktree 之外>
-mgmt_template: <本仓库 mgmt-template 的绝对路径>
+mgmt_template: <安装目录（链接模式下是本仓库）中 mgmt-template 的绝对路径>
 repo: <主仓库绝对路径>
 role: pm
 scope: pm
@@ -251,6 +259,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - 验收分级（v3.3.3）：v3.3.2 及之前，验收中任何不通过项都判 fail 并触发修复，一次 UX 打磨项目因此生出 14 个修复模块，其中只有 3 个修的是用户会遇到的功能缺陷。现在验收者（立项评审、模块验收、项目验收）先给不通过项定级：**阻塞**（按需求的用法功能不可用、结果错误、误导用户，或需求 / PA 明确要求的没达到）才判 fail、写修复项 F-n；**轻微**（外观、文案偏差，或只在需求没提到的条件下出现）该条照常 pass，记进「已知问题」K-n，不触发修复；**测试缺陷**（测试、判定脚本或 harness 自身不稳定、依赖运行时刻或负载）判 unverified(测试缺陷)，记进「测试缺陷」T-n，只有属于正在验收的模块时才退回（只改测试）。项目验收的 K-n、T-n 由 pm 登记到 attention.md，留给用户在「人工终审」决定，不建修复模块。代价：几像素的溢出、文案小偏差这类问题会随版本交付，需要用户在终审时看一眼「已知问题」。
 - 硬性判定的来源（v3.3.3）：只有需求原文和 charter 的 PA 能成为 pass / fail 的依据。需求没有提到的视口 × 语言矩阵、像素级或计算样式级判定不写进 PA、验收要点和 MA，想检查的写成「建议检查」（不通过只记建议）；评审、设计这类模块产出的检查清单是工作材料，PA 不写"清单逐条 pass"。立项评审第 7 项检查这一点，加码即为阻塞问题。
 - 常驻会话的长度（v3.3.3）：pm 在「调度」、模块 agent 在「等待开发」每次被唤醒大约增加 9K 字符上下文，一直不重置会线性累加（实际出现过 46 小时、57 次唤醒没有刷新）。除了上面的唤醒计数，守护也独立地数：常驻会话自上次重置以来的用户侧消息 ≥15 条 → `session_long`，告警发到该任务的常驻会话（带 session_id），建议 refresh；pm 60 分钟内不处理则升级为 `pm_unresponsive`，由守护把它移到「刷新」。模块任务只重发告警，不由守护移动。另外，常驻步骤每轮的回复限 3 行，任务计划一轮只整份读一次。
+- 安装目录（v3.3.4）：v3.3.3 及之前，「接收」步骤、守护和新项目的模板直接读源仓库的工作区，而步骤 prompt 是部署时的快照：在仓库里改文件或切换分支会让两者错位，删除或移动仓库会让新项目无法启动、守护停止工作且没有告警。现在它们读安装目录；`ma.py doctor` 检查路径、已部署的 prompt 与安装目录是否一致、守护心跳。仍然存在的错位：进行中的项目用的是启动时复制到管理目录的角色卡，就地更新 prompt 后两者可能不同版本（`doctor` 会列出）。安装目录必须在运行 Kandev 的机器上；它被删除时的表现和以前删除仓库一样。
 - 守护在上一个项目结束时会自动停用；同一 workspace 再开项目时，「接收」步骤会检查并重新启用它，pm 在「调度」中发现 stage.md 超过 60 分钟没更新时登记 attention.md。
 - 「等待开发」和「验收调查」交替时，模块 agent 的会话（profile `module`）和验收者的会话（profile `module_auditor`）在同一个 Kandev 任务里轮换；等待开发以 NOW 和文件为准，不依赖之前的对话。
 
@@ -266,6 +275,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - f. 用量上限后的继续、会话失败后移出再移回能恢复；守护移动任务时附带的说明能送达。退路：`agents/guard/stage.md` 会显示这些状态，由用户手动操作。
 - g. 「接收」步骤的 agent 能用 `update_task_kandev` 改写自己任务的描述，且之后「立项规划」的 `{{task_prompt}}` 取到的是新描述。退路：接收步骤把新描述同时写进任务文档 `intake`，pm 在描述没有 `[TASK v1]` 头时重新读任务、再读这个章节；改写失败时接收步骤在回复里给出全文，由用户粘贴到任务描述后把任务拖到「立项规划」。
 - h. （v3.3.2）`list_tasks_kandev` 返回子任务的工作区模式、autopilot、base 分支（字段名未确认，报告中见过 `metadata.workspace.mode`）；Kandev 准备会话失败时任务 state 是 `SCHEDULING`；Kandev 内部 agent 能用 `list_settings_resources_kandev` / `update_settings_kandev` 启用 automation。退路：读回核对时字段不存在就记 unverified 继续；`session_not_started` 不触发时由 stage.md 显示，用户处理；「接收」启用不了守护时在摘要第一行提醒用户。
+- i. （v3.3.4，未实测，目前不依赖）Kandev 的共享 prompt（步骤 prompt 里写 `@名称` 引用，用户可在 Settings → Prompts 直接修改）和 workflow 级 prompt（`workflow.prompt`）。如果 `@名称` 在自动启动的步骤 prompt 里会被展开，规则槽位可以改为存在 Kandev 里，改完不需要重新部署；公共头部也可以移到 workflow 级 prompt。要测的是：自动启动（on_enter auto_start）的步骤里 `@名称` 是否展开、展开发生在发送时还是保存时、agent 创建的子任务里是否同样生效、共享 prompt 是否按 workspace 隔离。现在的做法（构建时内联）不依赖它。2026-11-22 只读调查（另一台机器上的 Kandev 实例，本机的当时没有运行）：有 `list / get / create / update_shared_prompt_kandev`，共享 prompt 按名称全局保存（接口没有 workspace 参数），单个上限 1 MiB，可以设为不允许 agent 修改；`workflow.prompt` 是可写的设置项（`update_settings_kandev`，target 为 workflow），`export_workflow_kandev` 的导出里没有这个字段（未设置时）。展开行为要启动一次真实会话才能测，还没有做。
 
 ## 13. 已否决的设计
 

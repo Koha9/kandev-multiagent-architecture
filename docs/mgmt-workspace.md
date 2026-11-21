@@ -82,7 +82,7 @@ R1 的配套机制是**幂等**：
 │   │   └─ journal.md                                         该模块 agent
 │   └─ guard/
 │       ├─ journal.md                                         守护
-│       └─ stage.md          现在在等谁                      kandev/stage.py 生成（去重状态在架构仓库的 kandev/guard_state/）
+│       └─ stage.md          现在在等谁                      kandev/stage.py 生成（去重状态在安装目录的 kandev/guard_state/）
 ├─ modules/<模块>/
 │   ├─ spec.md               模块目标 + 模块验收标准         该模块 agent
 │   ├─ interfaces.md         接口契约（对外 + 任务之间）      该模块 agent

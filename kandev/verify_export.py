@@ -69,7 +69,7 @@ def main():
     ids = json.load(open(a.ids, encoding="utf-8"))
     repl = placeholders(ids)
     os.makedirs(a.out, exist_ok=True)
-    k = Kandev(a.url)
+    k = Kandev(a.url if a.url != DEFAULT_URL else ids.get("_meta", {}).get("url"))
     for wname, info in ids.items():
         if wname.startswith("_") or wname not in FILES:
             continue

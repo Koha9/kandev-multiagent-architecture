@@ -39,6 +39,7 @@
 | `quota/ledger.json` | 额度账本 | 只由 `tools/quota.py` 写 |
 | `tools/` | check_owns、check_tasks、quota、mgmt_precommit 脚本 | 只读 |
 | `agents/_template/`、`modules/_template/` | 复制源 | 不改 |
+| `VERSION` | 本目录来自哪个版本的模板 | 只读 |
 
 ## 任务文档存储
 

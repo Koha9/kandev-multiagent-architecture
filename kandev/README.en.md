@@ -8,7 +8,10 @@ Deploys the [multi-agent development workflow](../docs/workflow.en.md) to any Ka
 
 | File | Purpose |
 |---|---|
-| `build_workflows.py` | The single source of configuration: structure and prompts of the three workflows, plus the `apply` / `dump` commands |
+| `ma.py` | Entry point: pre-deployment question list, install into a standalone directory, prompt diff, deploy, health check (doctor), upgrade |
+| `deploy_questions.json` | What must be confirmed with the user before deploying, customizing or upgrading (view with `ma.py questions`) |
+| `build_workflows.py` | The single source of configuration: structure and prompts of the three workflows (rule slots come from `../rules/`), plus the `apply` / `dump` commands |
+| `manifest.py`, `slots.py`, `kandev_client.py` | Install manifest and answer validation, rule-slot loading, the Kandev MCP client |
 | `check_docs.py` | Self-check: whether prompts.md is up to date, links, step names, template paths, version number, stage regression tests. Run it after changing the workflow and before deploying |
 | `stage.py` | Stage classification for the guard: works out from Kandev state whom each task is "waiting on", and generates `agents/guard/stage.md` and alerts |
 | `tests/` | Offline regression tests for `stage.py` (`python kandev/tests/test_stage.py`) |
@@ -30,15 +33,22 @@ Deploys the [multi-agent development workflow](../docs/workflow.en.md) to any Ka
 
 ## Deployment
 
-Run in the `kandev/` directory (replace `python` with this machine's Python interpreter):
+Replace `python` with this machine's Python interpreter.
 
 ```
-python check_docs.py
-python build_workflows.py apply --workspace <workspace_id> --profiles profiles.local.json
-python verify_export.py
+python kandev/ma.py questions --stage install          # what to confirm before deploying
+python kandev/ma.py install --answers answers.json     # record the answers; a standalone install copies files to <home>
+python <home>/kandev/ma.py diff                        # deployed prompts vs. what would be deployed
+python <home>/kandev/ma.py apply                       # self-check → import / update in place → guard handoff file → export
+python <home>/kandev/ma.py doctor                      # check the install directory, deployed workflows and the guard
 ```
 
-- `apply` imports in the order W3 → W2 → W1 (each later workflow's prompts embed the step IDs of the earlier one). It first imports without profiles, then binds profiles step by step by ID, and finally writes out `kandev_ids.json`.
+- **Answers file**: JSON, keys as listed by `ma.py questions`. At minimum `setup_style` (quick / custom), `workspace_id`, `profiles` (role → profile ID, same format as `profiles.example.json`), `existing_workflows` (none / update / retire), `guard_automation` (create / manual / skip), `acceptance_run` (yes / no). `install` and `apply` refuse to run while a must-ask item is missing.
+- **Two install modes** (`install_mode`): `standalone` (default) copies everything needed at run time into the install directory `<home>` (default `~/.kandev-ma/<first 8 chars of the workspace id>/`); every path written into Kandev points there, so deleting this repository afterwards does not break anything. `link` copies nothing and `<home>` is this repository, for people who change the workflow itself.
+- **Updating in place**: `apply` requires `--confirmed <value printed by ma.py diff>`, and `--with-running` when projects are in progress.
+- **Customizing**: rule slots are described in [../rules/README.md](../rules/README.md) (Chinese); overrides go in `<home>/custom/rules/`, then `diff` + `apply` again.
+- **Upgrading**: in the new repository run `python kandev/ma.py upgrade --home <home>` (`--dry-run` first), then `diff` + `apply` in `<home>`.
+- `ma.py apply` calls `build_workflows.py apply`, which imports in the order W3 → W2 → W1 (each later workflow's prompts embed the step IDs of the earlier one). It first imports without profiles, then binds profiles step by step by ID, and finally writes out `kandev_ids.json`.
 - **Workflows with the same name already exist**:
   - Same version: running `apply` again only syncs prompts and profiles; the structure is not changed.
   - Other version: add `--retire-existing`. The old version is renamed to "<name> (<old version>)", e.g. "(v3.1)", all its tasks are kept, and then the new version is imported. Projects in progress on the old version finish on the old workflow.
@@ -49,7 +59,7 @@ python verify_export.py
 
 The external MCP cannot create automations, so the guard (one per workspace, covering all projects) has to be created by an agent inside Kandev:
 
-1. Copy [handoff/guard-automation.md](handoff/guard-automation.md) (Chinese) to `guard-automation.local.md` in the same directory (already git-ignored), and replace the `{大写占位}` (uppercase placeholders) in it with this machine's values.
+1. `ma.py apply` (or `ma.py guard`) writes `guard-handoff.<first 8 chars of the workspace id>.local.md` under `handoff/`: a copy of [handoff/guard-automation.md](handoff/guard-automation.md) (Chinese) with this machine's values filled in (git-ignored).
 2. In any Kandev task, give the whole "handoff prompt" (交接 prompt) section of the copy to the agent to execute.
 
 You can also create it manually in Kandev Settings → Automations: schedule `*/20 * * * *`, hidden run, a profile with a cheap model, concurrency 1; for the prompt, see the "Guard automation" (守护 automation) section at the end of [docs/prompts.md](../docs/prompts.md) (Chinese) (replace `<arch_root>` and `<python>` in it).
