@@ -99,6 +99,11 @@ def test_install_customize_upgrade(tmp):
     assert "<arch_root>" not in hand and "<python>" not in hand and "<<" not in hand
     handoff = open(os.path.join(hd, "guard-handoff.11111111.local.md"), encoding="utf-8").read()
     assert "guard-prompt.11111111.local.md" in handoff and "p5" in handoff and "{GUARD" not in handoff and "{ARCH" not in handoff
+    assert "{KANDEV_URL}" not in handoff and "http://localhost:38429/mcp" in handoff
+    run(home, "ma.py", "answer", "--set", "kandev_url=http://localhost:38430/mcp")     # 非缺省地址要进交接文件
+    run(home, "ma.py", "guard")
+    handoff = open(os.path.join(hd, "guard-handoff.11111111.local.md"), encoding="utf-8").read()
+    assert "http://localhost:38430/mcp" in handoff and "38429" not in handoff.replace("缺省 `http://localhost:38429/mcp`", ""), handoff
 
     # answer：只能改允许的键，校验不通过时不落盘
     run(home, "ma.py", "answer", "--set", "guard_automation=skip")

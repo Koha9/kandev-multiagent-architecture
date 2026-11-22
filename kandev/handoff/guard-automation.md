@@ -16,7 +16,7 @@
 | `{IDS_FILE}` | 本 workspace 的 ids 文件名（`ma.py install` 定的）：第一个 workspace 是 `kandev_ids.json`，链接模式的其他 workspace 带前 8 位 id，例如 `kandev_ids.7f64865e.json` |
 | `{GUARD_PROMPT_FILE}` | `ma.py` 生成的守护 prompt 全文（`guard-prompt.<workspace 前 8 位>.local.md` 的绝对路径） |
 | `{GUARD_PROFILE_ID}` | 守护用的 agent profile id（答案 `profiles` 中的 `mechanical`，便宜模型即可） |
-| Kandev 外部 MCP | `http://localhost:38429/mcp`（stage.py 用它只读查询） |
+| `{KANDEV_URL}` | Kandev 外部 MCP 地址（答案的 `kandev_url`，缺省 `http://localhost:38429/mcp`；stage.py 用它只读查询） |
 
 参考配置（已验证可用）：schedule `*/20`、hidden run（`automation_run`）、上面的 profile、并发 1、不挂仓库（`repository_mode=none`）、Local 执行器（不建 worktree）、`reuse_thread`（复用同一个任务）。
 
@@ -47,8 +47,8 @@
    - 在当前会话运行一次：{PYTHON} {ARCH_ROOT}/kandev/stage.py --ids {ARCH_ROOT}/kandev/{IDS_FILE} --json --dry-run
      （--dry-run 不能省：不带它，这次看到的告警会被记成已发。）
      期望：退出码 0；没有进行中的项目时标准输出为空（不带 --json 运行会打印「没有进行中的项目。」）。有输出时不要据此发消息或移动任务，这只是连通性检查。
-     失败（例如连不上 http://localhost:38429/mcp、找不到 kandev_ids.json）→ 原样回报错误；automation 保留，但说明守护运行时会遇到同样的问题。
-   - 如果有"立即运行一次"的工具：运行一次，确认 automation 的会话能执行这条命令、能访问 localhost:38429，并且没有发出任何消息（目前没有进行中的项目）。没有这个工具就跳过，并说明首次定时运行在什么时候。
+     失败（例如连不上 {KANDEV_URL}、找不到 kandev_ids.json）→ 原样回报错误；automation 保留，但说明守护运行时会遇到同样的问题。
+   - 如果有"立即运行一次"的工具：运行一次，确认 automation 的会话能执行这条命令、能访问 {KANDEV_URL}，并且没有发出任何消息（目前没有进行中的项目）。没有这个工具就跳过，并说明首次定时运行在什么时候。
 5. 回报（一条消息，≤15 行）
    - automation id 和名称；新建还是更新；是否发现其他旧守护
    - 实际使用的配置：trigger / cron / task mode / profile / 并发数 / 仓库 / 执行器 / 任务复用方式
@@ -67,5 +67,5 @@
 
 ## 为什么不在外部完成
 
-- 外部 MCP（`localhost:38429`）没有创建 automation 的工具，也没有 `message_task_kandev`；已有 automation 可以用 `list_settings_resources_kandev` 查看、用 `get_settings_kandev` / `update_settings_kandev` 读改（守护的自动停用就用它）。
+- 外部 MCP（`{KANDEV_URL}`）没有创建 automation 的工具，也没有 `message_task_kandev`；已有 automation 可以用 `list_settings_resources_kandev` 查看、用 `get_settings_kandev` / `update_settings_kandev` 读改（守护的自动停用就用它）。
 - 守护运行时需要 `message_task_kandev` 发 ALERT，所以守护本身也必须是 Kandev 内部的 automation。

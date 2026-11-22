@@ -352,7 +352,7 @@ def render_guard(ws, dep):
     out1, out2 = guard_files(ws)          # 不用 guard-automation.local.md：那是用户手填副本的名字
     values = {"{WORKSPACE_ID}": ws, "{ARCH_ROOT}": ROOT, "{ARCH_REPO_ID}": "", "{PYTHON}": ans["python"],
               "{IDS_FILE}": os.path.basename(dep["ids"]), "{GUARD_PROMPT_FILE}": out2.replace("\\", "/"),
-              "{GUARD_PROFILE_ID}": mf.full_profiles(ans["profiles"])["mechanical"]}
+              "{GUARD_PROFILE_ID}": mf.full_profiles(ans["profiles"])["mechanical"], "{KANDEV_URL}": url_of(dep)}
     text = open(os.path.join(HERE, "handoff", "guard-automation.md"), encoding="utf-8").read()
     for key, v in values.items():
         text = text.replace(key, v)
