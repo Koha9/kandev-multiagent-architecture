@@ -1,6 +1,7 @@
 """多 Agent workflow 的安装、部署、检查和升级入口（只用标准库）。给 AI 的操作步骤见 AGENTS.md。
 
-  python kandev/ma.py questions [--stage install|customize|redeploy|upgrade]   必须向用户确认的事项
+  python kandev/ma.py questions [--stage install|customize|redeploy|upgrade]   必须向用户确认的事项（install 阶段是一棵树）
+  python kandev/ma.py questions --stage install --answers part.json   只列出现在该问、还没回答的项（逐批问）
   python kandev/ma.py install --answers answers.json    记录答案；独立安装时把运行所需的文件复制到安装目录
   python <home>/kandev/ma.py diff                        已部署的 workflow 与本目录将要部署的内容的差异
   python <home>/kandev/ma.py apply [--confirmed <值>]    部署到 Kandev（自检 → 导入 / 就地更新 → 生成守护交接文件 → 导出）
@@ -31,7 +32,9 @@ from kandev_client import DEFAULT_URL, Kandev  # noqa: E402
 
 GUARD_NAME = "多Agent 守护"
 # 安装后还能用 answer 改的键；workspace_id、install_mode、home 决定了安装本身，要改就重新安装
-EDITABLE = ("profiles", "guard_automation", "python", "kandev_url", "setup_style")
+# project_defaults.* 都可以改（改完重写 custom/project-defaults.json）
+EDITABLE = ("profiles", "guard_automation", "python", "kandev_url", "setup_style", "model_strategy", "vendors",
+            "reviewer_cross_vendor")
 
 
 def bw():
@@ -101,16 +104,73 @@ def custom_slots(root=None):
 
 
 # ------------------------------------------------------------------ questions
+ASK_TAGS = {"always": "必须问", "guided": "guided / custom 才问", "custom": "选了 custom 才问",
+            "when_prompted": "ma.py 停下来时才问"}
+
+
+def when_text(q):
+    conds = [f"{k} 为 {' / '.join(v) if isinstance(v, list) else v}" for k, v in q.get("when", {}).items()]
+    return "；".join(conds)
+
+
+def print_question(q, indent=""):
+    when = when_text(q)
+    print(f"{indent}[{q['stage']}] {q['key']}（{ASK_TAGS[q['ask']]}" + (f"；仅当 {when}" if when else "") + "）")
+    print(f"{indent}  问题：{q['question']}")
+    for k, label in (("options", "选项"), ("recommended", "推荐"), ("otherwise", "不适用时"), ("why", "理由"),
+                     ("how", "做法"), ("flag", "同意后")):
+        if k in q:
+            print(f"{indent}  {label}：{' / '.join(q[k]) if isinstance(q[k], list) else q[k]}")
+    print()
+
+
+def depth(q, by_key):
+    """树里的层级：when 引用的项越深，这一项越深（只用来缩进）。"""
+    parents = [by_key[k] for k in q.get("when", {}) if k in by_key]
+    return 1 + max((depth(p, by_key) for p in parents), default=-1)
+
+
 def cmd_questions(a):
-    tags = {"always": "必须问", "custom": "选了自定义才问", "when_prompted": "ma.py 停下来时才问"}
+    if a.answers:
+        if a.stage not in (None, "install"):
+            die("--answers 只用于 install 阶段。", 2)
+        return questions_loop(json.load(open(a.answers, encoding="utf-8-sig")))
+    by_key = {q["key"]: q for q in mf.questions()}
     for q in mf.questions(a.stage):
-        print(f"[{q['stage']}] {q['key']}（{tags[q['ask']]}）\n  问题：{q['question']}")
-        for k, label in (("options", "选项"), ("recommended", "推荐"), ("why", "理由"), ("how", "做法"), ("flag", "同意后")):
-            if k in q:
-                print(f"  {label}：{' / '.join(q[k]) if isinstance(q[k], list) else q[k]}")
-        print()
+        print_question(q, "    " * depth(q, by_key))
     print("install 阶段的答案写成一个 JSON 文件（键 = 上面的 key），交给 ma.py install --answers。"
-          "「必须问」的项要有用户的明确回答，不能替用户填。")
+          "「必须问」的项要有用户的明确回答，不能替用户填。\n"
+          "逐批问：python kandev/ma.py questions --stage install --answers <已有答案的文件>，只列出现在该问的项。")
+
+
+def questions_loop(answers):
+    """只列出现在该问、还没回答的项；都答完时打印总表供用户确认。"""
+    out, items = mf.walk(answers)
+    _, problems = mf.validate(answers)
+    unknown = [(k, msg) for k, msg in problems if msg.startswith(("不认识的键", "应为 {"))]
+    for k, msg in unknown:
+        print(f"答案文件有问题：{k}：{msg}")
+    todo = [(q, st, msg) for q, st, msg in items if st in ("pending", "invalid")]
+    for q, st, msg in todo:
+        if st == "invalid":
+            print(f"（已有答案不合格，要重新问：{msg}）")
+        print_question(q)
+    later = [q["key"] for q, st, _ in items if st == "deferred"]
+    if todo:
+        print(f"这一批 {len(todo)} 个问题，合并成一次提问（每题给选项、推荐答案和一句理由；工具一次最多 4 题时按顺序分几次）；回答写进答案文件后再运行本命令。")
+        if later:
+            print("回答之后可能还要问：" + "、".join(later))
+        return 2 if unknown else 0
+    if unknown:
+        return 2
+    print("没有待问的问题，可以运行 install。")
+    print("下面是将要记录的全部取值（「推荐值」是没有问用户、按推荐或检测决定的项）。quick 安装时把这张表给用户确认：")
+    for q, st, _ in items:
+        if st in ("answered", "default") or (st == "skipped" and "otherwise" in q):
+            val = out.get(q["key"])
+            shown = json.dumps(val, ensure_ascii=False) if isinstance(val, (dict, list)) else val
+            print(f"  {q['key']} = {shown}" + ("（推荐值）" if st == "default" else "（不适用，取 otherwise）" if st == "skipped" else ""))
+    return 0
 
 
 # ------------------------------------------------------------------ install
@@ -141,6 +201,23 @@ def write_keep(path, text):
             shutil.copy2(path, path + ".bak")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+
+
+def write_project_defaults(home, answers):
+    """<home>/custom/project-defaults.json：新项目的缺省值，W1「接收」读取。已有且内容不同时先另存 .bak。
+    custom/ 属于用户：不随安装复制，升级不动。链接模式下一个仓库部署到多个 workspace 时以最后一次写入为准。"""
+    path = os.path.join(home, *mf.PROJECT_DEFAULTS.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_keep(path, json.dumps(mf.project_defaults(answers), ensure_ascii=False, indent=2) + "\n")
+    return path.replace("\\", "/")
+
+
+def read_project_defaults(root):
+    path = os.path.join(root, *mf.PROJECT_DEFAULTS.split("/"))
+    try:
+        return json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def check_paths(answers):
@@ -190,8 +267,10 @@ def cmd_install(a):
     m["deployments"][ws] = {**m["deployments"].get(ws, {}), "answers": answers, "ids": f"kandev/{ids}",
                             "profiles": f"kandev/{prof}"}
     mf.save(home, m)
+    pd = write_project_defaults(home, answers)
     py = answers["python"]
     print(f"已记录 workspace {ws} 的部署答案：{home}/{mf.NAME}")
+    print(f"项目缺省值（W1「接收」读取）：{pd}")
     print("下一步（在安装目录中运行）：")
     if answers["setup_style"] == "custom":
         print(f"  {py} {home}/kandev/ma.py questions --stage customize   # 问用户要定制什么，写进 {home}/custom/rules/")
@@ -202,27 +281,31 @@ def cmd_install(a):
 def cmd_answer(a):
     m = mf.load(ROOT)
     ws, dep = pick_deployment(m, a.workspace)
-    new, changed = dict(dep["answers"]), []
+    new, changed = mf.flatten(dep["answers"]), []
     types = {q["key"]: q.get("type") for q in mf.questions("install")}
+    editable = [k for k in types if k in EDITABLE or k.startswith(tuple(g + "." for g in mf.GROUPS))]
     for item in a.set:
         key, eq, val = item.partition("=")
-        if key not in EDITABLE:
-            die(f"{key} 不能用 answer 改（可改：{', '.join(EDITABLE)}）；workspace、安装方式和安装目录要改就重新安装。", 2)
+        if key not in editable:
+            die(f"{key} 不能用 answer 改（可改：{', '.join(editable)}）；workspace、安装方式和安装目录要改就重新安装。", 2)
         if not eq or not val:
             die(f"写成 --set {key}=<值>。", 2)
-        if types[key] == "object":
+        if types[key] in ("object", "list"):
             try:
                 val = json.loads(val)
             except json.JSONDecodeError as e:
-                die(f"{key} 的值要是 JSON 对象（shell 里注意引号，或改答案文件后重新 install）：{e}", 2)
+                die(f"{key} 的值要是 JSON（shell 里注意引号，或改答案文件后重新 install）：{e}", 2)
         new[key] = val
         changed.append(key)
-    problems = [f"{k}：{msg}" for k, msg in mf.validate(new)[1]] + (check_paths(new) if "python" in changed else [])
+    problems = mf.validate(new, strict=False)[1]
+    problems = [f"{k}：{msg}" for k, msg in problems] + (check_paths(new) if "python" in changed else [])
     if problems:
         die("没有改动：\n  " + "\n  ".join(problems), 2)
-    dep["answers"] = new
+    dep["answers"] = mf.nest(new)
     mf.save(ROOT, m)
     print("已更新：" + "、".join(changed))
+    if any(k.startswith("project_defaults.") for k in changed):
+        print(f"项目缺省值已写入 {write_project_defaults(ROOT, dep['answers'])}（之后启动的项目生效）")
     if {"python", "profiles"} & set(changed):
         print("守护的命令或 profile 可能变了：重新部署后运行 ma.py guard，并按交接文件更新 automation。")
 
@@ -471,6 +554,12 @@ def cmd_doctor(a):
         if not os.path.exists(os.path.join(ROOT, rel)):
             add("FAIL", f"运行时需要的文件不存在：{rel}")
     add("OK", "定制的规则槽位：" + ("、".join(custom_slots()) or "无（全部出厂规则）"))
+    pd = read_project_defaults(ROOT)
+    if pd:
+        add("OK", "项目缺省值（" + mf.PROJECT_DEFAULTS + "）：" + "，".join(f"{k}={v}" for k, v in pd.items() if not k.startswith("_")))
+    elif m:
+        add("WARN", f"没有 {mf.PROJECT_DEFAULTS}（在新增这项之前安装的）：「接收」按出厂缺省处理；"
+                    "要生成就运行 ma.py answer --set project_defaults.remote=auto（或别的值）")
     want_steps = {wf["name"]: {s["name"] for s in wf["steps"]} for wf in b.all_workflows()}
     for ws, dep in ((m or {}).get("deployments", {})).items():
         if a.workspace and ws != a.workspace:
@@ -642,6 +731,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
     q = sub.add_parser("questions")
     q.add_argument("--stage", choices=mf.STAGES)
+    q.add_argument("--answers", help="已有答案的 JSON 文件：只列出现在该问、还没回答的项")
     i = sub.add_parser("install")
     i.add_argument("--answers", required=True)
     for name in ("diff", "apply", "guard", "doctor", "answer"):

@@ -82,9 +82,18 @@
 
 ## 3. 运行模式
 
-pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任务和开发任务继承同一个值。
+pm 任务描述的 `[TASK v1]` 头写 `autonomy: 1 | 2 | 3 | 4`（pm 自己决定到什么程度）和由它导出的 `mode: attended | unattended`；模块任务和开发任务只继承 mode。没有 `autonomy` 行的旧头：attended 按 2、unattended 按 4。
 
-| | attended（默认） | unattended |
+| autonomy | mode | 做法 |
+|---|---|---|
+| 1 逐步确认 | attended | plan_only 固定为 true；另外改模块清单或范围、对 ESCALATE 的决定，pm 都先问用户 |
+| 2 关键节点确认（默认） | attended | 下表 attended 列 |
+| 3 自主决策 | unattended | 下表 unattended 列；但推送远端或开 PR、超出额度约定的真实调用、删除数据、删减需求 R-n、改基线分支先问用户 |
+| 4 完全无人值守 | unattended | 下表 unattended 列 |
+
+3 级映射到 unattended，是因为它对引擎的影响与 unattended 相同（立项评审通过后不停、模块不等用户配置），区别只在 pm 遇到那几类事时提问。
+
+| | attended | unattended |
 |---|---|---|
 | 立项确认 | 立项评审通过后，pm 向用户提问确认 | 立项评审通过后直接进入模块下发 |
 | 向用户提问 | 可以，合并成一次提问（每题附推荐答案） | 不为取舍和歧义提问。自行决定，写 ADR，登记到 `project/attention.md` |
@@ -97,13 +106,21 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 **integration_test**（`[TASK v1]` 头 `integration_test: auto | off`，缺省 auto）：auto 时 pm 在 charter 中加入结合测试模块，其他模块全部完成后自动开始结合测试；off 时不加，各模块分支在项目验收时才第一次合并。
 
+**remote / push_branch**（`[TASK v1]` 头，缺省 none）：交付方式。none：「收尾合并」只在本地合入基线分支；push：本地合入后推送 `push_branch`（缺省基线分支）；pr：把集成分支推送成 `push_branch`（缺省 `ma/<project>`）并开 PR，不在本地合入基线分支。`push_branch` 不是基线分支时也不在本地合入，只推送集成分支。开发期间推送地址一律保持 `DISABLED`，只有「收尾合并」在恢复地址后推送，不 force push；远端分支已有不在本地的提交时停下问用户。autonomy ≤3 时「人工终审」另问这次推不推送。适合 Kandev 跑在远程主机、只能在 GitHub 上看结果的情况。
+
+**ci**（缺省 none）：local 时 pm 在 conventions「合并与推送」列出仓库 CI 配置里的检查，baseline 模块写进合并门禁；remote 时「收尾合并」推送后等远端 CI 结果（最多 30 分钟），写进 final-report，fail 或拿不到结果登记 attention.md（推送不回滚）。
+
+**运行策略**：「接收」在 autonomy 1–3 时问三项（运行中发现的真实缺陷本轮修还是只记录、旧产物保留还是删除、是否允许改变已有行为），写进任务描述的「运行策略」节；pm 照录进 conventions，当作已决定，不在终审时才被推翻。
+
+这些参数由「接收」逐轮问出（先问需求和 autonomy，再按回答问其余项，最后请用户确认一份汇总），部署时可以在安装目录的 `custom/project-defaults.json` 给出缺省值，见 [intake.md](intake.md)。
+
 用户只需要看两处：`project/attention.md`（需要用户决定的事，每项附推荐答案和默认做法）和 `agents/guard/stage.md`（系统现在在等谁，由守护脚本生成）。
 
 ## 4. W1 项目管理
 
 | # | 步骤 | 角色 | 做什么 | 流转 |
 |---|---|---|---|---|
-| 0 | **接收** | intake | 入口。任务描述已是完整的 `[TASK v1]` 头 → 原样放行；否则按 [intake.md](intake.md) 推导能推导的参数（仓库、基线分支、项目名、管理目录、模板路径），缺的向用户提问（每批最多 4 问，最多 3 批），把任务描述改写成 `[TASK v1]` 头 + 用户原文；不规划、不改仓库 | 完成信号 → 立项规划 |
+| 0 | **接收** | intake | 入口。任务描述已是完整的 `[TASK v1]` 头 → 原样放行；否则按 [intake.md](intake.md) 推导能推导的参数（仓库、基线分支、项目名、管理目录、模板路径），缺的按自主程度逐轮向用户提问（每次最多 4 问，最后确认汇总，最多 6 次），把任务描述改写成 `[TASK v1]` 头 + 运行策略 + 用户原文；不规划、不改仓库 | 完成信号 → 立项规划 |
 | 1 | 立项规划 | pm | 初始化管理目录；写 charter（需求 R-n 原文、模块清单（baseline 最先、结合测试模块最后）、模块边界 B-n、PA 及 covers）、conventions、ADR、attention；不写代码 | 完成信号 → 立项评审 |
 | 2 | 立项评审 | plan_auditor | 独立评审 charter：需求覆盖表（每条 R 一行）+ 第 1–6 项每项一行结论（含模块规模、模块边界覆盖、baseline 模块），写进任务文档 `charter-review` | 退回 → 立项规划（≤2 次）；第 3 次仍有阻塞问题 → 写进 charter-review，立项确认（不论 mode）；通过：plan_only 或 attended → 立项确认，unattended → 模块下发 |
 | 3 | 立项确认 | pm + 人 | 门禁（attended、plan_only 或第 3 次评审仍有阻塞）：进入时启动 pm，pm 用一次提问请用户批准或退回，同时问 attention.md「待用户确认」中未答复的 Q-n / U-n；答复记入 feedback.md | 批准 → pm 移到模块下发；退回或答复改变了 charter 的假设 → 立项规划；先不决定 → 停在这里（之后在 pm 会话发消息，或直接拖到模块下发） |
@@ -111,7 +128,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 | 5 | 调度 | pm | 常驻、只做路由（进入时重置上下文）：处理上报、升级、提问、告警；结合测试缺陷或合并冲突 → 为担当模块建修复模块任务，修完通知结合测试模块重跑；影响到已完成模块的决策也建修复模块任务 | 全部模块完成后，agent 自己移到项目验收 |
 | 6 | 项目验收 | auditor | 建立或更新集成分支（从基线分支切出），合并全部模块分支，运行全量测试和结合测试，验证 PA，逐条核对 R；写 final-report（含额度用量、终审运行方式、需要用户处理、临时资源）；fail 和合并冲突写成修复项 | 没有 fail，或第 3 次仍有 fail（列入需要用户处理）→ 人工终审；有 fail → 模块下发 |
 | 7 | 人工终审 | pm + 人 | 门禁：进入时启动 pm，pm 按 final-report 用提问请用户批准或退回，同时问「需要用户处理」各项；答复记入 feedback.md | **批准 → pm 移到收尾合并**；退回或要求本轮修改 → 模块下发；先不决定 → 停在这里（之后在 pm 会话发消息，或直接拖到收尾合并） |
-| 8 | 收尾合并 | mechanical | 集成分支合入基线分支、跑冒烟测试、清理临时资源、按记录恢复推送地址、把 status 设为 done | 完成信号 → 完成 |
+| 8 | 收尾合并 | mechanical | 集成分支合入基线分支（或按 remote 推送 / 开 PR）、跑冒烟测试、清理临时资源、按记录恢复推送地址、ci=remote 时等远端 CI、把 status 设为 done | 完成信号 → 完成 |
 | 9 | 刷新 | pm | 重置上下文后，移回原步骤（移动 instructions 中的 `刷新返回：` 优先，其次 NOW） | agent 自己移动 |
 | 10 | 完成 | — | 任务完成（Kandev 状态变为 COMPLETED）。必须是最后一个步骤 | — |
 
@@ -189,7 +206,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 - 修复模块任务（`mod/<模块>-fix-<n>`）从集成分支切出；集成分支还不存在时（开发期间的接口变更、多依赖合并冲突、`integration_test: off`）从担当模块的当前分支切出。修完后成为该模块的 `current_branch`，由结合测试模块（或项目验收）合并进集成分支。
 - 项目验收更新 integration 分支，合并 registry 中每个模块的当前分支；没有结合测试模块时由项目验收建立。
 - 用户在人工终审中批准后，「收尾合并」把 integration 合入基线分支，并按 environment.md「约束落实」的记录恢复各 remote 的推送地址（baseline 模块禁用推送时记下原地址；项目结束后仓库归还用户）。
-- 收尾合并用本地合并还是 PR（PR 时先恢复推送地址再创建）、合并门禁命令、是否推送远端，由各项目的 environment.md 规定，见 [开发项目约定](project-conventions.md)。
+- 收尾合并只在本地合并、推送还是开 PR，由 [TASK v1] 头的 `remote`、`push_branch` 决定（见第 3 节），pm 写进 conventions「合并与推送」；合并门禁命令由各项目的 environment.md 规定，见 [开发项目约定](project-conventions.md)。
 
 ## 10. 与开发项目的边界
 
@@ -215,7 +232,7 @@ pm 任务描述的 `[TASK v1]` 头写 `mode: attended | unattended`，模块任�
 
 **部署前的提问**：必须向用户确认的事项集中在 `kandev/deploy_questions.json`。安装时必问四项（快速还是自定义、workspace、各角色的 profile、要不要守护），答案记在安装目录的 `ma-manifest.json`，缺项时脚本拒绝部署。另外几种情况脚本会停下来等用户同意后再带参数运行：就地更新已部署的 workflow（先看 `ma.py diff`）、有进行中的项目、同名 workflow 属于另一个系列、升级时用户改过的文件与新版冲突。
 
-**启动项目**：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数（运行模式、是否先看计划、是否做结合测试等）向你提问，然后把描述改写成 `[TASK v1]` 头 + 需求原文交给 pm。
+**启动项目**：在「多Agent · 项目管理」新建任务，选好仓库和基线分支，在描述里写需求，然后选择 Start task。描述可以只写需求（想指定的参数用一句话带上即可，例如"无人值守""先只出计划"）。任务从「接收」步骤开始：它推导仓库路径、基线分支、项目名、管理目录和模板路径，其余缺少的参数逐轮向你提问（先问自主程度，再按回答问是否先看计划、结合测试、怎么交付、CI、运行策略等），最后给你一份汇总确认，然后把描述改写成 `[TASK v1]` 头 + 需求原文交给 pm。
 
 pm 任务的 `[TASK v1]` 头（字段、缺省值、提问方式、完整模板和例子）只在 [intake.md](intake.md) 维护。已经按那个格式写好完整描述时（例如由 agent 按 [AGENTS.md](../AGENTS.md) C 节创建的任务），「接收」不改、不提问，直接进入立项规划。
 pm 创建的模块任务头示例（baseline / 普通模块）：

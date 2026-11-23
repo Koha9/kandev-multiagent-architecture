@@ -40,8 +40,39 @@ def test_slots_and_answers():
     assert keys({}) == sorted(q["key"] for q in mf.questions("install") if q["ask"] == "always")
     full, problems = mf.validate(ANSWERS)
     assert not problems and full["install_mode"] == "standalone" and full["kandev_url"].startswith("http")
-    assert keys({**ANSWERS, "setup_style": "custom"}) == ["home", "install_mode", "kandev_url", "python"]   # 自定义：可选项也要回答
-    assert keys({**ANSWERS, "setup_style": "custom", "install_mode": "link", "python": "p", "kandev_url": "u"}) == []   # 链接模式不问 home
+    guided = sorted(q["key"] for q in mf.questions("install") if q["ask"] == "guided" and not q.get("when"))
+    assert keys({**ANSWERS, "setup_style": "guided"}) == guided           # guided：问题树的第一级也要回答
+    pd = {"remote": "auto", "autonomy": "ask", "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}
+    g = {**ANSWERS, "setup_style": "guided", "model_strategy": "auto", "project_defaults": pd}
+    assert keys(g) == ["project_defaults.ci"]                              # 下一级：remote 不是 none 才问 CI
+    assert keys({**g, "project_defaults": {**pd, "remote": "none"}}) == []   # remote=none：CI 不适用
+    assert mf.validate({**g, "project_defaults": {**pd, "remote": "none", "ci": "local"}})[0]["project_defaults"]["ci"] == "none"
+    assert keys({**g, "model_strategy": "vendor", "project_defaults.ci": "auto"}) == ["reviewer_cross_vendor", "vendors"]   # 带点的键也可以平铺
+    assert keys({**g, "model_strategy": "vendor", "vendors": [], "reviewer_cross_vendor": "no",
+                 "project_defaults.ci": "auto"}) == ["vendors"]
+    assert keys({**g, "project_defaults": {**pd, "autonomy": "5", "ci": "auto"}}) == ["project_defaults.autonomy"]
+    assert keys({**g, "project_defaults": {**pd, "autonomy": 3, "plan_only": True, "ci": "auto"}}) == []   # 数字、布尔记成字符串
+    assert keys({**ANSWERS, "project_defaults": {"remot": "pr"}}) == ["project_defaults.remot"]
+    assert keys({**ANSWERS, "project_defaults": "pr"}) == ["project_defaults"]
+    custom = {**g, "setup_style": "custom", "project_defaults.ci": "auto"}
+    assert keys(custom) == ["install_mode", "kandev_url", "python"]   # 自定义：可选项也要回答；home 等 install_mode 答了再问
+    assert keys({**custom, "install_mode": "standalone"}) == ["home", "kandev_url", "python"]
+    assert keys({**custom, "install_mode": "link", "python": "p", "kandev_url": "u"}) == []   # 链接模式不问 home
+    # 旧的答案（没有新增的键）：quick 照样通过；已记录的 custom 答案在 apply / doctor 时不因新增的项失败
+    old_custom = {**ANSWERS, "setup_style": "custom", "install_mode": "standalone", "home": "h", "python": "p", "kandev_url": "u"}
+    assert not mf.validate(old_custom, strict=False)[1] and mf.validate(old_custom)[1]
+    assert mf.project_defaults(old_custom) == {"_source": mf.project_defaults({})["_source"], "remote": "auto", "ci": "auto",
+                                               "autonomy": "ask", "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}
+    # 问题树：没有 when 引用不存在的键；先问的项排在依赖它的项前面
+    order = [q["key"] for q in mf.questions("install")]
+    for q in mf.questions("install"):
+        for k in list(q.get("when", {})) + q.get("after", []):
+            assert k in order and order.index(k) < order.index(q["key"]), (q["key"], k)
+    status = lambda answers: {q["key"]: st for q, st, _ in mf.walk(answers)[1]}       # noqa: E731
+    s = status({})
+    assert s["setup_style"] == "pending" and s["model_strategy"] == "deferred" and s["profiles"] == "deferred"
+    s = status({"setup_style": "quick", "workspace_id": WS, "guard_automation": "yes"})
+    assert s["profiles"] == "pending" and s["project_defaults.remote"] == "default" and s["vendors"] == "skipped"
     assert keys({**ANSWERS, "guard_automation": "maybe"}) == ["guard_automation"]
     assert keys({**ANSWERS, "install_mod": "link"}) == ["install_mod"]                      # 拼错的键不能被静默忽略
     assert keys({**ANSWERS, "workspace_id": 123}) == ["workspace_id"]
@@ -74,6 +105,19 @@ def test_install_customize_upgrade(tmp):
     assert "空格" in run(src, "ma.py", "install", "--answers", ans, expect=2)
     write(ans, json.dumps({**ANSWERS, "home": home, "python": "C:/nope/python.exe"}))
     assert "找不到解释器" in run(src, "ma.py", "install", "--answers", ans, expect=2) and not os.path.exists(home)
+
+    # 提问循环：只列出现在该问的项；答完后打印总表
+    write(ans, json.dumps({"setup_style": "guided", "workspace_id": WS}))
+    out = run(src, "ma.py", "questions", "--stage", "install", "--answers", ans)
+    assert "guard_automation" in out and "project_defaults.remote" in out and "project_defaults.ci（" not in out, out
+    assert "[install] profiles" not in out and "没有待问的问题" not in out, out
+    write(ans, json.dumps({**ANSWERS, "home": home}))
+    out = run(src, "ma.py", "questions", "--stage", "install", "--answers", ans)
+    assert "没有待问的问题，可以运行 install" in out and "project_defaults.ci = auto（推荐值）" in out, out
+    write(ans, json.dumps({**ANSWERS, "projct_defaults": {}}))
+    assert "不认识的键" in run(src, "ma.py", "questions", "--stage", "install", "--answers", ans, expect=2)
+    out = run(src, "ma.py", "questions", "--stage", "install")
+    assert "    [install] project_defaults.ci" in out and "仅当 project_defaults.remote 为 auto / push / pr" in out, out
 
     write(ans, json.dumps({**ANSWERS, "home": home}))
     run(src, "ma.py", "install", "--answers", ans)
@@ -114,6 +158,35 @@ def test_install_customize_upgrade(tmp):
     got = mf.load(home)["deployments"][WS]["answers"]
     assert got["workspace_id"] == WS and got["profiles"] == PROFILES and got["guard_automation"] == "skip", got
     run(home, "ma.py", "answer", "--set", "guard_automation=yes")
+
+    # 项目缺省值：install 写出 custom/project-defaults.json；answer --set 改它；doctor 打印一行
+    pd_path = os.path.join(home, "custom", "project-defaults.json")
+    pd = json.load(open(pd_path, encoding="utf-8"))
+    assert {k: v for k, v in pd.items() if k != "_source"} == {"remote": "auto", "ci": "auto", "autonomy": "ask",
+                                                              "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}, pd
+    run(home, "ma.py", "answer", "--set", "project_defaults.remote=none", "--set", "project_defaults.autonomy=3")
+    pd = json.load(open(pd_path, encoding="utf-8"))
+    assert pd["remote"] == "none" and pd["ci"] == "none" and pd["autonomy"] == "3" and os.path.exists(pd_path + ".bak"), pd
+    for bad in ("project_defaults.remote=github", "project_defaults.nope=1"):
+        run(home, "ma.py", "answer", "--set", bad, expect=2)
+    run(home, "ma.py", "answer", "--set", "project_defaults.remote=pr")
+    assert json.load(open(pd_path, encoding="utf-8"))["ci"] == "auto"       # remote 不是 none：ci 回到推荐值
+    assert mf.load(home)["deployments"][WS]["answers"]["project_defaults"]["remote"] == "pr"
+    assert "remote=pr，ci=auto，autonomy=3" in run(home, "ma.py", "doctor", "--offline")
+    # 新增提问之前的安装：答案里没有新键、没有 project-defaults.json，doctor 不 FAIL，answer 照常能用
+    m = mf.load(home)
+    saved = dict(m["deployments"][WS]["answers"])
+    m["deployments"][WS]["answers"] = {k: v for k, v in saved.items() if k not in ("project_defaults", "model_strategy")}
+    mf.save(home, m)
+    shutil.move(pd_path, pd_path + ".moved")
+    out = run(home, "ma.py", "doctor", "--offline")
+    assert "FAIL" not in out and "project-defaults.json" in out, out
+    run(home, "ma.py", "answer", "--set", "guard_automation=yes")
+    assert not os.path.exists(pd_path)
+    shutil.move(pd_path + ".moved", pd_path)
+    m = mf.load(home)
+    m["deployments"][WS]["answers"] = saved
+    mf.save(home, m)
     shutil.move(os.path.join(tmp, "src-kandev"), os.path.join(src, "kandev"))
 
     # 定制：custom/rules 覆盖出厂槽位，进入 prompt；出厂文件不变
@@ -157,6 +230,7 @@ def test_install_customize_upgrade(tmp):
     assert rd("docs/intake.md") == "我的 intake\n" and not os.path.exists(os.path.join(home, "docs", "intake.md.new"))
     assert rd("mgmt-template/protocol/message.md") == "新版协议\n" and rd("rules/extra.md") == "新增\n"
     assert "提交信息用英文" in rd("custom/rules/git.md") and mf.load(home)["deployments"][WS]["answers"]["home"] == home
+    assert json.loads(rd("custom/project-defaults.json"))["remote"] == "pr"          # 升级不动 custom/
     write(os.path.join(src, "mgmt-template", "roles", "pm.md"), "更新的 pm 角色卡\n")
     run(src, "ma.py", "upgrade", "--home", home, "--conflicts", "take-new")
     assert rd("mgmt-template/roles/pm.md") == "更新的 pm 角色卡\n" and rd("mgmt-template/roles/pm.md.mine") == "我的 pm 角色卡\n"

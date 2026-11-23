@@ -129,8 +129,8 @@ def check_template_refs():
     return problems
 
 
-TASK_FIELDS = ("project", "mode", "plan_only", "integration_test", "mgmt_root", "mgmt_template", "repo",
-               "role", "scope", "parent", "pm", "branch")
+TASK_FIELDS = ("project", "autonomy", "mode", "plan_only", "integration_test", "remote", "push_branch", "ci",
+               "mgmt_root", "mgmt_template", "repo", "role", "scope", "parent", "pm", "branch")
 
 
 def check_arch_refs():
@@ -203,6 +203,17 @@ def check_questions():
             problems.append(f"deploy_questions.json：{q.get('key')} 是可选项，必须给 recommended")
         if q.get("ask") != "when_prompted" and q.get("stage") not in ("install", "customize"):
             problems.append(f"deploy_questions.json：{q.get('key')} 的答案不会被记录（只有 install 阶段记录），ask 应为 when_prompted")
+        by_key = {p["key"]: p for p in mf.questions() if p.get("key") in keys}     # 问题树：只能依赖前面的项
+        for k, v in q.get("when", {}).items():
+            vals = v if isinstance(v, list) else [v]
+            if k not in by_key:
+                problems.append(f"deploy_questions.json：{q.get('key')} 的 when 引用了不在它前面的 {k}")
+            elif by_key[k].get("options") and set(vals) - set(by_key[k]["options"]):
+                problems.append(f"deploy_questions.json：{q.get('key')} 的 when 里 {k} 的取值不在它的 options 里")
+        problems += [f"deploy_questions.json：{q.get('key')} 的 after 引用了不在它前面的 {k}" for k in q.get("after", [])
+                     if k not in by_key]
+        if q.get("options") and "recommended" in q and q["recommended"] not in q["options"]:
+            problems.append(f"deploy_questions.json：{q.get('key')} 的 recommended 不在 options 里")
         keys.add(q.get("key"))
         covers |= set(q.get("covers", []))
     want = {f"rules/{n}.md" for n in slots.SLOTS} | {f"rules/params.json:{k}" for k in slots.params()}

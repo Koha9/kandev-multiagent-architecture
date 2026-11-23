@@ -1,17 +1,18 @@
 {
   "_readme": [
-    "部署提问清单：部署 AI 必须向用户确认的事项的唯一来源。用 `python kandev/ma.py questions --stage <阶段>` 查看。",
-    "ask=always：安装时必须问用户，不能替用户决定。ask=custom：用户在 setup_style 选了 custom 才问，否则用 recommended。",
-    "这两类（install 阶段）的答案写成一个 JSON 文件（键 = key），交给 ma.py install --answers；ma.py 把它记进 ma-manifest.json，缺必问项时拒绝执行。",
-    "ask=when_prompted：平时不用问。ma.py 遇到这种情况会停下并说明，这时再问用户，得到同意后带上 flag 重新运行；答案不记录。",
+    "部署提问清单：部署 AI 要向用户确认的事项的唯一来源，install 阶段是一棵提问树。用 `python kandev/ma.py questions --stage <阶段>` 查看。",
+    "ask 决定在哪种 setup_style 下问：always = 每种都问，不能替用户决定；guided = 选了 guided 或 custom 才问；custom = 选了 custom 才问；没问到的项用 recommended（quick 下由你按推荐值或检测结果决定，最后列成一张总表给用户确认）。when_prompted = 平时不用问，ma.py 遇到这种情况会停下并说明，这时再问用户，得到同意后带上 flag 重新运行；答案不记录。",
+    "when：{键: 值或值的列表}，前面的答案匹配时这一项才适用；不适用的项不问，答案里写了也忽略，有 otherwise 时取 otherwise。after：这些键回答之后再问。没有 recommended 的项只要适用就必须回答。",
+    "提问循环：把已有的答案写成 JSON 文件（键 = key；带点的键如 project_defaults.remote 也可以写成嵌套对象），运行 `ma.py questions --stage install --answers <文件>`，它只列出现在该问、还没回答的项（同一批一次问完），回答后写回文件再运行，直到提示没有待问的问题，再交给 ma.py install --answers。ma.py 把答案记进 ma-manifest.json，缺必问项时拒绝执行。",
+    "project_defaults.* 是新项目的缺省值：ma.py install 写成 <home>/custom/project-defaults.json，由 W1「接收」读取；ask 表示每个项目再问。model_strategy、vendors、reviewer_cross_vendor 只记录选 profile 的方式，部署只用 profiles。",
     "新增槽位（rules/*.md、params.json 的键）时必须在 customize 阶段登记（covers），check_docs.py 会检查。"
   ],
   "questions": [
     {
       "key": "setup_style", "stage": "install", "ask": "always",
-      "question": "快速安装（其余可选项都用推荐值）还是自定义（逐项确认安装位置、规则定制等）？",
-      "options": ["quick", "custom"], "recommended": "quick",
-      "why": "大多数用户用推荐值即可；之后随时可以再定制。"
+      "question": "怎么安装：quick（能推断的都由 agent 按推荐值或检测结果决定，最后给你一张总表确认）、guided（按问题树逐级问，每题给推荐答案）、custom（guided 之外再问安装位置、解释器、Kandev 地址和规则定制）？",
+      "options": ["quick", "guided", "custom"], "recommended": "guided",
+      "why": "第一次部署推荐 guided：推送、CI、自主程度这些项目缺省值会影响之后每个项目，值得各问一次，总共只多两三批问题；以后可以用 ma.py answer 改。"
     },
     {
       "key": "workspace_id", "stage": "install", "ask": "always",
@@ -20,16 +21,71 @@
       "type": "string"
     },
     {
-      "key": "profiles", "stage": "install", "ask": "always",
-      "question": "各角色用哪个 agent profile？",
-      "how": "先调用 list_agent_profiles_kandev，按 docs/workflow.md「角色与 profile」为 5 个必填角色（pm、auditor、developer、reviewer、mechanical）各选一个，4 个可选角色（module、module_auditor、plan_auditor、intake）按需要选；把选择列成表给用户确认。必填、缺省和「必须不同」的约束由 ma.py 校验，报错照着改。缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建。",
-      "type": "object"
-    },
-    {
       "key": "guard_automation", "stage": "install", "ask": "always",
       "question": "要建守护 automation 吗？它每 20 分钟巡检一次，项目卡住时告警、用量上限重置后自动恢复，每次消耗少量模型额度。",
       "how": "yes：部署后按 ma.py apply 打印的交接文件创建（你在 Kandev 内部且有 create_automation_kandev 时由你做，否则把交接文件交给用户）。skip：不建，告诉用户项目卡住时不会有告警。",
       "options": ["yes", "skip"], "recommended": "yes"
+    },
+    {
+      "key": "model_strategy", "stage": "install", "ask": "guided",
+      "question": "各角色的模型怎么选：auto（agent 按角色建议从已有 profile 里挑，列表给你确认）、vendor（先说你想用哪些厂商 / CLI，agent 在这个范围内挑）、per_role（逐个角色由你指定 profile）？",
+      "options": ["auto", "vendor", "per_role"], "recommended": "auto",
+      "why": "docs/workflow.md「角色与 profile」已经写了每个角色适合什么模型，agent 挑完你只需要看一张表。"
+    },
+    {
+      "key": "vendors", "stage": "install", "ask": "guided", "when": {"model_strategy": "vendor"},
+      "question": "想用哪些厂商或 CLI（例如 Claude Code、Codex、Gemini CLI）？",
+      "how": "先调用 list_agent_profiles_kandev，把已有 profile 涉及的厂商 / CLI 列给用户选，可多选。写成字符串列表。",
+      "type": "list"
+    },
+    {
+      "key": "reviewer_cross_vendor", "stage": "install", "ask": "guided", "when": {"model_strategy": "vendor"},
+      "question": "审核（reviewer）和验收（auditor）要不要用与开发、规划不同厂商的模型？",
+      "options": ["yes", "no"], "recommended": "yes",
+      "why": "不同厂商的模型盲点不同，交叉审核更容易发现问题；只选了一个厂商时选 no。"
+    },
+    {
+      "key": "profiles", "stage": "install", "ask": "always", "after": ["model_strategy", "vendors", "reviewer_cross_vendor"],
+      "question": "各角色用哪个 agent profile？",
+      "how": "先调用 list_agent_profiles_kandev。model_strategy=auto 时按 docs/workflow.md「角色与 profile」为每个角色选；vendor 时只在 vendors 的范围内选，reviewer_cross_vendor=yes 时 reviewer、auditor 换厂商；per_role 时逐个角色请用户选（每题给推荐）。5 个必填角色（pm、auditor、developer、reviewer、mechanical），4 个可选角色（module、module_auditor、plan_auditor、intake）按需要选。无论哪种方式，最后都把选择列成表给用户确认。必填、缺省和「必须不同」的约束由 ma.py 校验，报错照着改。缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建。",
+      "type": "object"
+    },
+    {
+      "key": "project_defaults.remote", "stage": "install", "ask": "guided",
+      "question": "你的项目是否推送到云端仓库（GitHub 等）？",
+      "options": ["auto", "none", "push", "pr"], "recommended": "auto",
+      "why": "auto：每个项目由 agent 看 git remote 判断（有远端就按 push 处理，没有就只在本地）；none：只在本地；push：结束时推送基线分支；pr：结束时推送一个分支并开 PR。不同项目情况不同，auto 最省事。"
+    },
+    {
+      "key": "project_defaults.ci", "stage": "install", "ask": "guided", "when": {"project_defaults.remote": ["auto", "push", "pr"]},
+      "otherwise": "none",
+      "question": "项目有 CI 时怎么对待？",
+      "options": ["auto", "none", "local", "remote"], "recommended": "auto",
+      "why": "auto：每个项目检测 .github/workflows、.gitlab-ci.yml 等再决定；none：不管 CI；local：合并前在本地复现 CI 的检查；remote：等推送的分支 / PR 上的远端 CI 结果。"
+    },
+    {
+      "key": "project_defaults.autonomy", "stage": "install", "ask": "guided",
+      "question": "项目运行中需要决定的事，agent 自主到什么程度？",
+      "options": ["ask", "1", "2", "3", "4"], "recommended": "ask",
+      "why": "ask：每个项目启动时再问（推荐，不同项目要求不同）；1 逐步确认；2 关键节点确认（≈ attended）；3 自主决策，只问不可逆或高成本的事；4 完全无人值守（≈ unattended）。"
+    },
+    {
+      "key": "project_defaults.plan_only", "stage": "install", "ask": "guided",
+      "question": "立项计划出来后，是否先停下来给你看再开发？",
+      "options": ["ask", "true", "false"], "recommended": "ask",
+      "why": "ask：每个项目按「接收」现有的规则决定要不要问（推荐）；true：总是先停下；false：评审通过就开发。"
+    },
+    {
+      "key": "project_defaults.integration_test", "stage": "install", "ask": "guided",
+      "question": "所有模块完成后，是否自动做跨模块的结合测试？",
+      "options": ["ask", "auto", "off"], "recommended": "ask",
+      "why": "ask：每个项目再问（推荐）；auto：总是做；off：不做，省额度，适合多为单模块或纯库的项目。"
+    },
+    {
+      "key": "project_defaults.paid_calls", "stage": "install", "ask": "guided",
+      "question": "测试和验收时是否允许消耗额度的真实调用（真实 AI、付费 API、部署）？",
+      "options": ["ask", "deny", "allow"], "recommended": "ask",
+      "why": "ask：需求明显依赖这类调用而没写约定时再问（推荐，即现在的做法）；deny：一律用 mock；allow：允许（次数上限仍按需求里写的）。"
     },
     {
       "key": "install_mode", "stage": "install", "ask": "custom",
@@ -37,8 +93,8 @@
       "options": ["standalone", "link"], "recommended": "standalone"
     },
     {
-      "key": "home", "stage": "install", "ask": "custom",
-      "question": "安装目录放在哪里？（链接模式不用问）",
+      "key": "home", "stage": "install", "ask": "custom", "when": {"install_mode": "standalone"},
+      "question": "安装目录放在哪里？",
       "type": "string", "recommended": "~/.kandev-ma/<workspace id 前 8 位>",
       "why": "它必须在运行 Kandev 的那台机器上，守护每 20 分钟要运行其中的脚本。路径不能含空格。"
     },
@@ -56,7 +112,7 @@
     {
       "key": "customize", "stage": "customize", "ask": "custom",
       "question": "要定制哪些规则？git、编码、测试、工作区、质量五段规则，数值参数，角色卡，「接收」的参数缺省值。",
-      "how": "逐项问清用户的具体要求后写文件，不记录答案（doctor 会从磁盘列出定制了哪些）。规则槽位和参数写进安装目录的 custom/rules/ 下的同名文件（params.json 只写要改的键），不改 rules/ 里的出厂文件。角色卡和项目模板在 mgmt-template/，「接收」的参数缺省值在 docs/intake.md：独立安装时直接改安装目录里的文件。改完用 ma.py diff 给用户看差异。",
+      "how": "逐项问清用户的具体要求后写文件，不记录答案（doctor 会从磁盘列出定制了哪些）。规则槽位和参数写进安装目录的 custom/rules/ 下的同名文件（params.json 只写要改的键），不改 rules/ 里的出厂文件。角色卡和项目模板在 mgmt-template/，「接收」的参数缺省值在 docs/intake.md：独立安装时直接改安装目录里的文件。新项目的缺省值（推送、CI、自主程度等）用 ma.py answer --set project_defaults.<键>=<值> 改。改完用 ma.py diff 给用户看差异。",
       "recommended": "不定制",
       "covers": ["rules/git.md", "rules/coding.md", "rules/testing.md", "rules/workspace.md", "rules/quality.md",
                  "rules/params.json:dev_wip", "rules/params.json:refresh_wakes", "rules/params.json:guard"]

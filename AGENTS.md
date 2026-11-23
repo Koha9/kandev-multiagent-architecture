@@ -45,7 +45,12 @@
 前提：源仓库在运行 Kandev 的那台机器上（安装目录也建在这台机器上，守护每 20 分钟要运行其中的脚本）。
 
 1. **确认 Kandev**：调用 `list_workspaces_kandev`。连不上就停下，请用户启动 Kandev 或给出 MCP 地址（地址不是默认值时写进答案的 `kandev_url`）。
-2. **提问**：运行 `python kandev/ma.py questions --stage install`，按清单问用户。`workspace_id` 先列出 workspace 让用户选；`profiles` 先调用 `list_agent_profiles_kandev`，按 [docs/workflow.md](docs/workflow.md)「角色与 profile」选好后列成表给用户确认（mode 应能无人值守执行；缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建）。
+2. **提问**（问题树，逐批问）：先运行 `python kandev/ma.py questions --stage install` 看整棵树，再逐批问：
+   - 第一批固定是 `setup_style`、`workspace_id`、`guard_automation`。`workspace_id` 先调用 `list_workspaces_kandev` 列给用户选；`setup_style` 第一次部署推荐 guided，并说明 quick 会由你按推荐值和检测结果决定其余各项，最后给一张总表确认。
+   - 每批回答后写进答案文件（例如 `kandev/answers.local.json`），运行 `python kandev/ma.py questions --stage install --answers kandev/answers.local.json`，它只列出现在该问的项。照着问下一批，直到它打印「没有待问的问题」。每批合并成一次提问（一次最多 4 题时按顺序分几次），每题给选项、推荐答案和一句理由。
+   - `profiles`：先调用 `list_agent_profiles_kandev`，按 `model_strategy` 的答案选。auto：按 [docs/workflow.md](docs/workflow.md)「角色与 profile」选；vendor：只在用户选的厂商里选，`reviewer_cross_vendor=yes` 时 reviewer、auditor 换厂商；per_role：逐个角色请用户选。无论哪种都把结果列成表给用户确认（mode 应能无人值守执行；缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建）。
+   - `project_defaults.*` 是之后每个项目的缺省值（推送、CI、自主程度、plan_only、结合测试、付费调用），由「接收」读取；`ask` 表示每个项目再问。
+   - 最后把 `questions --answers` 打印的总表给用户确认。quick 时必须做：表里标「推荐值」的项是你决定的。
 3. **安装**：把答案写成 JSON 文件（留在源仓库，例如 `kandev/answers.local.json`，格式见 [kandev/README.md](kandev/README.md)），运行：
    ```
    python kandev/ma.py install --answers kandev/answers.local.json
@@ -85,8 +90,16 @@
 
 用户自己在 Kandev 里新建任务时只需要写需求：W1 的「接收」步骤会推导参数、向用户提问并补全 `[TASK v1]` 头。你代用户启动项目时写好完整的头，「接收」会原样放行，不再提问。
 
-1. 按 [docs/intake.md](docs/intake.md) 第 3 节的字段逐项向用户确认：目标仓库和基线分支、需求（按重要度排序，一条一行）、`mode`、`plan_only`、`integration_test`、技术栈与环境要求、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
-2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `<home>/kandev/` 下该 workspace 的 ids 文件，选好仓库），描述按 intake.md 第 6 节的格式。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写 `<home>/mgmt-template` 的绝对路径。
+1. 按 [docs/intake.md](docs/intake.md) 第 3 节的字段逐项向用户确认：
+   - 目标仓库和基线分支；需求（按重要度排序，一条一行）。
+   - `autonomy`（1–4）。`mode` 由它导出：1、2 → attended，3、4 → unattended；1 时 `plan_only: true`。
+   - `plan_only`、`integration_test`。
+   - 交付方式：`remote`（none / push / pr）与 `push_branch`，以及 `ci`。
+   - autonomy 1–3 时的运行策略：缺陷本轮修还是只记录、旧产物保留还是删除、是否允许改变已有行为。写进正文「运行策略」节。
+   - 技术栈与环境要求、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
+
+   安装目录有 `custom/project-defaults.json` 时，其中的具体值作为推荐答案。
+2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `<home>/kandev/` 下该 workspace 的 ids 文件，选好仓库），描述按 intake.md 第 6 节的格式。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写 `<home>/mgmt-template` 的绝对路径。头写全（含 autonomy、remote、ci）时「接收」不提问，只校验 autonomy 与 mode / plan_only 是否一致。
 3. 经用户同意后启动任务。之后用户只需要看两处：`<mgmt_root>/project/attention.md`（需要用户决定的事）和 `<mgmt_root>/agents/guard/stage.md`（现在在等谁）。
 
 ## D. 跑基准项目

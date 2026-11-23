@@ -16,7 +16,11 @@ NAME = "ma-manifest.json"
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUESTIONS = os.path.join(HERE, "deploy_questions.json")
 STAGES = ("install", "customize", "redeploy", "upgrade")
-ASKS = ("always", "custom", "when_prompted")
+ASKS = ("always", "guided", "custom", "when_prompted")
+STYLE_LEVEL = {"quick": 0, "guided": 1, "custom": 2}       # setup_style 选了哪种，问到哪一级
+ASK_LEVEL = {"always": 0, "guided": 1, "custom": 2, "when_prompted": 9}
+GROUPS = ("project_defaults",)                              # 答案里可以写成嵌套对象的键组
+PROJECT_DEFAULTS = "custom/project-defaults.json"
 
 # 不随安装复制的内容：本机文件、运行时状态、调研材料、用户的定制
 SKIP_DIR_NAMES = {".git", ".claude", "__pycache__", "node_modules"}
@@ -107,33 +111,114 @@ def check_profiles(p):
     return problems
 
 
-def validate(answers):
-    """按提问清单校验 install 阶段的答案（只有这一阶段的答案会被记录）。
-    返回 (补全了推荐值的答案, [(key, 问题说明)])。"""
-    out, problems = dict(answers), []
-    qs = {q["key"]: q for q in questions("install")}
-    problems += [(k, f"不认识的键（可用：{sorted(qs)}）") for k in answers if k not in qs]
-    custom, link = answers.get("setup_style") == "custom", answers.get("install_mode") == "link"
-    for key, q in qs.items():
-        if key == "home" and link:              # 链接模式的安装目录就是本仓库
-            out.pop("home", None)
+def flatten(answers):
+    """{"project_defaults": {"remote": "pr"}} → {"project_defaults.remote": "pr"}（带点的键原样保留）。"""
+    out = {}
+    for k, v in answers.items():
+        if k in GROUPS and isinstance(v, dict):
+            out.update({f"{k}.{k2}": v2 for k2, v2 in v.items()})
+        else:
+            out[k] = v
+    return out
+
+
+def nest(flat):
+    out = {}
+    for k, v in flat.items():
+        group, dot, sub = k.partition(".")
+        if dot and group in GROUPS:
+            if not isinstance(out.get(group), dict):      # 写错成非对象的组（validate 已报错）
+                out[group] = {}
+            out[group][sub] = v
+        else:
+            out[k] = v
+    return out
+
+
+def _value(q, val):
+    """校验一个答案，返回 (规范化后的值, 问题说明或 None)。有 options 的项接受 JSON 的数字和布尔值，记成字符串。"""
+    if q.get("options") and isinstance(val, (bool, int)):
+        val = str(val).lower()
+    if not isinstance(val, TYPES.get(q.get("type"), str)):
+        return val, f"类型应为 {q.get('type', 'string')}，收到 {val!r}"
+    if q.get("options") and val not in q["options"]:
+        return val, f"可选值 {q['options']}，收到 {val!r}"
+    if q.get("type") == "list" and (not val or not all(isinstance(x, str) and x for x in val)):
+        return val, f"应为非空的字符串列表，收到 {val!r}"
+    if q["key"] == "profiles":
+        p = check_profiles(val)
+        return val, "；".join(p) if p else None
+    return val, None
+
+
+def walk(answers, strict=True):
+    """按提问树的顺序走一遍 install 阶段的提问。
+    strict=True（install、questions）：按 setup_style 决定哪些项要问；False（已记录的答案：apply、doctor、answer）：
+    只有 always 项和没有推荐值的适用项必须有答案，其余缺的补推荐值（兼容在新增提问之前安装的答案）。
+    返回 (补全后的扁平答案, [(问题, 状态, 说明)])。状态：answered / invalid / pending（现在该问）/
+    deferred（取决于还没回答的项）/ default（没问，用推荐值）/ skipped（when 不匹配，不适用）。"""
+    flat = flatten(answers)
+    out, items, open_keys = dict(flat), [], set()
+    style = flat.get("setup_style")
+    for q in questions("install"):
+        key = q["key"]
+        deps = set(q.get("when", {})) | set(q.get("after", [])) | ({"setup_style"} if q["ask"] != "always" else set())
+        if deps & open_keys:
+            items.append((q, "deferred", "先回答 " + "、".join(sorted(deps & open_keys))))
+            open_keys.add(key)
             continue
-        if answers.get(key) in (None, ""):
-            if q["ask"] == "always":
-                problems.append((key, f"必须向用户确认——{q['question']}"))
-            elif custom:
-                problems.append((key, f"用户选了自定义，这一项也要问——{q['question']}（推荐：{q['recommended']}）"))
+        cond = {k: v if isinstance(v, list) else [v] for k, v in q.get("when", {}).items()}
+        if any(out.get(k) not in v for k, v in cond.items()):
+            if "otherwise" in q:
+                out[key] = q["otherwise"]
+            else:
+                out.pop(key, None)
+            items.append((q, "skipped", ""))
+            continue
+        if flat.get(key) in (None, ""):
+            level_asked = strict and STYLE_LEVEL.get(style, 0) >= ASK_LEVEL[q["ask"]]
+            if q["ask"] == "always" or "recommended" not in q or level_asked:
+                items.append((q, "pending", ""))
+                open_keys.add(key)
             else:
                 out[key] = q["recommended"]
+                items.append((q, "default", ""))
             continue
-        val = answers[key]
-        if not isinstance(val, TYPES.get(q.get("type"), str)):
-            problems.append((key, f"类型应为 {q.get('type', 'string')}，收到 {val!r}"))
-        elif q.get("options") and val not in q["options"]:
-            problems.append((key, f"可选值 {q['options']}，收到 {val!r}"))
-        elif key == "profiles":
-            problems += [(key, p) for p in check_profiles(val)]
-    return out, problems
+        out[key], problem = _value(q, flat[key])
+        items.append((q, "invalid" if problem else "answered", problem or ""))
+        if problem:
+            open_keys.add(key)
+    return out, items
+
+
+def validate(answers, strict=True):
+    """按提问清单校验 install 阶段的答案（只有这一阶段的答案会被记录）。
+    返回 (补全了推荐值的答案（project_defaults 为嵌套对象）, [(key, 问题说明)])。"""
+    qs = {q["key"] for q in questions("install")}
+    problems = [(k, f"不认识的键（可用：{sorted(qs)}）") for k in flatten(answers) if k not in qs]
+    problems += [(g, "应为 {键: 值} 的对象") for g in GROUPS if g in answers and not isinstance(answers[g], dict)]
+    out, items = walk(answers, strict)
+    flat = flatten(answers)
+    for q, status, msg in items:
+        if status == "invalid":
+            problems.append((q["key"], msg))
+        elif status == "pending" or (status == "deferred" and q["ask"] == "always" and flat.get(q["key"]) in (None, "")):
+            how = "必须向用户确认" if q["ask"] == "always" or "recommended" not in q else \
+                f"setup_style={out.get('setup_style')} 时这一项也要问（推荐：{q['recommended']}）"
+            problems.append((q["key"], f"{how}——{q['question']}"))
+    return nest(out), problems
+
+
+def project_defaults(answers):
+    """custom/project-defaults.json 的内容（W1「接收」读取）。值都是字符串；remote=none 时 ci=none。"""
+    pd = flatten(validate(answers, strict=False)[0])
+    out = {"_source": "ma.py install 根据部署提问的答案生成；改用 ma.py answer --set project_defaults.<键>=<值>"}
+    for q in questions("install"):
+        if q["key"].startswith("project_defaults."):
+            out[q["key"].split(".", 1)[1]] = str(pd.get(q["key"], q.get("recommended")))
+    if out.get("remote") == "none":
+        out["ci"] = "none"
+    return out
 
 
 def deployment(m, workspace):
@@ -145,4 +230,4 @@ def missing_answers(root, workspace):
     dep = deployment(load(root), workspace)
     if not dep:
         return [f"{q['key']}：{q['question']}" for q in questions("install") if q["ask"] == "always"]
-    return [f"{k}：{msg}" for k, msg in validate(dep.get("answers", {}))[1]]
+    return [f"{k}：{msg}" for k, msg in validate(dep.get("answers", {}), strict=False)[1]]

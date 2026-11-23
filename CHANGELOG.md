@@ -8,6 +8,22 @@
 
 （进行中的改动，发布时移到新版本一节。）
 
+- **部署提问改成问题树**：`setup_style` 增加 guided，第一次部署推荐用它。新增两组问题：
+  - 模型选法：`model_strategy`、`vendors`、`reviewer_cross_vendor`。
+  - 项目缺省值：`project_defaults.remote/ci/autonomy/plan_only/integration_test/paid_calls`。
+
+  `ma.py questions --stage install --answers <文件>` 只列出现在该问的项，便于逐批提问；答完打印全部取值的总表。`ma.py install` 把项目缺省值写成 `<home>/custom/project-defaults.json`，由「接收」读取。之后用 `ma.py answer --set project_defaults.<键>=<值>` 修改，不需要重新部署。
+  - 原因：上一次实测中，Kandev 跑在远端主机上，用户只能通过 GitHub 推送查看结果，但部署时没有问过推送、CI 和模型选择。
+  - 升级：旧的答案和安装照常有效，缺的新项按推荐值处理。旧安装没有 project-defaults.json，doctor 会给 WARN；运行一次 `ma.py answer --set project_defaults.remote=auto` 即生成。
+  - 守护 prompt：无变化。
+- **启动项目改为逐轮提问**：「接收」先问需求和自主程度，再按回答问后续各项，最后请用户确认一份汇总（含本项目 attention.md 的绝对路径）。整个步骤最多 6 次提问。
+  - 自主程度是新头字段 `autonomy` 1–4，`mode` 由它导出：1、2 → attended，3、4 → unattended。
+  - 后续各项：计划门禁、结合测试、交付方式（新字段 `remote: none|push|pr`、`push_branch`）、CI（`ci: none|local|remote`）、额度，以及运行策略（缺陷本轮修还是只记录、旧产物保留还是删除、是否允许改变已有行为）。
+  - 「收尾合并」按 remote 推送或开 PR：先 fetch，确认不会覆盖远端，不 force；ci=remote 时等远端 CI 结果。autonomy ≤3 时，人工终审另问是否推送。
+  - 兼容：没有 autonomy 的旧头照旧，attended 按 2、unattended 按 4。
+  - 原因：实测中用户推翻了 pm 两项保守默认（保留旧产物、真实缺陷本轮不修），多了 3 个修复模块；用户和其他会话还找错了管理目录。
+  - 代价：pm 步骤各约 +156 字符，收尾合并 +783，合计 +2237。
+  - 守护 prompt 和 stage.py：无变化。
 - 文档重组：新增本文件；`docs/workflow.md` 只描述现在的行为；英文只保留 `README.en.md` 和 `docs/overview.en.md`；流程图和架构图更新到现在的步骤。
 
 下面几项改变了 agent 收到的指示，还没有在真实项目上跑过（部署后做一次基准运行来验证）：

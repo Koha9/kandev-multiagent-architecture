@@ -69,6 +69,20 @@ The `[TASK v1]` header of the pm task sets `mode: attended | unattended`; module
 | Environment needs user setup | The baseline module escalates to the pm, who asks the user | Choose an approach that needs no user setup; the pm writes an ADR |
 | Final human review | The user | The user (when they come back) |
 
+`autonomy: 1–4` sets how much the pm decides on its own, and `mode` is derived from it:
+- 1, step-by-step: attended. Always stops at plan approval, and also confirms changes to the module list or scope.
+- 2, key checkpoints (the default): attended.
+- 3, autonomous: unattended. Still asks before pushing, paid calls beyond the quota, deleting data, cutting a requirement, or changing the base branch.
+- 4, fully unattended.
+
+A header without `autonomy` maps attended → 2 and unattended → 4.
+
+Delivery is set by two fields:
+- `remote: none | push | pr`, together with `push_branch`: whether the final merge stays local, pushes the branch, or opens a PR.
+- `ci: none | local | remote`: run the repository's CI checks in the merge gate, or wait for remote CI after the push.
+
+The intake step asks about these in rounds and ends with a summary for the user to confirm. Per-install defaults come from `custom/project-defaults.json`, which `ma.py install` writes.
+
 `plan_only: true` always stops at plan approval, whatever the mode, so the user can read the plan before spending development quota. `integration_test: auto | off` (default auto) controls whether the integration-test module is added.
 
 ## W1 Project management
