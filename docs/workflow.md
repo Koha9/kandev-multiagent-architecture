@@ -178,7 +178,7 @@ pm 任务描述的 `[TASK v1]` 头写 `autonomy: 1 | 2 | 3 | 4`（pm 自己决�
 | 4 | 合并 | mechanical | 合并门禁：先核对是否已合入；rebase 到最新模块分支；运行 environment.md「合并门禁」的命令和 owns 检查；通过后自己快进合入模块分支（不支持 PR），向模块 agent 发 REPORT（失败重试一次，仍失败照实写进 summary） | 合入 → 完成；门禁失败 → 开发（第 3 次 ESCALATE 给模块 agent） |
 | 5 | 完成 | — | | |
 
-**结合测试任务**（契约标注 `kind: integration-test`）：开发按 environment.md「结合测试」的工具，对真实组装的应用写自动化测试，断言用户可见的结果和数据状态；自动化工具做不到的场景才手动操作产品，并写明原因和证据。测试因为产品缺陷失败时，保留失败的用例，report 写 `result=blocked` 和 `defects`（每条写明担当模块和疑似位置），上报模块 agent，不改断言、不加 mock、不跳过。审核核对测试跑的是真实应用，没有用 mock、skip 或放宽断言换取通过。
+**结合测试任务**（契约标注 `kind: integration-test`）：开发按 environment.md「结合测试」的工具，对真实组装的应用写自动化测试，断言用户可见的结果和数据状态；自动化工具做不到的场景才手动操作产品，并写明原因和证据。测试因为产品缺陷失败时，保留失败的用例，report 写 `result=blocked` 和 `defects`（每条写明担当模块和疑似位置），上报模块 agent，不改断言、不加 mock、不跳过。审核核对测试跑的是真实应用，没有用 mock、skip 或放宽断言换取通过。这些要求（以及 `ui: true` 任务的截图要求）由「模块规划」原文写进这类任务的契约（【结合测试要求】【界面要求】），开发、审核的步骤 prompt 只写"按契约附的要求做"，其他开发任务不再携带它们。
 
 开发和审核在测试、截图等方面的具体要求见 [开发项目约定](project-conventions.md)。
 
@@ -276,6 +276,7 @@ branch: mod/baseline base <基线分支>   # 普通模块：mod/<模块> base mo
 - **不带 `session_id` 的消息进任务的主会话**，而模块任务里模块 agent 和验收者的会话在同一个任务中轮换，主会话不一定是收件人的；从「验收调查」回到「等待开发」时发生 profile 切换，平台也可能不执行上下文重置（对策见第 7 节）。
 - **一直 RUNNING 的旧会话**会让发给该任务的消息永久排队；只能由用户在界面取消那一轮。守护用 `session_stuck` 告警，pm 登记到 attention.md。
 - **门禁中的用户消息**投递给用户所在的会话标签，不是下一步骤的会话；由用户消息触发的移动也不一定把下一步的步骤 prompt 送达。所以门禁步骤绑定 pm profile（进入门禁时评审会话关闭，当前会话换成 pm 的），进入时启动 pm 主动提问，用户的答复由 pm 自己移动任务，不再靠 on_turn_start 把消息带回上一步；pm 收到用户直接消息时自己判断所处步骤并处理（【用户直接消息】，在门禁中按门禁步骤的规则记录和路由）；评审会话万一收到就转发给 pm 会话（registry 中的 `kandev_session_id`）；pm 再次进入「立项规划」「模块下发」时从多个来源收集意见。pm 仍没有开始工作时，把任务移到门禁再移回该步骤，并在 instructions 中附上意见原话。
+- **常驻步骤按需读建任务参数**：「模块规划」「模块下发」内联完整参数；常驻的「等待开发」「调度」只带一个路径，要建任务时读 `ma.py apply` 生成的 `kandev/handoff/params-<workflow ID>.local.md`（ID 已填好；`ma.py doctor` 核对它存在且与部署一致）。读不到时不凭记忆创建。
 - **建子任务的参数只靠 prompt**：漏传 `workspace_mode` 时 Kandev 默认 `inherit_parent`，子任务共用模块任务的 worktree，换 profile 开新会话（「审核」）会失败并静默停在 SCHEDULING（对策见第 8 节）。
 - **导出文件不能代替部署脚本**：导出的 workflow 只按 model / mode 记录 profile，同模型的 profile 有多个时可能匹配错；部署用 `ma.py apply`，它按 ID 绑定。
 - **prompt 是部署时的快照**：规则槽位和参数改完要重新部署才生效。进行中的项目用的是启动时复制到管理目录的角色卡，就地更新 prompt 后两者可能不同版本（`ma.py doctor` 会列出；不一致时 agent 以步骤 prompt 为准）。安装目录必须在运行 Kandev 的机器上，它被删除后新项目无法启动、守护停止工作。

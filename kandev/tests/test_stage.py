@@ -91,17 +91,27 @@ def test_main_isolation():
         out_md = os.path.join(good, "agents", "guard", "stage.md")
         code, alerts, err = cli("--state-dir", state, "--dry-run")
         assert code == 0 and len(alerts) == 2 and not os.path.exists(state) and not os.path.exists(out_md), (code, alerts, err)
+        assert all(a["action"]["tool"] == "message_task_kandev" and a["journal_line"] for a in alerts), alerts
+        ids = [a["action"]["args"]["prompt"].split("\n")[1] for a in alerts]
+        assert len(set(ids)) == 2 and ids[1].endswith("-2"), ids                      # 同一次运行的 ALERT id 不重复
         code, alerts, err = cli()                                  # 快照模式不带 --state-dir：也不写
         assert code == 0 and not os.path.exists(out_md), (code, err)
         code, alerts, err = cli("--state-dir", state)
         assert code == 1 and "pm-bad" in err and os.path.exists(out_md), (code, err)
-        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # 出错的项目告警也已输出
-        assert not os.path.exists(os.path.join(state, f"{uid(1)}.json")), "写不进去的项目不应记为已告警"
+        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # stage.md 写不进去不影响告警
+        assert os.path.exists(os.path.join(state, f"{uid(1)}.json")), "告警已输出的项目要记为已发"
         with open(os.path.join(state, f"{uid(2)}.json"), "w") as f:
             f.write('{"0000')                                      # 写到一半的状态文件
         code, alerts, err = cli("--state-dir", state, now="2026-11-09T05:20:00+00:00")
-        assert code == 1 and "pm-good" in {a["project"] for a in alerts}, (code, alerts, err)
+        got = {a["project"] for a in alerts}
+        assert code == 1 and "pm-good" in got and "pm-bad" not in got, (code, alerts, err)   # pm-bad 已记为已发，不重发
         assert json.load(open(os.path.join(state, f"{uid(2)}.json"), encoding="utf-8")), "状态文件应被重新写好"
+        # 去重状态写不进去：这个项目本轮不输出告警（守护会执行已输出的行，输出了却没记下就会在下一轮重发）
+        state2 = os.path.join(tmp, "state2")
+        os.makedirs(os.path.join(state2, f"{uid(2)}.json"))         # 状态文件的位置是目录：写不进去
+        code, alerts, err = cli("--state-dir", state2)
+        got = {a["project"] for a in alerts}
+        assert code == 1 and "pm-good" not in got and "pm-bad" in got and "pm-good" in err, (code, alerts, err)
 
 
 def test_stuck_and_parent_done():
@@ -880,6 +890,52 @@ def test_grouping():
         uid(1): ("D:/p1-mgmt", sorted([uid(1), uid(11), uid(21)])),
         uid(2): ("D:/p2-mgmt", sorted([uid(2), uid(12), uid(22)])),
     }, got                                                   # 已完成的项目和无法归属的任务不出现
+
+
+def test_actions():
+    """每行输出带 action（守护原样调用的工具和参数）和 journal_line；原有字段不变。"""
+    from stage import with_action
+    now = ts("2026-11-09T05:00:00Z")
+    local = now.astimezone().strftime("%y%m%d-%H%M%S")
+    base = {"to_task": uid(11), "object": f"t21 @ task {uid(21)}", "step": "待开发", "value": 12, "threshold": 10}
+
+    al = with_action({**base, "signal": "hold_ready", "suggest": "unblock", "session_id": "S-mod"}, "mod:a", now)
+    assert al["signal"] == "hold_ready" and al["suggest"] == "unblock", al                 # 原有字段保留
+    assert al["action"] == {"tool": "message_task_kandev", "args": {"task_id": uid(11), "session_id": "S-mod", "prompt": "\n".join([
+        "[KMSG v1]", f"id: M-guard-{local}", "type: ALERT", "from: guard @ task -", f"to: mod:a @ task {uid(11)}",
+        "reply: none", "reply_to: -", "due: -", "refs: -", "---",
+        f"对象：t21 @ task {uid(21)}", "信号：hold_ready=12（阈值 10）", "建议：unblock"])}}, al["action"]
+    assert al["journal_line"] == f"ALERT M-guard-{local} hold_ready=12 → task {uid(11)}（t21 @ task {uid(21)}）", al
+    al = with_action({**base, "signal": "idle_no_signal", "suggest": "unblock"}, "mod:a", now, seq=3)
+    assert "session_id" not in al["action"]["args"], al                                    # 没有会话 id：不传
+    assert al["action"]["args"]["prompt"].split("\n")[1] == f"id: M-guard-{local}-3", al
+
+    esc = {**base, "to_task": uid(1), "signal": "pm_unresponsive", "suggest": "refresh", "return_step": "调度",
+           "workflow_id": "W1", "refresh_step_id": "S-refresh"}
+    al = with_action(dict(esc), "pm", now)
+    assert al["action"] == {"tool": "move_task_kandev", "args": {"task_id": uid(1), "workflow_id": "W1",
+                            "workflow_step_id": "S-refresh", "instructions": "刷新返回：调度"}}, al
+    assert al["journal_line"] == f"pm_unresponsive → task {uid(1)}：移到「刷新」（刷新返回：调度）", al
+    al = with_action({**esc, "refresh_step_id": None}, "pm", now)
+    assert al["action"] is None and "未移动" in al["journal_line"], al                        # ids 不全：不调用
+
+    al = with_action({**base, "to_task": uid(21), "signal": "limit_resume", "suggest": "continue", "value": "11-09 21:00",
+                      "threshold": "-", "session_id": "S-dev", "message": "continue\n\n（守护…）"}, "dev:a-01", now)
+    assert al["action"] == {"tool": "message_task_kandev",
+                            "args": {"task_id": uid(21), "prompt": "continue\n\n（守护…）", "session_id": "S-dev"}}, al
+    assert al["journal_line"] == f"limit_resume → task {uid(21)} session S-dev：发送 continue（上限重置于 11-09 21:00）", al
+
+    al = with_action({"to_task": None, "signal": "guard_disabled", "value": "上次巡检的项目都已结束：P", "threshold": "-",
+                      "suggest": "none"}, None, now)
+    assert al["action"] is None and al["journal_line"].startswith("guard_disabled：已停用「多Agent 守护」") and "P" in al["journal_line"], al
+
+
+def test_task_scope():
+    from stage import task_scope
+    assert task_scope(task(1, "项目管理", "调度", "[TASK v1]\nscope: pm")) == "pm"
+    assert task_scope(task(2, "项目管理", "调度", "")) == "pm"
+    assert task_scope(task(11, "模块管理", "等待开发", "scope: mod:auth\npm: task x")) == "mod:auth"
+    assert task_scope(task(21, "开发", "开发", "parent: mod:a @ task x")) == "t21"
 
 
 def main():

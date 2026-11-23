@@ -12,7 +12,7 @@
 | `build_workflows.py` | 部署逻辑：导入、就地更新、绑定 profile，以及 `dump`（生成 prompts.md）、`stats`（每个步骤的字符数和携带的共享块）命令 |
 | `manifest.py`、`slots.py`、`kandev_client.py` | 安装清单与答案校验、规则槽位的读取、Kandev MCP 客户端 |
 | `check_docs.py` | 自检：prompts.md 是否最新、链接、步骤名、模板路径、版本号、stage 回归测试。改完 workflow、部署前运行 |
-| `stage.py` | 守护用的阶段分类：从 Kandev 状态判断每个任务"在等谁"，生成 `agents/guard/stage.md` 和告警 |
+| `stage.py` | 守护用的阶段分类：从 Kandev 状态判断每个任务"在等谁"，生成 `agents/guard/stage.md`，并输出守护要原样执行的动作（`action`：工具和完整参数） |
 | `tests/` | 离线测试：`stage.py` 的回归测试、`ma.py` 的安装 / 定制 / 部署门禁 / 升级测试（用内存里的 Kandev 替身）、管理目录工具的测试 |
 | `verify_export.py` | 导出已部署的 workflow，打印每个步骤的配置用来核对，并把去掉本机 ID 的副本写到 `export/` |
 | `export/` | 示例 workflow：从实际部署导出的三套 workflow，见 [export/README.md](export/README.md) |
@@ -36,7 +36,7 @@ python kandev/ma.py questions --stage install                        # 部署前
 python kandev/ma.py questions --stage install --answers answers.json # 只列出这一批该问、还没回答的项
 python kandev/ma.py install --answers answers.json     # 记录答案；独立安装时复制到安装目录 <home>
 python <home>/kandev/ma.py diff                        # workspace 里的现状，和将要改变的内容
-python <home>/kandev/ma.py apply                       # 自检 → 导入 / 就地更新 → 守护交接文件 → 导出
+python <home>/kandev/ma.py apply                       # 自检 → 导入 / 就地更新 → 建任务参数文件 → 守护交接文件 → 导出
 python <home>/kandev/ma.py doctor                      # 检查安装目录、已部署的 workflow、守护
 ```
 
