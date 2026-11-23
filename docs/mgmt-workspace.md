@@ -24,7 +24,7 @@
 | R3 | **恢复只读文件** | 恢复时只读 README → 角色卡 → 自己的 NOW | 依赖对话摘要导致的偏差，以及重复调查 |
 
 R1 的配套机制是**幂等**：
-- `create_task_kandev` 一律带 `external_id`（模块用 `mod-<模块>`，开发任务用任务 ID）。恢复时如果看到未确认的创建意图，用相同的 `external_id` 重新调用即可，不会重复建任务。
+- `create_task_kandev` 一律带 `external_id`（模块用 `<pm 任务 id>-mod-<模块>`，开发任务用 `<模块任务 id>-<任务 ID>`，避免与同一 workspace 里以前的项目撞名）。恢复时如果看到未确认的创建意图，用相同的 `external_id` 重新调用即可，不会重复建任务。
 - 消息带唯一的 `id`，接收方按 id 去重。
 - `move_task_kandev` 和 `step_complete_kandev` 重做之前，先确认任务当前所在的步骤。这是检查自己动作的结果，不属于"查询别人"。
 

@@ -38,7 +38,8 @@ PARAMS = slots.params()   # rules/params.json，可被 custom/rules/params.json 
 
 GATES = {"立项确认", "人工终审"}
 RESIDENT = {"调度", "等待开发"}
-HOLD, DECISION, DONE, INTAKE = "待开发", "等待决策", "完成", "接收"
+HOLD, DECISION, DONE, INTAKE, MOD_PLAN = "待开发", "等待决策", "完成", "接收", "模块规划"
+WAIT_PREREQ = "排队：等前置模块"         # W2 任务在「模块规划」、前置模块没有全部完成（不告警；数值是未完成的前置模块标题）
 # 步骤名只用于分类，不认识的步骤名落到"运行中"，不会报错。与 build_workflows.py 的一致性由 check_docs.py「步骤名同步」核对。
 SIGNAL_STEPS = {"接收", "立项规划", "立项评审", "模块下发", "项目验收", "收尾合并",
                 "模块规划", "验收调查", "开发", "审核", "合并"}
@@ -93,6 +94,35 @@ def prereq_state(t):
     if statuses is None:
         return False, False, False
     return True, "failed" in statuses, all(x in PREREQ_DONE for x in statuses)
+
+
+def module_name(t):
+    s = header_field(t.get("description"), "scope")
+    return s[4:].strip() if s.startswith("mod:") else ""
+
+
+def module_prereqs(t, by_id):
+    """W2 任务的前置模块任务（by_id 中的任务 id）。两个来源取并集：
+      - t["deps"]：Kandev 返回的依赖（collect 从任务的 blocked_by / depends_on 取；没有这个字段时为 None）
+      - 按「模块下发」的建任务规则从 [TASK v1] 头推导（Kandev 不返回依赖时也能判断）：同一个 pm 下，
+        baseline 和修复模块（scope 含 -fix-）没有前置；integration（kind 以 integration 开头）依赖其他全部非修复模块；
+        其余模块依赖 baseline，以及 branch 行 `base mod/<模块>` 指向的那个模块
+    查不到的 id（不属于这个项目）忽略。"""
+    out = [d for d in (t.get("deps") or []) if d in by_id and d != t["id"]]
+    desc = t.get("description")
+    name, kind = module_name(t), header_field(desc, "kind")
+    if not name or kind == "baseline" or "-fix-" in name:
+        return out
+    pm = header_task(desc, "pm")
+    mods = {module_name(m): m["id"] for m in by_id.values()
+            if m["workflow"].endswith("模块管理") and m["id"] != t["id"] and module_name(m)
+            and header_task(m.get("description"), "pm") == pm}
+    if kind.startswith("integration"):
+        derived = [i for n, i in mods.items() if "-fix-" not in n]
+    else:
+        base = re.search(r"\bbase\s+mod/([\w.-]+)", header_field(desc, "branch"))
+        derived = [mods[n] for n in ("baseline", base and base.group(1)) if n in mods]
+    return out + [i for i in derived if i not in out]
 
 
 def mins(a, b):
@@ -242,7 +272,7 @@ def verdict(category, signal=None, value=None, threshold=None, due=True):
 # ------------------------------------------------------------------ classification (pure)
 def classify(t, now, by_id):
     """t: dict(id, title, workflow, step, state, sessions[{state, updated_at}], perm, question, wip_admitted,
-    wip_step, blocker_status, own_status, limit, long, module_session, since). Returns dict(category, signal, value, threshold) — signal None = no alert.
+    wip_step, blocker_status, own_status, limit, long, module_session, deps, since). Returns dict(category, signal, value, threshold) — signal None = no alert.
     规则从上到下，第一条匹配的生效；给人看的规则表在 mgmt-template/roles/guard.md「阶段分类」，两处一起改。"""
     step, s0 = t["step"], (t["sessions"][0] if t["sessions"] else None)
     in_step = mins(t.get("since"), now)
@@ -301,6 +331,12 @@ def classify(t, now, by_id):
         if pre_done:
             return r("等上级：可放行", "hold_ready", in_step, T_HOLD, due=in_step >= T_HOLD)
         return r("待开发")
+    if (t["workflow"].endswith("模块管理") and step == MOD_PLAN
+            and not (s0 and s0.get("state") in ACTIVE_STATES)):
+        # Kandev 的 blocked_by 还没解除，但会话被提前启动了（例如 pm 给它发了消息）：空闲是在等前置，不是没推进
+        waiting = [by_id[i]["title"] for i in module_prereqs(t, by_id) if not is_done(by_id[i])]
+        if waiting:
+            return r(WAIT_PREREQ, value="、".join(waiting))
     if step in SIGNAL_STEPS and s0 and s0.get("state") in IDLE_STATES and idle >= T_IDLE:
         if t["workflow"].endswith("项目管理"):   # 会话是评审者 / 机械 agent / 等 pm 的，告警 pm 没人处理：只给人看
             return r("等人：空闲未推进", value=f"{step}，空闲 {idle} 分钟")
@@ -508,6 +544,17 @@ def detect_long(k, task_id, sessions):
     return {"session_id": s["session_id"], "wakes": wakes}
 
 
+def kandev_deps(t):
+    """list_tasks_kandev 返回的任务依赖（前置任务 id 列表）；响应里没有依赖字段时返回 None。
+    字段名未在真实接口上核实过，所以 blocked_by / depends_on 都认，元素是字符串或带 id / task_id 的对象都可以。"""
+    for key in ("blocked_by", "depends_on", "dependencies"):
+        v = t.get(key)
+        if isinstance(v, list):
+            return [x if isinstance(x, str) else (x.get("id") or x.get("task_id") or x.get("depends_on_task_id"))
+                    for x in v if isinstance(x, (str, dict))]
+    return None
+
+
 def collect(ids):
     k = kandev()
     try:
@@ -525,7 +572,7 @@ def collect(ids):
             item = {"id": t["id"], "title": t["title"], "workflow": wname, "step": step, "state": t["state"],
                     "description": t.get("description", ""), "wip_admitted": t.get("wip_admitted"),
                     "wip_step": step in wip_steps,
-                    "question": t["id"] in pq_tasks, "sessions": [], "perm": 0}
+                    "question": t["id"] in pq_tasks, "sessions": [], "perm": 0, "deps": kandev_deps(t)}
             live = step != DONE and t["state"] != "COMPLETED"
             if live or wname.endswith("模块管理"):     # 已完成的模块任务也取会话：完成后仍可能留着一个卡住的会话（session_stuck）
                 item["sessions"] = k.call("list_task_sessions_kandev", {"task_id": t["id"]}).get("sessions", [])
@@ -623,7 +670,7 @@ def initialized(mgmt_root):
 ORDER = ["等人", "等上限", "等上级", "排队", "待开发", "常驻", "运行中", "完成"]
 
 
-NOTICE_MARKS = ("未登记", "查不到前置", "会话过长")     # 分类名里带这些字样的行在 stage.md 单列出来
+NOTICE_MARKS = ("未登记", "查不到前置", "会话过长", "等前置模块")     # 分类名里带这些字样的行在 stage.md 单列出来
 
 
 def render(rows, alerts, now_local, unreadable=None):
@@ -640,7 +687,8 @@ def render(rows, alerts, now_local, unreadable=None):
             out.append("")
     notice = [r for r in rows if any(k in r["category"] for k in NOTICE_MARKS)]
     if notice or unreadable:
-        out += ["## 留意（不告警）", ""] + [f"- {r['title']}（{r['step']}）：{r['category']}" for r in notice]
+        out += ["## 留意（不告警）", ""] + [f"- {r['title']}（{r['step']}）：{r['category']}"
+                                         + (f"（{r['value']}）" if r["category"] == WAIT_PREREQ else "") for r in notice]
         out += [f"- modules/{m}/tasks.json 读不了或格式不对：这个模块的放行和未登记检查这次没有生效" for m in unreadable or []]
         out.append("")
     counts = " · ".join(f"{g} {len(groups[g])}" for g in ORDER[3:] if groups[g])

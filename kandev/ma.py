@@ -31,6 +31,7 @@ import slots  # noqa: E402
 from kandev_client import DEFAULT_URL, Kandev  # noqa: E402
 
 GUARD_NAME = "多Agent 守护"
+ACCEPT_TMP_PREFIX = "【部署验收临时】"     # AGENTS.md B3 建的临时任务的标题前缀；doctor 列出遗留的这类任务
 # 安装后还能用 answer 改的键；workspace_id、install_mode、home 决定了安装本身，要改就重新安装
 # project_defaults.* 都可以改（改完重写 custom/project-defaults.json）
 EDITABLE = ("profiles", "guard_automation", "python", "kandev_url", "setup_style", "model_strategy", "vendors",
@@ -384,6 +385,17 @@ def running_projects(k, found):
     return [t["title"] for t in tasks if t.get("workflow_step_id") != done and t.get("state") != "COMPLETED"]
 
 
+def leftover_accept_tasks(k, found):
+    """三套 workflow 中标题以 ACCEPT_TMP_PREFIX 开头的任务（验收部署时建的临时任务没删）：[(标题, id, 步骤名)]。"""
+    out = []
+    for info in found.values():
+        names = {v: n for n, v in info["steps"].items()}
+        for t in k.call("list_tasks_kandev", {"workflow_id": info["workflow_id"]}).get("tasks", []):
+            if (t.get("title") or "").startswith(ACCEPT_TMP_PREFIX):
+                out.append((t["title"], t["id"], names.get(t.get("workflow_step_id"), "?")))
+    return out
+
+
 def guard_files(ws):
     hd = os.path.join(HERE, "handoff")
     return os.path.join(hd, f"guard-handoff.{ws[:8]}.local.md"), os.path.join(hd, f"guard-prompt.{ws[:8]}.local.md")
@@ -600,6 +612,10 @@ def cmd_doctor(a):
                             + ("…" if len(names) > 8 else "") + "（ma.py diff 看详情）")
                     else:
                         add("OK", tag + "已部署的 workflow 与本目录一致")
+                left = leftover_accept_tasks(k, found)
+                if left:
+                    add("WARN", tag + f"有验收部署留下的临时任务（标题以「{ACCEPT_TMP_PREFIX}」开头）：请用户删除（或经用户同意后删除）："
+                        + "；".join(f"{t}（{i}，{s}）" for t, i, s in left))
                 busy = running_projects(k, found)
                 res_auto = k.call("list_settings_resources_kandev", {"resource_type": "automation", "workspace_id": ws, "limit": 50})
                 guards = [r for r in res_auto.get("resources", []) if r.get("label") == GUARD_NAME]

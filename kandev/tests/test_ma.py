@@ -300,6 +300,17 @@ code, out = run("diff")
 assert "接收" in out and "被人在界面上改过" in out and "wip_limit" in out and "1 个步骤的 prompt、1 处结构" in out, out
 code, out = run("doctor")
 assert "已部署的 workflow 与本目录不一致" in out, out
+assert ma.ACCEPT_TMP_PREFIX not in out, out
+
+hold = next(s for s in wf(bw.W3_NAME)["steps"] if s["name"] == "待开发")   # 验收部署留下的临时任务：doctor WARN 列出
+fake_kandev.STATE["tasks"].append({"id": "tmp-1", "title": ma.ACCEPT_TMP_PREFIX + " 待开发行为", "workflow_id": wf(bw.W3_NAME)["id"],
+                                   "workflow_step_id": hold["id"], "state": "TODO"})
+fake_kandev.STATE["tasks"].append({"id": "t9", "title": "普通任务 " + ma.ACCEPT_TMP_PREFIX, "workflow_id": wf(bw.W3_NAME)["id"],
+                                   "workflow_step_id": hold["id"], "state": "TODO"})
+code, out = run("doctor")
+line = next((l for l in out.splitlines() if ma.ACCEPT_TMP_PREFIX + "」开头" in l), "")
+assert line.startswith("WARN") and "tmp-1" in line and "待开发" in line and "t9" not in line and "删除" in line, out
+del fake_kandev.STATE["tasks"][-2:]
 
 fake_kandev.STATE["tasks"].append({"id": "t1", "title": "进行中的项目", "workflow_id": wf(W1)["id"],
                                    "workflow_step_id": intake["id"], "state": "IN_PROGRESS"})

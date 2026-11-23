@@ -76,11 +76,11 @@
 3. **「待开发」行为**（会启动一次真实会话：先问用户，不做就记 unverified）：
    | # | 操作 | 期望 |
    |---|---|---|
-   | a | 在 W3 建临时任务 A：`workflow_step_id`=「待开发」，`start_agent=false`，不设 blocked_by，prompt="只回复 OK，然后结束本轮，不做任何其他事" | A 停在「待开发」，没有会话 |
+   | a | 在 W3 建临时任务 A：title 以 `【部署验收临时】` 开头，`workflow_step_id`=「待开发」，`start_agent=false`，不设 blocked_by，prompt="只回复 OK，然后结束本轮，不做任何其他事" | A 停在「待开发」，没有会话 |
    | b | 等 1 分钟后再看 A | A 仍在「待开发」，没有被自动启动 |
    | c | 把 A 移到「开发」 | A 启动会话；回复 OK 后因为没有完成信号停在「开发」 |
    | d | 给 A 发消息"把自己移到「等待决策」后结束本轮"；A 移过去后再把它移回「开发」 | 移回后沿用原来的开发会话，不新建会话 |
-   | e | 请用户删除 A（或经同意后删除） | 不留下 worktree 或分支 |
+   | e | 当场请用户删除 A（或经同意后删除），不要留到以后；`ma.py doctor` 会对标题以 `【部署验收临时】` 开头的残留任务给 WARN | 不留下 worktree 或分支 |
 
    任一项不符合期望：记为 fail，不要启动项目，回报给用户。
 4. **守护**（用户选了 `skip` 时记 unverified）：`list_settings_resources_kandev`（`resource_type=automation`）中有「多Agent 守护」且已启用；`python kandev/stage.py --ids <ids 文件> --json --dry-run` 退出码 0（`--dry-run` 不能省：不带它，这次看到的告警会被记成已发，守护 60 分钟内不再发）；守护运行过一次后，`kandev/guard_state/` 下的心跳文件（`last_run*.json`）的 `at` 在 40 分钟以内。

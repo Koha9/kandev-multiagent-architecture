@@ -732,6 +732,71 @@ def test_hold_from_tasks_json():
     assert c == "排队" and al == [], (c, al)
 
 
+def test_module_prereqs():
+    """W2 任务在「模块规划」、Kandev 的 blocked_by 还没解除，会话却被提前启动后空闲（实测：结合测试模块收到 pm 的消息后
+    空闲 34 分钟，误报 idle_no_signal）→ 排队：等前置模块，不告警；前置全部完成后照常 idle_no_signal。"""
+    from stage import WAIT_PREREQ, kandev_deps, render
+    now = ts("2026-11-09T05:00:00Z")
+    idle = {"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:26:00Z", "session_id": "s-idle"}
+    stale = {"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "s-stale"}
+
+    def mod(n, name, step, extra="", state="IN_PROGRESS"):
+        t = task(n, "模块管理", step, f"[TASK v1]\nrole: module\nscope: mod:{name}\npm: task {uid(1)}\n{extra}", state)
+        t["title"] = f"mod:{name}"
+        return t
+
+    def world(base_done=True, auth_done=False, ui_done=False):
+        return [task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt"),
+                mod(11, "baseline", "完成" if base_done else "等待开发", "kind: baseline\nbranch: mod/baseline base main",
+                    "COMPLETED" if base_done else "IN_PROGRESS"),
+                mod(12, "auth", "完成" if auth_done else "等待开发", "branch: mod/auth base mod/baseline",
+                    "COMPLETED" if auth_done else "IN_PROGRESS"),
+                mod(13, "ui", "完成" if ui_done else "模块规划", "branch: mod/ui base mod/auth",
+                    "COMPLETED" if ui_done else "IN_PROGRESS"),
+                mod(15, "auth-fix-1", "模块规划", "branch: mod/auth-fix-1 base mod/auth"),
+                mod(14, "integration-test", "模块规划", "kind: integration\nbranch: mod/integration-test base integration")]
+
+    def check(tasks, sessions=(idle,)):
+        tasks[-1]["sessions"] = [dict(s) for s in sessions]
+        state = {t["id"]: {"step": t["step"], "since": "2026-11-09T04:20:00+00:00"} for t in tasks}
+        rows, alerts, _ = evaluate(tasks, now, state, uid(1))
+        it = next(r for r in rows if r["id"] == uid(14))
+        return it, [(a["signal"], a["to_task"]) for a in alerts if a["object"].endswith(uid(14))], rows, alerts
+
+    it, al, rows, alerts = check(world())
+    assert (it["category"], it["value"], al) == (WAIT_PREREQ, "mod:auth、mod:ui", []), (it, al)   # 修复模块不算前置
+    text = render(rows, alerts, "now")
+    assert f"- mod:integration-test（模块规划）：{WAIT_PREREQ}（mod:auth、mod:ui）" in text, text
+    it, al, *_ = check(world(base_done=False, auth_done=True, ui_done=True))
+    assert (it["category"], it["value"]) == (WAIT_PREREQ, "mod:baseline"), it
+    it, al, *_ = check(world(auth_done=True, ui_done=True))                                  # 前置全部完成：照常告警
+    assert it["category"] == "等上级：空闲未推进" and al == [("idle_no_signal", uid(1))], (it, al)
+    it, al, *_ = check(world(), sessions=(stale,))                                           # 会话卡住仍然报
+    assert al == [("running_stale", uid(1))], al
+    it, al, *_ = check(world(), sessions=())                                                 # 还没有会话
+    assert it["category"] == WAIT_PREREQ and al == [], (it, al)
+
+    # 普通模块：依赖 baseline 和 branch 行 base 指向的模块；修复模块、baseline 没有推导出的前置
+    w = world()
+    w[3]["sessions"] = [dict(idle)]
+    rows, alerts, _ = evaluate(w, now, {t["id"]: {"step": t["step"], "since": "2026-11-09T04:20:00+00:00"} for t in w}, uid(1))
+    by = {r["id"]: r for r in rows}
+    assert (by[uid(13)]["category"], by[uid(13)]["value"]) == (WAIT_PREREQ, "mod:auth"), by[uid(13)]
+    assert by[uid(15)]["category"] == "排队", by[uid(15)]
+
+    # Kandev 返回的依赖（没有 scope 也生效）；不属于本项目的 id 忽略
+    plain = task(30, "模块管理", "模块规划", f"pm: task {uid(1)}")
+    plain.update({"sessions": [dict(idle)], "deps": [uid(12), "ffffffff-0000-0000-0000-000000000000"]})
+    rows, alerts, _ = evaluate(world()[:3] + [plain], now, {plain["id"]: {"step": "模块规划", "since": "2026-11-09T04:20:00+00:00"}}, uid(1))
+    assert (rows[-1]["category"], rows[-1]["value"]) == (WAIT_PREREQ, "mod:auth") and not alerts, (rows[-1], alerts)
+    plain["deps"] = ["ffffffff-0000-0000-0000-000000000000"]
+    rows, alerts, _ = evaluate([plain], now, {plain["id"]: {"step": "模块规划", "since": "2026-11-09T04:20:00+00:00"}}, uid(1))
+    assert rows[-1]["category"] == "等上级：空闲未推进", rows[-1]
+
+    assert kandev_deps({}) is None and kandev_deps({"blocked_by": []}) == []
+    assert kandev_deps({"depends_on": ["a", {"id": "b"}, {"task_id": "c"}, 3]}) == ["a", "b", "c"]
+
+
 def test_load_blockers():
     import tempfile
     with tempfile.TemporaryDirectory() as root:

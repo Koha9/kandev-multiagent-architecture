@@ -24,6 +24,7 @@ visual_check: null        # ui: true 时：截图是否存在、是否与 AC 一
 boundary_check:           # 至少 1 个边界情况的亲自抽查
   - case: 空题库时抽题
     result: 返回 count=0，没有异常（test_practice.py::test_empty_bank）
+temp_resources: 无         # 审核中自己启动的实例、端口、临时目录：已清理 | <清不掉的资源和原因>
 suggestions: []           # 非硬性的问题和改进想法：只作建议，不作为退回的理由
 findings:                 # 只指出问题，不写实现方案
   - severity: high        # high | medium | low

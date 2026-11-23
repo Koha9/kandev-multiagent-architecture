@@ -10,7 +10,8 @@
 | `protocol/message.md` | 消息（KMSG v1）与交接（HANDOFF v1）格式 | 只读 |
 | `task-docs/` | 任务文档 `now`、`report`、`review` 的内容模板（任务文档本身存在 Kandev 任务计划里，见下） | 只读 |
 | `project/charter.md` | 需求原文（R-n）、产品意图、范围、模块清单、模块边界（B-n）、项目验收标准（PA-n） | pm |
-| `project/attention.md` | 需要用户处理的事：待确认的问题（附推荐答案）、无法验证的项、遗留建议 | pm |
+| `project/attention.md` | 需要用户处理的事（待确认的问题附推荐答案、无法验证的项），以及 pm 按【遗留分诊】自己处理的记录（自修清单、待核对、已自行处理） | pm |
+| `project/workflow-feedback.md` | 多 agent 工作流本身的问题（给工作流维护者，不问用户） | pm |
 | `project/feedback.md` | 用户在门禁中的意见原话及去向 | pm |
 | `project/conventions.md` | 协作规范、约束清单 | pm |
 | `project/environment.md` | 环境、命令、冒烟测试、结合测试、共享文件、合并方式、合并门禁、约束落实、截图 | baseline 模块 agent（mod:baseline 或 mod:baseline-fix-<n>） |

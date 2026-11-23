@@ -117,6 +117,7 @@ guided 再加：
 - **升级**：在新版仓库中运行 `python kandev/ma.py upgrade --home <home>`（先 `--dry-run` 看会改什么），再在 `<home>` 中 `diff` + `apply`。各版本要注意的事（包括守护 prompt 有没有变、要不要重新交接）见 [../CHANGELOG.md](../CHANGELOG.md)。
 - **改答案**：`ma.py answer --set key=value`（可改 profiles、guard_automation、python、kandev_url、setup_style、model_strategy、vendors、reviewer_cross_vendor 和 `project_defaults.*`；workspace 和安装方式要改就重新安装）。
 - 部署后按 [AGENTS.md](../AGENTS.md)「B. 验收部署」核对。
+- **`doctor`** 不带 `--offline` 时连 Kandev 核对：已部署的 workflow 与本目录一致、守护 automation 和心跳；三套 workflow 里还有标题以 `【部署验收临时】`（`ma.py` 的 `ACCEPT_TMP_PREFIX`）开头的任务时给 WARN，列出标题、id 和所在步骤：这是验收 B3 建的临时任务没删，请用户删除（脚本不删）。
 
 内部实现：`ma.py apply` 调用 `build_workflows.py apply`，它按 W3 → W2 → W1 的顺序导入（后者的 prompt 里要写入前者的步骤 ID），先不带 profile 导入，再按 ID 逐步绑定 profile，最后写出 ids 文件。
 
