@@ -19,6 +19,7 @@
 - **等待开发收到合并的 REPORT 后先用 `git merge-base --is-ancestor` 核对**，提交确实在模块分支上才记 merged。
 - **合并步骤的 REPORT / ESCALATE 全文内联在 prompt 里**，不再为一条消息去读 message.md；修正了 prompt 里一处没被解释的 `\n`。
 - **建任务的参数一行一个**（模块任务、开发子任务、修复模块任务），修复模块的参数成为具名块【建修复模块】。参数和取值没有增减。
+- **门禁和停下等人时主动提问**。「立项确认」「人工终审」进入时启动 pm（原来没有 prompt，只靠 on_turn_start 把用户消息带回上一步）。pm 用 `ask_user_question_kandev` 请用户批准、退回或先不决定，并一起问还没答复的 Q-n / U-n（终审时是「需要用户处理」各项），答复记入 feedback.md 后由 pm 移动任务；直接拖动仍然有效。新增共享块【等用户】，给 W1 的接收、pm、立项评审、项目验收、收尾合并：流程停下等用户时一律提问，不论 mode。unattended 只是不为取舍和歧义提问。原因：attended 的测试项目评审通过后在「立项确认」停了约 1.5 小时，Q-1、Q-2、U-1 只写在回复正文里，没有待答的提问，守护也不告警，用户不知道在等自己。代价：门禁多一轮 pm 会话；「调度」里不阻塞项目的事（守护没在运行）仍只登记 attention.md，因为提问会阻塞常驻会话。升级：`ma.py apply` 就地更新 W1（两个门禁新增 prompt，删掉 on_turn_start）；已经停在门禁的任务不会自动收到新 prompt，需要拖出再拖回，或照常直接拖动。守护 prompt：无变化。
 - **「接收」原样放行前做两项检查**（仓库存在且是 git 仓库；模板目录有 README.md，否则改用安装目录的模板）。
 - **评审者不再读 pm 的角色卡**；不发消息的步骤（接收、收尾合并）不再带【发消息】，不给模块发消息的步骤不再带"带 session_id"那一段。
 - **管理目录的 JSON 模板删掉没有读者或写者的字段**：tasks.json 的 `branch`、`updated`、`refs`、`passes`、`review_rounds`；registry.json 的 `kandev_ids`、`agents[].status`、守护条目；status.json 的 `done`、`total`、`last_report`、`blocked_reason`、`open_decisions`。status.json 新增 `misrouted` 和模块状态的取值说明（planned / active / done / dropped）。只影响新启动的项目。

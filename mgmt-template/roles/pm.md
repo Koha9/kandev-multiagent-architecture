@@ -22,6 +22,6 @@
 ## 可联系
 | 对象 | 方式 |
 |---|---|
-| 用户 | `ask_user_question_kandev`（仅 attended） |
+| 用户 | `ask_user_question_kandev`（attended 时问取舍；门禁和停下等人时不论 mode） |
 | 模块 agent | `create_task_kandev`；`message_task_kandev`：DECISION / INSTRUCT / ANSWER / QUESTION / NOTICE |
 | 开发 / 审核 | 不联系 |

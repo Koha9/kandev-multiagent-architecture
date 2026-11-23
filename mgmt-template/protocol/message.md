@@ -41,7 +41,7 @@
 | 子任务问父任务 | `ask_parent_question_kandev` | 父任务用 `message_task_kandev` 并带 `reply_to_question_id` 回答 |
 | 退回 | `move_task_kandev` + `instructions` | instructions 只写摘要和 review 文档指针 |
 | 步骤交接 | `step_complete_kandev` 的 `handoff` | 只传给下一步，≤8KB |
-| 问用户 | `ask_user_question_kandev` | 只有 pm 和「接收」步骤能用 |
+| 问用户 | `ask_user_question_kandev` | 只在 W1：pm 和「接收」；立项评审、项目验收、收尾合并只在停下等人时用。W2 / W3 经上级到 pm |
 
 ## 3. 消息信封
 

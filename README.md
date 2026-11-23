@@ -39,7 +39,7 @@
 
 ![架构图：W1 项目管理、W2 模块管理、W3 开发三层，加上管理目录和守护](docs/architecture.svg)
 
-黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；三套 workflow 各自的流程图和 agent 之间允许的消息路径见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
+黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准；进入门禁时 pm 会主动向你提问。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；三套 workflow 各自的流程图和 agent 之间允许的消息路径见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
 
 ## 怎么使用
 
@@ -104,7 +104,7 @@
 - Kandev 看板：每个任务在哪一步。
 - `<mgmt_root>/project/attention.md`：需要你决定的事。
 - `<mgmt_root>/agents/guard/stage.md`：现在在等谁。
-- 「立项确认」「人工终审」：把任务拖到下一步表示批准；在任务里发消息表示带着意见退回。
+- 「立项确认」「人工终审」：进入时 pm 会向你提问（批准 / 退回修改 / 先不决定），并一起问需要你决定的各项。也可以不等提问，直接把任务拖到下一步表示批准，或在 pm 会话里发消息带着意见退回。其他需要你处理才能继续的情况，W1 的 agent 也会用提问通知你。
 
 ## 文档地图
 

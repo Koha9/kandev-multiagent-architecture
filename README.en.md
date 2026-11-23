@@ -106,7 +106,7 @@ To see what the workflows look like first: [kandev/export/](kandev/export/README
 - The Kandev board: which step each task is in.
 - `<mgmt_root>/project/attention.md`: decisions you need to make.
 - `<mgmt_root>/agents/guard/stage.md`: who the system is waiting on.
-- Plan approval (立项确认) and final human review (人工终审): drag the task to the next step to approve; send a message in the task to send it back with notes.
+- Plan approval (立项确认) and final human review (人工终审): on entry the pm asks you (approve / send back / decide later), together with the items that need your decision. You can also skip the question: drag the task to the next step to approve, or send a message in the pm session to send it back with notes. Whenever a W1 step has to stop and wait for you, it asks you the same way.
 
 ## Documentation map
 

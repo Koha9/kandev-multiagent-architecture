@@ -78,11 +78,11 @@ The `[TASK v1]` header of the pm task sets `mode: attended | unattended`; module
 | 0 | Intake（接收） | intake | Entry. A complete `[TASK v1]` header passes unchanged; otherwise derive what can be derived, ask the user for the rest and rewrite the task description | Completion signal → 1 |
 | 1 | Planning（立项规划） | pm | Initialize the management directory; write the charter (requirements R-n, module list, module boundaries B-n, project acceptance criteria), conventions, ADRs. No code | Completion signal → 2 |
 | 2 | Plan review（立项评审） | plan_auditor | Independent review of the charter with a requirement coverage table | Send back to 1 (at most twice); pass → 3 when attended or plan_only, → 4 when unattended |
-| 3 | Plan approval（立项确认） | human | Gate | Drag to 4 = approve; send a message = back to 1 with notes |
+| 3 | Plan approval（立项确认） | pm + human | Gate: the pm asks the user to approve or send back | Approve → 4; send back → 1; decide later → stays (dragging to 4 also approves) |
 | 4 | Module dispatch（模块下发） | pm | Create the modules not yet created (baseline first, integration-test last), then dispatch pending fix items and final-review notes as fix modules | Completion signal → 5 |
 | 5 | Scheduling（调度） | pm | Long-running, routing only: reports, escalations, questions, alerts | When all modules are done the agent moves itself to 6 |
 | 6 | Project acceptance（项目验收） | auditor | Merge all module branches into the integration branch, run all tests, check every acceptance criterion and every R, write the final report | No fail (or still failing the third time) → 7; fail → 4 |
-| 7 | Final human review（人工终审） | human | Gate | Drag to 8 = approve; send a message = back to 4 with notes |
+| 7 | Final human review（人工终审） | pm + human | Gate: the pm asks the user to approve or send back, plus the open items from the final report | Approve → 8; send back → 4; decide later → stays (dragging to 8 also approves) |
 | 8 | Final merge（收尾合并） | mechanical | Merge the integration branch into the base branch, run the smoke test, clean up | Completion signal → 10 |
 | 9 | Refresh（刷新） | pm | Reset the context, then move back to the step it came from | The agent moves itself |
 | 10 | Done（完成） | — | Task completed. Must be the last step | — |
