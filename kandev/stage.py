@@ -1,103 +1,58 @@
 """阶段分类：从 Kandev 的结构化状态确定性地判断每个任务"现在在等谁"，生成告警（守护用）。
 
+规则（分类的先后、阈值、每个信号发给谁、去重与升级、用量上限、自动停用）只有一份给人看的说明：
+mgmt-template/roles/guard.md。代码里对应的是 classify（先后）、SIGNALS（发给谁、是否升级、建议）和 evaluate（去重、升级）。
+改规则时这几处和 tests/test_stage.py 一起改；check_docs.py 会核对 guard.md 里的信号与 SIGNALS 一致。
+
 一个 workspace 只需要一个守护：脚本自己发现所有进行中的项目，不需要按项目配置。
   - 项目 = 「多Agent · 项目管理」中未完成的任务（pm 任务）；mgmt_root 取自它描述中的 [TASK v1] 头
   - 模块任务按 [TASK v1] 头的 pm / parent 归到项目；开发任务按 parent（模块任务）归到项目
   - 管理目录已初始化（有 README.md）时，写 <mgmt_root>/agents/guard/stage.md；未初始化时不写，避免干扰立项规划
 
 用法：
-  python stage.py [--ids kandev_ids.json] [--json] [--disable-when-done]        # 所有进行中的项目
+  python stage.py [--ids kandev_ids.json] [--json] [--disable-when-done]        # 所有进行中的项目（守护 automation 这样调用）
+  python stage.py --dry-run                                                     # 人工查看：不写去重状态、心跳和 stage.md
   python stage.py --mgmt-root <管理目录> [--json]                               # 只看一个项目
   python stage.py --snapshot snapshot.json --now 2026-11-09T05:00:00+00:00 [--json]   # 离线测试，不连 Kandev
-去重状态存在 --state-dir（默认 kandev/guard_state/，不提交），按 pm 任务 id 分文件。
-每次（非离线）运行都写心跳 <state-dir>/last_run.json（时间、项目、告警数），用来确认守护还在运行。
 
-用量上限：最新会话停在 WAITING_FOR_INPUT / IDLE 时，读该会话最新的几条消息（只看类型和 metadata）；最新一条是
-provider_error.error_kind=rate_limit 的 status 消息 → 判为"到达用量上限"。重置时间从消息文字（"resets 9pm (Asia/Tokyo)"）
-解析，解析不了按出错后 60 分钟。恢复方式与用户手动恢复相同：向同一个会话发一条消息（守护用 message_task_kandev
-带 session_id），不移动任务、不新建会话。进程退出类错误（metadata 带 session.recover 动作）不属于这一类，不自动恢复。
-
-自动停用（--disable-when-done，只由守护 automation 传入）：上次心跳在 60 分钟内且当时有进行中的项目，这次一个都没有，
-并且三套 workflow 中没有运行中或停在用量上限的会话 → 通过外部 MCP 把名为「多Agent 守护」的 automation 设为
-enabled=false，并输出一行 signal=guard_disabled。启动新项目前需要重新启用。
-
-规则表（从上到下，第一条匹配的生效；与 mgmt-template/roles/guard.md「阶段分类」一致）：
-  0 等上级    开发任务在「完成」/ COMPLETED，但它在 tasks.json 中的 status 不是 merged / dropped / failed，停留 ≥10 分钟，
-              且模块任务在「等待开发 / 刷新 / 模块规划」→ 告警上级 child_unrecorded（合并的 REPORT 没有送达时的兜底）。
-              tasks.json 中查不到该任务时不告警；模块任务在其他步骤或已完成时只在 stage.md 显示"完成（tasks.json 未登记）"。
-              since 是守护第一次看到它在这一步的时间，所以实际要连续两次巡检（20–40 分钟）都看到才告警，
-              覆盖了合并 → 模块 agent 处理 REPORT 之间的正常间隔
-  1 完成      步骤=完成，或任务 state=COMPLETED
-  2 等人      有待处理的权限请求                         → 只写进 stage.md，不发告警
-  3 等人      有待处理的提问（ask_user_question）        → 同上
-  4 等人      步骤=立项确认 / 人工终审                    → 同上
-              W1「接收」（v3.3）中的任务还没有 [TASK v1] 头（mgmt_root 为空）：按项目列出，不写 stage.md；
-              在等用户回答时归第 3 条，空闲未推进时归第 9 条的例外（只给人看）；会话失败或疑似卡住也只给人看
-              （这一步没有上级，接收会话也不认识 KMSG），归为"等人：接收会话失败 / 接收疑似卡住"
-  4a 等上限   最新会话停在用量上限，已过重置时间 2 分钟   → 恢复该任务自己 limit_resume（不告警上级）
-  4b 等上限   最新会话停在用量上限，还没到重置时间        → 只写进 stage.md
-  4c 等上级   有一个不是最新的会话 RUNNING 但 ≥45 分钟没有更新（那一轮不会结束，发给它的消息一直排队）；
-              模块任务完成后也检查它的全部会话                → 告警 pm session_stuck（v3.3.3；不升级为 pm_unresponsive）
-  4d 等上级   开发任务未结束而它的模块任务已完成，停留 ≥10 分钟 → 告警 pm parent_done（v3.3.3）
-  5 等上级    步骤=等待决策，停留 ≥10 分钟                → 告警上级 decision_pending（先于 9，不会再判为空闲未推进）
-  6 等上级    最新会话 FAILED / CANCELLED                 → 告警上级 session_failed
-  6a 等上级   任务 state=SCHEDULING、在 agent 步骤、没有运行中的会话、不是 WIP 排队，停留 ≥10 分钟
-              → 开发任务告警上级 session_not_started（Kandev 准备会话失败后会静默停在这里）；W1 / W2 任务只写进 stage.md
-              （"等人：会话未启动"）。排在第 9 条之前：否则上一步骤留下的空闲会话会被误判为 idle_no_signal
-  7 等上级    步骤=待开发，前置失败                       → 告警上级 hold_broken
-  8 等上级    步骤=待开发，前置全部完成，停留 ≥10 分钟    → 告警上级 hold_ready
-              前置关系取自 <mgmt_root>/modules/*/tasks.json（含 -fix-<n> 修复模块）：任务的 blocked_by 中每个任务
-              status 都是 merged / dropped → 完成；有 status=failed → 失败。v3.1 任务在 Kandev 里设置的 blocked_by
-              仍然有效（FAILED / CANCELLED 为失败，未到「完成」为未完成）。两种来源任一表明未完成就不放行；
-              读不到 tasks.json 或解析失败时，只剩 Kandev 来源；两者都没有 → 只在 stage.md 显示，不告警
-  8a 等上级   步骤=开发，前置未满足、还没有会话，停留 ≥10 分钟 → 告警上级 dev_blocked（v3.2 不应出现，多见于 v3.1 任务）
-  9 等上级    要求完成信号的步骤中会话已空闲 ≥10 分钟     → 告警上级 idle_no_signal
-              例外：W1（项目管理）的这类步骤，会话属于 pm 以外的评审者 / 机械 agent，发给 pm 没人处理 →
-              归为"等人：空闲未推进"，只写进 stage.md（步骤和空闲分钟数），不告警
- 10 等上级    会话 RUNNING 但 ≥45 分钟没有更新            → 告警上级 running_stale
- 11 排队      在设了 WIP 的步骤但未获准入，或在 agent 步骤还没有会话
- 12 待开发    步骤=待开发（前置未完成）
- 13a 常驻     步骤=调度 / 等待开发，常驻会话自上次上下文重置以来已被唤醒 ≥15 次
-              → 告警任务自己 session_long（带 session_id，建议 refresh；v3.3.3）。唤醒 = 该会话里用户侧的 message
-              （步骤 prompt、KMSG、用户输入）；重置标记 = 内容以 "Context reset" 开头的 status。只读消息的类型、作者和这个标记
- 13 常驻      步骤=调度 / 等待开发
- 14 运行中    其他
-上级：开发任务 → [TASK v1] 头 parent 中的模块任务；模块任务 → pm；pm → pm 自己。limit_resume、session_long 发给任务自己；
-session_stuck、parent_done 一律发给 pm。发给模块任务的告警带 session_id（modules/*/tasks.json 顶层的 module_session_id）。
-连不上 Kandev 时退出码 1：last_run.json 记连续失败次数，上次巡检过的各项目 stage.md 标题下加一行"守护故障"（note_failure）。
-v3.3.2 新增的信号（child_unrecorded、session_not_started）的 suggest 是完整的处理方法，旧版 prompt 的 agent 收到也能照做。
-同一任务的同一信号 60 分钟内只告警一次；pm 停在常驻步骤（调度）时，同一信号告警 60 分钟后仍未消除 → pm_unresponsive
-（守护把 pm 移到「刷新」，instructions 写「刷新返回：<return_step>」）。pm 在其他步骤不升级，到期后重发原信号。
-limit_resume 不升级为 pm_unresponsive：恢复后又碰到上限，就等新的重置时间，且距上次恢复 ≥60 分钟再试。
---json 时标准输出每行一个要发出的告警（带 project、mgmt_root、journal；pm_unresponsive 另带 workflow_id 和
-refresh_step_id；pm_unresponsive 另带 return_step = 当前步骤名；limit_resume 另带 session_id 和 message）；否则打印给人看的摘要。没有进行中的项目且没有停用守护时
-什么都不输出。只用标准库。
+输出：--json 时标准输出每行一个要发出的告警（to_task、object、step、signal、value、threshold、suggest、project、mgmt_root、
+journal；limit_resume 另带 session_id 和 message，pm_unresponsive 另带 return_step、workflow_id、refresh_step_id，
+发给模块任务或常驻会话的另带 session_id）；否则打印给人看的摘要。退出码 1：连不上 Kandev，或有项目巡检失败。
+状态：去重状态在 --state-dir（默认 kandev/guard_state/，不提交），按 pm 任务 id 分文件；心跳是同目录的 last_run.json
+（非缺省的 ids 文件是 last_run.<workspace 前 8 位>.json，见 beat_name）。不带 --dry-run 的运行会把看到的告警记为已发。
+只用标准库。
 """
 import argparse
 import json
 import os
 import re
 import sys
+from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import slots  # noqa: E402
 
-GATES = {"立项确认", "人工终审"}
+PARAMS = slots.params()   # rules/params.json，可被 custom/rules/params.json 覆盖
+
+GATE_PLAN = "立项确认"
+GATES = {GATE_PLAN, "人工终审"}
 RESIDENT = {"调度", "等待开发"}
-HOLD, DECISION, DONE, INTAKE = "待开发", "等待决策", "完成", "接收"
-# v3.2 删除了 W1 的「环境基线」；仍在 v3.1 旧 workflow 里运行的项目可能有任务停在这一步，按要求完成信号的步骤处理。
-# 步骤名只用于分类，不认识的步骤名落到"运行中"，不会报错。
-LEGACY_SIGNAL_STEPS = {"环境基线"}
+HOLD, DECISION, DONE, INTAKE, MOD_PLAN = "待开发", "等待决策", "完成", "接收", "模块规划"
+WAIT_PREREQ = "排队：等前置模块"         # W2 任务在「模块规划」、前置模块没有全部完成（不告警；数值是未完成的前置模块标题）
+# 步骤名只用于分类，不认识的步骤名落到"运行中"，不会报错。与 build_workflows.py 的一致性由 check_docs.py「步骤名同步」核对。
 SIGNAL_STEPS = {"接收", "立项规划", "立项评审", "模块下发", "项目验收", "收尾合并",
-                "模块规划", "验收调查", "开发", "审核", "合并"} | LEGACY_SIGNAL_STEPS
+                "模块规划", "验收调查", "开发", "审核", "合并"}
 AGENT_STEPS = SIGNAL_STEPS | RESIDENT | {"刷新"}
 IDLE_STATES = {"WAITING_FOR_INPUT", "IDLE", "COMPLETED"}
 LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会话的状态（实测为 WAITING_FOR_INPUT）
 ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
+T_GATE = 30                               # autonomy 2 的任务在「立项确认」的提问挂了这么久（最新会话没有更新）→ gate_timeout（0 = 关闭）
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
-T_WAKES = 15                              # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 相同）
+T_WAKES = PARAMS["refresh_wakes"]         # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 同一个参数）
+globals().update({k: v for k, v in PARAMS.get("guard", {}).items() if k in slots.GUARD_PARAMS})   # 用户定制的守护阈值（分钟）
 WAKE_PAGE, WAKE_PAGES = 100, 5            # 数唤醒次数时每页条数、最多翻几页（实测 Kandev 每页只返回约 40 条，15 次唤醒约 1–2 页）
 FAIL_MARK = "> **守护故障**"              # note_failure 写进 stage.md 的那一行的开头
 RESET_MARK = "Context reset"             # Kandev 重置上下文时写入会话的 status 消息的开头（实测："Context reset — new conversation started"）
@@ -109,19 +64,17 @@ GUARD_NAME = "多Agent 守护"
 RESUME_TEXT = ("continue\n\n（守护 guard：本会话上一轮因到达用量上限而中断，上限已于 {reset} 重置。请从中断处继续当前步骤："
                "先核对 NOW / now、磁盘与 git 的实际状态，已经完成的操作不要重复。）")
 UUID = r"[0-9a-fA-F-]{36}"
+BEAT_NAME = "last_run.json"              # 心跳文件名；main() 按 workspace 改（见 beat_name）
+KANDEV_URL = None                        # main() 从 ids 文件的 _meta.url 取；None 表示默认地址
 
 
 # ------------------------------------------------------------------ parsing helpers
 def ts(s):
     if not s:
         return None
-    s = s.replace("Z", "+00:00")
-    if "." in s:
-        head, tail = s.split(".", 1)
-        tz = tail[tail.index("+"):] if "+" in tail else "+00:00"
-        frac = "".join(c for c in tail.split("+")[0] if c.isdigit())[:6]
-        s = f"{head}.{frac}{tz}"
-    dt = datetime.fromisoformat(s)
+    m = re.match(r"^(.*?)(\.\d+)?(Z|[+-]\d\d:?\d\d)?$", s.strip())
+    head, frac, tz = m.group(1), m.group(2) or "", m.group(3) or ""
+    dt = datetime.fromisoformat(head + frac[:7] + ("+00:00" if tz == "Z" else tz))   # 小数秒截到 6 位
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
@@ -135,17 +88,43 @@ def header_task(desc, name):
     return m.group(1) if m else None
 
 
-def prereq_state(t, by_id):
+def prereq_state(t):
     """任务前置的状态：(是否有前置信息, 是否有失败的前置, 前置是否全部完成)。
-    两个来源：t["blocker_status"]（tasks.json 中 blocked_by 各任务的 status，None 表示读不到）、
-    t["blockers"]（v3.1：Kandev 中的前置任务 id，用它们的 step / state 判断）。"""
-    statuses, kblockers = t.get("blocker_status") or [], t.get("blockers") or []
-    known = bool(statuses or kblockers)
-    kb = [by_id.get(b) for b in kblockers]
-    failed = "failed" in statuses or any(b and b["state"] in ("FAILED", "CANCELLED") for b in kb)
-    done = (all(s in PREREQ_DONE for s in statuses)
-            and all(b and (b["step"] == DONE or b["state"] == "COMPLETED") for b in kb))
-    return known, failed, done and known
+    来源只有 t["blocker_status"]：tasks.json 中 blocked_by 各任务的 status（[] = 登记了、没有前置；None = 查不到这个任务
+    或读不到 tasks.json）。W3 任务不设 Kandev 的 blocked_by（docs/workflow.md 第 8、13 节），所以不看 Kandev 的依赖。"""
+    statuses = t.get("blocker_status")
+    if statuses is None:
+        return False, False, False
+    return True, "failed" in statuses, all(x in PREREQ_DONE for x in statuses)
+
+
+def module_name(t):
+    s = header_field(t.get("description"), "scope")
+    return s[4:].strip() if s.startswith("mod:") else ""
+
+
+def module_prereqs(t, by_id):
+    """W2 任务的前置模块任务（by_id 中的任务 id）。两个来源取并集：
+      - t["deps"]：Kandev 返回的依赖（collect 从任务的 blocked_by / depends_on 取；没有这个字段时为 None）
+      - 按「模块下发」的建任务规则从 [TASK v1] 头推导（Kandev 不返回依赖时也能判断）：同一个 pm 下，
+        baseline 和修复模块（scope 含 -fix-）没有前置；integration（kind 以 integration 开头）依赖其他全部非修复模块；
+        其余模块依赖 baseline，以及 branch 行 `base mod/<模块>` 指向的那个模块
+    查不到的 id（不属于这个项目）忽略。"""
+    out = [d for d in (t.get("deps") or []) if d in by_id and d != t["id"]]
+    desc = t.get("description")
+    name, kind = module_name(t), header_field(desc, "kind")
+    if not name or kind == "baseline" or "-fix-" in name:
+        return out
+    pm = header_task(desc, "pm")
+    mods = {module_name(m): m["id"] for m in by_id.values()
+            if m["workflow"].endswith("模块管理") and m["id"] != t["id"] and module_name(m)
+            and header_task(m.get("description"), "pm") == pm}
+    if kind.startswith("integration"):
+        derived = [i for n, i in mods.items() if "-fix-" not in n]
+    else:
+        base = re.search(r"\bbase\s+mod/([\w.-]+)", header_field(desc, "branch"))
+        derived = [mods[n] for n in ("baseline", base and base.group(1)) if n in mods]
+    return out + [i for i in derived if i not in out]
 
 
 def mins(a, b):
@@ -237,16 +216,73 @@ def stuck_session(sessions, now, skip):
     return None
 
 
+# ------------------------------------------------------------------ signals
+# 信号表：每个信号发给谁、会不会升级、带哪个会话 id、建议怎么处理，都只写在这里。
+# 新增信号：在这里加一行，在 classify 里加一个分支，在 mgmt-template/roles/guard.md 的两张表里各加一行
+# （check_docs.py「信号表」会核对），在 tests/test_stage.py 的 PRIORITY 里加一行。
+#   to        SUPERIOR  被告警对象的上级（见 route：开发任务 → 模块任务；模块任务 → pm；pm → pm 自己）
+#             SELF      任务自己
+#             TO_PM     不论对象是谁都发给 pm（上级模块可能已完成，或处理不了）
+#   escalate  告警发给了 pm 自己、pm 停在常驻步骤、信号自上次告警起一直没消除 → T_DEDUP 分钟后改发 pm_unresponsive
+#   suggest   告警里的建议。只写一个词的是各角色 prompt 里已有的处理方法；写成整段的是完整的处理方法，
+#             旧版 prompt 的 agent 收到也能照做
+#   session   告警带的 session_id 取自任务的哪个字段（"limit" / "long"，见 collect）；None = 不带，
+#             发给模块任务时由 evaluate 补上模块 agent 的会话 id
+#   message   守护原样发到该会话的消息（只有用量上限恢复用）
+Sig = namedtuple("Sig", "to escalate suggest session message", defaults=(None, None))
+SUPERIOR, SELF, TO_PM = "superior", "self", "pm"
+ESCALATED, DISABLED = "pm_unresponsive", "guard_disabled"     # 不由 classify 产生的两个信号：evaluate 升级、main 自动停用
+SIGNALS = {
+    "child_unrecorded": Sig(SUPERIOR, True, (
+        "该开发任务已在「完成」，但 tasks.json 没有登记（合并的 REPORT 可能没有送达）："
+        "`git log mod/<模块> --oneline --grep \"^<任务id>\"` 有提交 → tasks.json 记 merged，"
+        "再检查 held 任务能否放行；没有提交 → 查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm，不要猜 merged")),
+    "limit_resume": Sig(SELF, False, "continue", session="limit", message=RESUME_TEXT),
+    "session_stuck": Sig(TO_PM, False, (
+        "该任务有一个会话一直 RUNNING 但很久没有输出（数值是会话 id 前 8 位和分钟数），那一轮不会自己结束，"
+        "发给这个会话的消息会一直排队。agent 取消不了它：在 attention.md 登记一条，请用户在 Kandev 界面打开该任务的"
+        "这个会话并取消当前这一轮；在此之前不要再给这个会话发消息，要它做的事等取消后重发")),
+    "parent_done": Sig(TO_PM, False, (
+        "该开发任务还没结束，但它的模块任务已经完成（数值是模块任务标题），没有模块 agent 会处理它的 REPORT、提问和放行，"
+        "也不能给已完成的模块发指令。它如果是多余的 → 请用户取消；它的工作还需要 → 为这个模块建修复模块任务接手，"
+        "契约写明接手这个任务（任务 id、分支），原任务请用户取消")),
+    "gate_timeout": Sig(SELF, False, (
+        "立项确认的提问已挂了很久（见数值，分钟）而用户没有答复：按「立项确认」步骤 prompt 第 6 步处理"
+        "（评审通过、未答复的项都有推荐答案且不涉及额度授权、删除数据、删减需求 → 按推荐答案继续并登记\"默认采用\"；否则保持停下）")),
+    "decision_pending": Sig(SUPERIOR, True, "unblock"),
+    "session_failed": Sig(SUPERIOR, True, "unblock"),
+    "session_not_started": Sig(SUPERIOR, True, (
+        "该任务进入当前步骤后一直没有启动会话（Kandev 停在 SCHEDULING）：先 move_task_kandev 到"
+        "「等待决策」再移回当前步骤一次；再次收到本告警 → 新建任务取代它（workspace_mode=new_workspace、"
+        "autopilot=true、base_branch=mod/<模块>），原任务移到「完成」并在 tasks.json 标 failed")),
+    "hold_broken": Sig(SUPERIOR, True, "split"),
+    "hold_ready": Sig(SUPERIOR, True, "unblock"),
+    "idle_no_signal": Sig(SUPERIOR, True, "unblock"),
+    "running_stale": Sig(SUPERIOR, True, "refresh"),
+    "dev_blocked": Sig(SUPERIOR, True, "unblock"),
+    "session_long": Sig(SELF, True, (
+        "refresh：本会话自上次上下文重置以来被唤醒的次数已到上限（见数值）。处理完手头的事件后，把未落盘的状态写入 NOW.md，"
+        "在 NOW「注意」节写一行 `刷新返回：<当前步骤名>`，再 move_task_kandev 把本任务移到本 workflow 的「刷新」"), session="long"),
+}
+
+
+def verdict(category, signal=None, value=None, threshold=None, due=True):
+    """classify 的返回值。signal 必须在 SIGNALS 里（写错或漏登记时立即报错，不等到阈值满足的那一次）；
+    due=False：条件成立但停留时间还没到阈值，这次不告警（signal 记为 None）。"""
+    if signal is not None and signal not in SIGNALS:
+        raise KeyError(f"classify 给出了信号表 SIGNALS 里没有的信号：{signal}")
+    return {"category": category, "signal": signal if due else None, "value": value, "threshold": threshold}
+
+
 # ------------------------------------------------------------------ classification (pure)
 def classify(t, now, by_id):
     """t: dict(id, title, workflow, step, state, sessions[{state, updated_at}], perm, question, wip_admitted,
-    wip_step, blockers[kandev ids], since). Returns dict(category, signal, value, threshold) — signal None = no alert."""
+    wip_step, blocker_status, own_status, limit, long, module_session, deps, since). Returns dict(category, signal, value, threshold) — signal None = no alert.
+    规则从上到下，第一条匹配的生效；给人看的规则表在 mgmt-template/roles/guard.md「阶段分类」，两处一起改。"""
     step, s0 = t["step"], (t["sessions"][0] if t["sessions"] else None)
     in_step = mins(t.get("since"), now)
     idle = mins(ts(s0.get("updated_at")), now) if s0 else -1
-
-    def r(category, signal=None, value=None, threshold=None):
-        return {"category": category, "signal": signal, "value": value, "threshold": threshold}
+    r = verdict
 
     if step == DONE or t["state"] == "COMPLETED":
         stuck = stuck_session(t["sessions"], now, 0)     # 只有模块任务完成后还会带着会话列表（见 collect）
@@ -256,11 +292,17 @@ def classify(t, now, by_id):
         if t["workflow"].endswith("开发") and own is not None and own not in RECORDED:
             parent = by_id.get(header_task(t.get("description"), "parent"))
             if parent and not is_done(parent) and parent["step"] in MOD_LIVE:
-                return r("等上级：完成未登记", "child_unrecorded" if in_step >= T_IDLE else None, own or "(空)", T_IDLE)
+                return r("等上级：完成未登记", "child_unrecorded", own or "(空)", T_IDLE, due=in_step >= T_IDLE)
             return r("完成（tasks.json 未登记）", value=own or "(空)")
         return r("完成")
     if t.get("perm"):
         return r("等人：权限请求", value=t["perm"])
+    # 立项确认超时：只在 pm 的门禁提问还挂着（用户没有答复）时成立，时间从最新会话最后一次更新算起，
+    # 所以"先不决定"（没有待答提问）和刚发出下一批提问（会话刚更新）都不会触发。排在"提问"之前。
+    if (step == GATE_PLAN and T_GATE and t.get("question") and idle >= T_GATE
+            and header_field(t.get("description"), "autonomy") == "2"
+            and header_field(t.get("description"), "plan_only") != "true"):
+        return r("等人：立项确认（超时）", "gate_timeout", idle, T_GATE)
     if t.get("question"):
         return r("等人：提问")
     if step in GATES:
@@ -277,29 +319,35 @@ def classify(t, now, by_id):
     if t["workflow"].endswith("开发"):
         parent = by_id.get(header_task(t.get("description"), "parent"))
         if parent and is_done(parent):
-            return r("等上级：模块已完成", "parent_done" if in_step >= T_IDLE else None, parent["title"], T_IDLE)
+            return r("等上级：模块已完成", "parent_done", parent["title"], T_IDLE, due=in_step >= T_IDLE)
     if step == INTAKE and s0 and s0.get("state") in ("FAILED", "CANCELLED"):
         return r("等人：接收会话失败", value=s0["state"])
     if step == INTAKE and s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
         return r("等人：接收疑似卡住", value=idle)
     if step == DECISION:
-        return r("等上级：等待决策", "decision_pending" if in_step >= T_DECISION else None, in_step, T_DECISION)
+        return r("等上级：等待决策", "decision_pending", in_step, T_DECISION, due=in_step >= T_DECISION)
     if s0 and s0.get("state") in ("FAILED", "CANCELLED"):
         return r("等上级：会话失败", "session_failed", s0["state"], "-")
     if (t["state"] in SCHEDULING_STATES and step in AGENT_STEPS and not (s0 and s0.get("state") in ACTIVE_STATES)
             and not (t.get("wip_step") and t.get("wip_admitted") is False)):
         if not t["workflow"].endswith("开发"):     # W1 / W2 没有「等待决策」可用来重启会话：只给人看
             return r("等人：会话未启动", value=f"{step}，{in_step} 分钟")
-        return r("等上级：会话未启动", "session_not_started" if in_step >= T_IDLE else None, step, T_IDLE)
-    known, pre_failed, pre_done = prereq_state(t, by_id)
+        return r("等上级：会话未启动", "session_not_started", step, T_IDLE, due=in_step >= T_IDLE)
+    known, pre_failed, pre_done = prereq_state(t)
     if step == HOLD:
         if not known:
             return r("待开发（tasks.json 中查不到前置）")
         if pre_failed:
-            return r("等上级：前置失败", "hold_broken", "前置 failed / FAILED / CANCELLED", "-")
+            return r("等上级：前置失败", "hold_broken", "前置 failed", "-")
         if pre_done:
-            return r("等上级：可放行", "hold_ready" if in_step >= T_HOLD else None, in_step, T_HOLD)
+            return r("等上级：可放行", "hold_ready", in_step, T_HOLD, due=in_step >= T_HOLD)
         return r("待开发")
+    if (t["workflow"].endswith("模块管理") and step == MOD_PLAN
+            and not (s0 and s0.get("state") in ACTIVE_STATES)):
+        # Kandev 的 blocked_by 还没解除，但会话被提前启动了（例如 pm 给它发了消息）：空闲是在等前置，不是没推进
+        waiting = [by_id[i]["title"] for i in module_prereqs(t, by_id) if not is_done(by_id[i])]
+        if waiting:
+            return r(WAIT_PREREQ, value="、".join(waiting))
     if step in SIGNAL_STEPS and s0 and s0.get("state") in IDLE_STATES and idle >= T_IDLE:
         if t["workflow"].endswith("项目管理"):   # 会话是评审者 / 机械 agent / 等 pm 的，告警 pm 没人处理：只给人看
             return r("等人：空闲未推进", value=f"{step}，空闲 {idle} 分钟")
@@ -307,7 +355,7 @@ def classify(t, now, by_id):
     if s0 and s0.get("state") == "RUNNING" and idle >= T_STALE:
         return r("等上级：疑似卡住", "running_stale", idle, T_STALE)
     if step == "开发" and not s0 and known and not pre_done and t["workflow"].endswith("开发"):
-        return r("等上级：开发步骤前置未满足", "dev_blocked" if in_step >= T_IDLE else None, in_step, T_IDLE)
+        return r("等上级：开发步骤前置未满足", "dev_blocked", in_step, T_IDLE, due=in_step >= T_IDLE)
     if (t.get("wip_step") and t.get("wip_admitted") is False) or (step in AGENT_STEPS and not s0):
         return r("排队", value=in_step)
     if step in RESIDENT:
@@ -326,151 +374,127 @@ def route(t, pm_task):
     return t["id"]
 
 
-SUGGEST = {"dev_blocked": "unblock", "decision_pending": "unblock", "session_failed": "unblock", "hold_broken": "split",
-           "hold_ready": "unblock", "idle_no_signal": "unblock", "running_stale": "refresh", "limit_resume": "continue",
-           # v3.3.2 新增的信号：建议写成完整的处理方法，旧版 prompt 的模块 agent 收到也能照做
-           "child_unrecorded": ("该开发任务已在「完成」，但 tasks.json 没有登记（合并的 REPORT 可能没有送达）："
-                                "`git log mod/<模块> --oneline --grep \"^<任务id>\"` 有提交 → tasks.json 记 merged，"
-                                "再检查 held 任务能否放行；没有提交 → 查 NOW「未确认的意图」，仍不清楚就 ESCALATE 给 pm，不要猜 merged"),
-           "session_not_started": ("该任务进入当前步骤后一直没有启动会话（Kandev 停在 SCHEDULING）：先 move_task_kandev 到"
-                                   "「等待决策」再移回当前步骤一次；再次收到本告警 → 新建任务取代它（workspace_mode=new_workspace、"
-                                   "autopilot=true、base_branch=mod/<模块>），原任务移到「完成」并在 tasks.json 标 failed"),
-           # v3.3.3：同样写成完整的处理方法
-           "session_long": ("refresh：本会话自上次上下文重置以来被唤醒的次数已到上限（见数值）。处理完手头的事件后，把未落盘的状态写入 NOW.md，"
-                            "在 NOW「注意」节写一行 `刷新返回：<当前步骤名>`，再 move_task_kandev 把本任务移到本 workflow 的「刷新」"),
-           "session_stuck": ("该任务有一个会话一直 RUNNING 但很久没有输出（数值是会话 id 前 8 位和分钟数），那一轮不会自己结束，"
-                             "发给这个会话的消息会一直排队。agent 取消不了它：在 attention.md 登记一条，请用户在 Kandev 界面打开该任务的"
-                             "这个会话并取消当前这一轮；在此之前不要再给这个会话发消息，要它做的事等取消后重发"),
-           "parent_done": ("该开发任务还没结束，但它的模块任务已经完成（数值是模块任务标题），没有模块 agent 会处理它的 REPORT、提问和放行，"
-                           "也不能给已完成的模块发指令。它如果是多余的 → 请用户取消；它的工作还需要 → 为这个模块建修复模块任务接手，"
-                           "契约写明接手这个任务（任务 id、分支），原任务请用户取消")}
-SELF_SIGNALS = {"limit_resume"}   # 发给任务自己、不升级的信号
-SELF_ALERTS = {"session_long"}    # 发给任务自己的告警（带常驻会话的 session_id）；pm 不处理时照常升级为 pm_unresponsive
-PM_SIGNALS = {"session_stuck", "parent_done"}   # 不论对象是谁都发给 pm（上级模块可能已完成，或处理不了）；不升级为 pm_unresponsive
-
-
 def evaluate(tasks, now, state, pm_task):
-    """Returns (rows, alerts, new_state)."""
+    """Returns (rows, alerts, new_state)。new_state 每个任务一条：
+      step / since  所在步骤和守护第一次看到它在这一步的时间（换步骤后下面两项清空：算新的情况）
+      alerts        信号 -> 上次告警的时间。满 T_DEDUP 分钟才删除，信号中途消失也不删：
+                    时有时无的信号（空闲 ↔ 运行、恢复后又碰到上限）在 T_DEDUP 分钟内不会重发
+      streak        已告警、并且之后每次巡检都还在的那个信号（没有则为 None）。升级为 pm_unresponsive 要求它没有中断过"""
     by_id = {t["id"]: t for t in tasks}
     rows, alerts, new_state = [], [], {}
+    dedup = timedelta(minutes=T_DEDUP)
     for t in tasks:
         prev = state.get(t["id"], {})
-        since = prev.get("since") if prev.get("step") == t["step"] else None
+        same = prev.get("step") == t["step"]
+        since = prev.get("since") if same else None
         since = ts(since) if since else now
         t["since"] = since
         c = classify(t, now, by_id)
-        sent = {k: v for k, v in prev.get("alerts", {}).items() if prev.get("step") == t["step"]}
-        if c["signal"]:
-            last = ts(sent.get(c["signal"]))
-            own = c["signal"] in SELF_SIGNALS
-            to_self = c["signal"] in SELF_ALERTS
-            to_pm = c["signal"] in PM_SIGNALS
-            to_task = t["id"] if (own or to_self) else pm_task if to_pm else route(t, pm_task)
-            is_pm = to_task == t["id"] and not own and not to_pm and t["workflow"].endswith("项目管理")
-            if last is None or now - last >= timedelta(minutes=T_DEDUP):
-                signal = "pm_unresponsive" if (is_pm and last is not None and t["step"] in RESIDENT) else c["signal"]
+        cur, streak = c["signal"], None
+        sent = dict(prev.get("alerts") or {}) if same else {}
+        if cur:
+            sig = SIGNALS[cur]
+            last = ts(sent.get(cur))
+            # 旧版状态文件没有 streak：旧版在信号消失时清空 alerts，所以记录还在就说明一直没消除
+            unbroken = same and last is not None and prev.get("streak", cur) == cur
+            streak = cur if unbroken else None
+            if last is None or now - last >= dedup:
+                to_task = t["id"] if sig.to == SELF else pm_task if sig.to == TO_PM else route(t, pm_task)
+                escalated = (sig.escalate and unbroken and to_task == t["id"] and t["workflow"].endswith("项目管理")
+                             and t["step"] in RESIDENT)
                 al = {"to_task": to_task, "object": f"{t['title']} @ task {t['id']}", "step": t["step"],
-                      "signal": signal, "value": c["value"], "threshold": c["threshold"],
-                      "suggest": "refresh" if signal == "pm_unresponsive" else SUGGEST[c["signal"]]}
-                if signal == "pm_unresponsive":
+                      "signal": ESCALATED if escalated else cur, "value": c["value"], "threshold": c["threshold"],
+                      "suggest": "refresh" if escalated else sig.suggest}
+                if escalated:
                     al["return_step"] = t["step"]
-                if own:
-                    al.update({"session_id": t["limit"].get("session_id"), "message": RESUME_TEXT.format(reset=c["value"])})
-                if to_self and signal != "pm_unresponsive":
-                    al["session_id"] = (t.get("long") or {}).get("session_id")
-                # 发给模块任务的告警带上模块 agent 的会话 id：不带时消息进主会话，模块进过「验收调查」后那是验收者的
-                mod_session = (by_id.get(to_task) or {}).get("module_session")
-                if mod_session and not al.get("session_id") and signal != "pm_unresponsive":
-                    al["session_id"] = mod_session
+                else:
+                    if sig.session:
+                        al["session_id"] = (t.get(sig.session) or {}).get("session_id")
+                    if sig.message:
+                        al["message"] = sig.message.format(reset=c["value"])
+                    # 发给模块任务的告警带上模块 agent 的会话 id：不带时消息进主会话，模块进过「验收调查」后那是验收者的
+                    mod_session = (by_id.get(to_task) or {}).get("module_session")
+                    if mod_session and not al.get("session_id"):
+                        al["session_id"] = mod_session
                 alerts.append(al)
-                sent[c["signal"]] = now.isoformat()
-        else:
-            sent = {}
-        new_state[t["id"]] = {"step": t["step"], "since": since.isoformat(), "alerts": sent}
+                sent[cur], streak = now.isoformat(), cur
+        sent = {k: v for k, v in sent.items() if ts(v) and now - ts(v) < dedup}
+        new_state[t["id"]] = {"step": t["step"], "since": since.isoformat(), "alerts": sent, "streak": streak}
         rows.append({**c, "id": t["id"], "title": t["title"], "workflow": t["workflow"], "step": t["step"]})
     return rows, alerts, new_state
 
 
 # ------------------------------------------------------------------ data collection
-def load_blockers(mgmt_root):
-    """kandev task id -> [blocked_by 各任务的 status]，取自 modules/*/tasks.json（含 -fix-<n> 修复模块）。
-    blocked_by 中查不到的任务记为 None（视为未完成）。文件不存在或解析失败的模块跳过，不报错。"""
-    out = {}
+def read_json(path, default=None):
+    """读 JSON 文件；不存在、编码不对（带 BOM 可以）、内容损坏都返回 default，不抛错。"""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, obj):
+    """先写临时文件再替换：中途被杀不会留下半截文件。"""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def load_modules(mgmt_root):
+    """读一遍 modules/*/tasks.json（含 -fix-<n> 修复模块），返回：
+      blockers   kandev task id -> [blocked_by 各任务的 status]（查不到的任务记为 None，视为未完成）
+      statuses   kandev task id -> 该任务自己的 status（没有 status 字段记为 ""）
+      sessions   模块任务的 kandev task id -> 模块 agent 的会话 id（顶层 module_task_id / module_session_id）
+      unreadable 读不了或形状不对的模块名：这些模块的放行和未登记检查这次不生效，stage.md 里会提示
+    """
+    out = {"blockers": {}, "statuses": {}, "sessions": {}, "unreadable": []}
     mods = os.path.join(mgmt_root, "modules")
     if not os.path.isdir(mods):
         return out
-    for m in os.listdir(mods):
+    for m in sorted(os.listdir(mods)):
         p = os.path.join(mods, m, "tasks.json")
         if m.startswith("_") or not os.path.exists(p):
             continue
+        doc = read_json(p)
         try:
-            tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
-        except (OSError, json.JSONDecodeError):
-            continue
-        try:
+            tasks = doc.get("tasks", [])
             status = {t["id"]: t.get("status") for t in tasks}
-            for t in tasks:
-                if t.get("kandev_task_id"):
-                    out[t["kandev_task_id"]] = [status.get(b) for b in t.get("blocked_by") or []]
+            blockers = {t["kandev_task_id"]: [status.get(b) for b in t.get("blocked_by") or []]
+                        for t in tasks if t.get("kandev_task_id")}
+            statuses = {t["kandev_task_id"]: t.get("status") or "" for t in tasks if t.get("kandev_task_id")}
         except (TypeError, KeyError, AttributeError):
+            out["unreadable"].append(m)
             continue
+        out["blockers"].update(blockers)
+        out["statuses"].update(statuses)
+        if doc.get("module_task_id") and doc.get("module_session_id"):
+            out["sessions"][doc["module_task_id"]] = doc["module_session_id"]
     return out
+
+
+def load_blockers(mgmt_root):
+    return load_modules(mgmt_root)["blockers"]
 
 
 def load_statuses(mgmt_root):
-    """kandev task id -> 该任务自己在 tasks.json 中的 status（没有 status 字段记为 ""）。来源和容错同 load_blockers。
-    查不到的任务不在结果里（调用方得到 None，不据此告警）。"""
-    out = {}
-    mods = os.path.join(mgmt_root, "modules")
-    if not os.path.isdir(mods):
-        return out
-    for m in os.listdir(mods):
-        p = os.path.join(mods, m, "tasks.json")
-        if m.startswith("_") or not os.path.exists(p):
-            continue
-        try:
-            tasks = json.load(open(p, encoding="utf-8")).get("tasks", [])
-            for t in tasks:
-                if t.get("kandev_task_id"):
-                    out[t["kandev_task_id"]] = t.get("status") or ""
-        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            continue
-    return out
+    return load_modules(mgmt_root)["statuses"]
 
 
 def load_module_sessions(mgmt_root):
-    """模块任务的 kandev task id -> 模块 agent 的会话 id，取自 modules/*/tasks.json 顶层的 module_task_id / module_session_id
-    （v3.3.3 起模块 agent 在「模块规划」写入）。没写的模块不在结果里。容错同 load_blockers。"""
-    out = {}
-    mods = os.path.join(mgmt_root, "modules")
-    if not os.path.isdir(mods):
-        return out
-    for m in os.listdir(mods):
-        p = os.path.join(mods, m, "tasks.json")
-        if m.startswith("_") or not os.path.exists(p):
-            continue
-        try:
-            doc = json.load(open(p, encoding="utf-8"))
-            if doc.get("module_task_id") and doc.get("module_session_id"):
-                out[doc["module_task_id"]] = doc["module_session_id"]
-        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-            continue
-    return out
+    return load_modules(mgmt_root)["sessions"]
 
 
 def note_failure(state_dir, now, err):
     """连不上 Kandev 时留痕：心跳文件记连续失败次数（at 不更新，仍表示最后一次成功），并在上次巡检过的各项目
     stage.md 标题下面加一行故障提示（用户看的就是这个文件；下次成功运行会整份重写，提示随之消失）。返回连续失败次数。"""
-    beat_path = os.path.join(state_dir, "last_run.json")
-    try:
-        beat = json.load(open(beat_path, encoding="utf-8")) if os.path.exists(beat_path) else {}
-    except (OSError, json.JSONDecodeError):
-        beat = {}
+    beat_path = os.path.join(state_dir, BEAT_NAME)
+    beat = read_json(beat_path, {}) or {}
     beat["failures"] = int(beat.get("failures") or 0) + 1
     beat["failed_at"], beat["last_error"] = now.isoformat(), str(err)[:300]
-    os.makedirs(state_dir, exist_ok=True)
-    with open(beat_path, "w", encoding="utf-8") as f:
-        json.dump(beat, f, ensure_ascii=False, indent=1)
+    write_json(beat_path, beat)
     banner = (f"{FAIL_MARK} 守护连不上 Kandev，已连续 {beat['failures']} 次（最近一次 "
               f"{now.astimezone().strftime('%Y-%m-%d %H:%M')}）：{beat['last_error']}。下面的内容是最后一次成功巡检时的，可能已经过时。")
     for root in beat.get("mgmt_roots") or []:
@@ -485,19 +509,9 @@ def note_failure(state_dir, now, err):
     return beat["failures"]
 
 
-def kandev_blockers(t):
-    """v3.1：任务在 Kandev 里设置的 blocked_by（list_tasks 返回的字段，形状不确定：id 字符串或带 id 的对象）。"""
-    out = []
-    for b in t.get("blocked_by") or []:
-        bid = b if isinstance(b, str) else (b.get("blocked_by_task_id") or b.get("task_id") or b.get("id")) if isinstance(b, dict) else None
-        if bid:
-            out.append(bid)
-    return out
-
-
 def kandev():
-    from build_workflows import Kandev  # noqa: E402
-    return Kandev()
+    from kandev_client import Kandev  # noqa: E402
+    return Kandev(KANDEV_URL, client="ma-guard")
 
 
 def detect_limit(k, task_id, s0):
@@ -515,7 +529,8 @@ def detect_limit(k, task_id, s0):
 def detect_long(k, task_id, sessions):
     """常驻步骤的任务：常驻会话空闲时，数它自上次上下文重置以来被唤醒了几次 → {"session_id", "wakes"}，否则 None。
     常驻会话 = 最新的一个还活着的会话（WAITING_FOR_INPUT / IDLE / RUNNING / STARTING；验收等一次性会话结束后是
-    COMPLETED，不会被选中）。正在运行时也数：告警是排队送达的，而且这样去重状态不会因为某次巡检碰上它在运行而被清掉。
+    COMPLETED，不会被选中）。正在运行时也数：告警是排队送达的，而且这样 pm 的 session_long 不会因为某次巡检碰上它在运行
+    而被算作"中途消除过"（那样就不升级为 pm_unresponsive 了）。
     最多翻 WAKE_PAGES 页；翻完还没看到重置标记时，按已数到的次数算。"""
     alive = LIMIT_STATES | ACTIVE_STATES
     s = next((s for s in sessions if s.get("state") in alive and s.get("session_id")), None)
@@ -540,6 +555,17 @@ def detect_long(k, task_id, sessions):
     return {"session_id": s["session_id"], "wakes": wakes}
 
 
+def kandev_deps(t):
+    """list_tasks_kandev 返回的任务依赖（前置任务 id 列表）；响应里没有依赖字段时返回 None。
+    字段名未在真实接口上核实过，所以 blocked_by / depends_on 都认，元素是字符串或带 id / task_id 的对象都可以。"""
+    for key in ("blocked_by", "depends_on", "dependencies"):
+        v = t.get(key)
+        if isinstance(v, list):
+            return [x if isinstance(x, str) else (x.get("id") or x.get("task_id") or x.get("depends_on_task_id"))
+                    for x in v if isinstance(x, (str, dict))]
+    return None
+
+
 def collect(ids):
     k = kandev()
     try:
@@ -556,8 +582,8 @@ def collect(ids):
             step = names.get(t["workflow_step_id"], "?")
             item = {"id": t["id"], "title": t["title"], "workflow": wname, "step": step, "state": t["state"],
                     "description": t.get("description", ""), "wip_admitted": t.get("wip_admitted"),
-                    "wip_step": step in wip_steps, "blockers": kandev_blockers(t),
-                    "question": t["id"] in pq_tasks, "sessions": [], "perm": 0}
+                    "wip_step": step in wip_steps,
+                    "question": t["id"] in pq_tasks, "sessions": [], "perm": 0, "deps": kandev_deps(t)}
             live = step != DONE and t["state"] != "COMPLETED"
             if live or wname.endswith("模块管理"):     # 已完成的模块任务也取会话：完成后仍可能留着一个卡住的会话（session_stuck）
                 item["sessions"] = k.call("list_task_sessions_kandev", {"task_id": t["id"]}).get("sessions", [])
@@ -614,6 +640,13 @@ def disable_guard(workspace_id):
     return [x["resource_id"] for x in targets]
 
 
+def beat_name(ids_path, ids):
+    """心跳文件名。缺省的 ids 文件（kandev_ids.json）用 last_run.json；同一目录部署了多个 workspace 时，
+    其他 workspace 的 ids 文件名带前 8 位 id，心跳也带，避免互相覆盖（自动停用和故障计数都读它）。"""
+    ws = (ids.get("_meta") or {}).get("workspace_id") or ""
+    return "last_run.json" if os.path.basename(ids_path) == "kandev_ids.json" or not ws else f"last_run.{ws[:8]}.json"
+
+
 def norm(path):
     return os.path.normcase(os.path.normpath(path)) if path else ""
 
@@ -648,7 +681,10 @@ def initialized(mgmt_root):
 ORDER = ["等人", "等上限", "等上级", "排队", "待开发", "常驻", "运行中", "完成"]
 
 
-def render(rows, alerts, now_local):
+NOTICE_MARKS = ("未登记", "查不到前置", "会话过长", "等前置模块")     # 分类名里带这些字样的行在 stage.md 单列出来
+
+
+def render(rows, alerts, now_local, unreadable=None):
     groups = {g: [r for r in rows if r["category"].startswith(g)] for g in ORDER}
     out = ["# 现在在等谁", "", f"> 由 kandev/stage.py 生成，不要手改。更新：{now_local}", ""]
     if not groups["等人"] and not groups["等上级"] and not groups["等上限"]:
@@ -660,6 +696,12 @@ def render(rows, alerts, now_local):
             out += [f"| {r['title']} | {r['step']} | {r['category']} | {r['value'] if r['value'] is not None else ''} |"
                     for r in groups[g]]
             out.append("")
+    notice = [r for r in rows if any(k in r["category"] for k in NOTICE_MARKS)]
+    if notice or unreadable:
+        out += ["## 留意（不告警）", ""] + [f"- {r['title']}（{r['step']}）：{r['category']}"
+                                         + (f"（{r['value']}）" if r["category"] == WAIT_PREREQ else "") for r in notice]
+        out += [f"- modules/{m}/tasks.json 读不了或格式不对：这个模块的放行和未登记检查这次没有生效" for m in unreadable or []]
+        out.append("")
     counts = " · ".join(f"{g} {len(groups[g])}" for g in ORDER[3:] if groups[g])
     out += ["## 其他", "", counts or "无", ""]
     if alerts:
@@ -676,67 +718,83 @@ def main():
     p.add_argument("--snapshot", help="离线测试：从 JSON 读取任务列表，不连 Kandev")
     p.add_argument("--now", help="离线测试：当前时间（ISO 8601）")
     p.add_argument("--json", action="store_true", help="标准输出每行一个告警 JSON")
+    p.add_argument("--dry-run", action="store_true",
+                   help="只看不记：不写去重状态、心跳和 stage.md。人工查看或验收时用，否则这次看到的告警会被记为已发，守护 60 分钟内不再发")
     p.add_argument("--disable-when-done", action="store_true",
                    help=f"所有项目正常结束后把「{GUARD_NAME}」automation 设为停用（只由守护 automation 传入）")
     a = p.parse_args()
 
     now = ts(a.now) if a.now else datetime.now(timezone.utc)
     ids = json.load(open(a.ids, encoding="utf-8")) if os.path.exists(a.ids) else {}
+    global KANDEV_URL
+    KANDEV_URL = ids.get("_meta", {}).get("url")
     w1 = ids.get("多Agent · 项目管理", {})
     if a.snapshot:
         tasks = json.load(open(a.snapshot, encoding="utf-8"))["tasks"]
         for t in tasks:
-            t.setdefault("description", ""), t.setdefault("sessions", []), t.setdefault("blockers", [])
+            t.setdefault("description", ""), t.setdefault("sessions", [])
     else:
         try:
             tasks = collect(ids)
-        except (OSError, RuntimeError) as e:      # 连不上 Kandev MCP（URLError 是 OSError）或工具调用失败
-            n = note_failure(a.state_dir, now, e)
+        except Exception as e:      # 连不上 Kandev MCP、工具调用失败、响应缺字段：都留痕，不让守护无声退出
+            n = note_failure(a.state_dir, now, e) if not a.dry_run else 0
             print(f"stage.py：连不上 Kandev 或查询失败（连续第 {n} 次）：{e}", file=sys.stderr)
             return 1
 
+    global BEAT_NAME
+    BEAT_NAME = beat_name(a.ids, ids)
+    explicit_state = any(x == "--state-dir" or x.startswith("--state-dir=") for x in sys.argv[1:])
+    write = not a.dry_run and not (a.snapshot and not explicit_state)     # 离线快照不往真实状态目录写
+    unknown = [t["title"] for t in tasks if t["step"] == "?"]
+    if unknown:
+        print(f"stage.py：{len(unknown)} 个任务所在的步骤不在 ids 文件 {a.ids} 里（ids 可能过期或指错了 workspace），"
+              f"它们不会被正确分类：{'、'.join(unknown[:5])}", file=sys.stderr)
     projects = group_projects(tasks)
     if a.mgmt_root:
         projects = [pr for pr in projects if norm(pr["mgmt_root"]) == norm(a.mgmt_root)]
-    os.makedirs(a.state_dir, exist_ok=True)
-    texts, n_alerts = [], 0
+    texts, n_alerts, failed = [], 0, 0
     for pr in projects:
-        root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
-        if ready and not a.snapshot:
-            blockers, statuses, mod_sessions = load_blockers(root), load_statuses(root), load_module_sessions(root)
-            for t in pr["tasks"]:
-                t["blocker_status"] = blockers.get(t["id"])
-                t["own_status"] = statuses.get(t["id"])
-                t["module_session"] = mod_sessions.get(t["id"])
-        state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
-        state = json.load(open(state_path, encoding="utf-8")) if os.path.exists(state_path) else {}
-        rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])
-        n_alerts += len(alerts)
-        with open(state_path, "w", encoding="utf-8") as f:
-            json.dump(new_state, f, ensure_ascii=False, indent=1)
-        text = render(rows, alerts, now.astimezone().strftime("%Y-%m-%d %H:%M"))
-        if ready:
-            out = os.path.join(root, "agents", "guard", "stage.md")
-            os.makedirs(os.path.dirname(out), exist_ok=True)
-            with open(out, "w", encoding="utf-8") as f:
-                f.write(text)
-        journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
-                   else os.path.join(a.state_dir, "journal.md"))
-        for al in alerts:
-            al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
-            if al["signal"] == "pm_unresponsive":
-                al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
-            if a.json:
-                print(json.dumps(al, ensure_ascii=False))
-        texts.append(f"===== {pr['title']} · {root or '（未写 mgmt_root）'}\n{text}")
-    beat_path = os.path.join(a.state_dir, "last_run.json")
+        try:
+            root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
+            mods = load_modules(root) if ready and not a.snapshot else None
+            if mods:
+                for t in pr["tasks"]:
+                    t["blocker_status"] = mods["blockers"].get(t["id"])
+                    t["own_status"] = mods["statuses"].get(t["id"])
+                    t["module_session"] = mods["sessions"].get(t["id"])
+            state_path = os.path.join(a.state_dir, f"{pr['pm_task']}.json")
+            state = read_json(state_path, {}) or {}       # 损坏的状态文件按空处理：代价是告警重发一次
+            rows, alerts, new_state = evaluate(pr["tasks"], now, state, pr["pm_task"])
+            text = render(rows, alerts, now.astimezone().strftime("%Y-%m-%d %H:%M"), mods and mods["unreadable"])
+            journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
+                       else os.path.join(a.state_dir, "journal.md"))
+            for al in alerts:
+                al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
+                if al["signal"] == ESCALATED:
+                    al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
+                if a.json:
+                    print(json.dumps(al, ensure_ascii=False))
+            n_alerts += len(alerts)
+            # 告警已经输出，再记"已发"和 stage.md：这两步失败最多让告警重发一次，不会把没发出的告警记成已发
+            if write:
+                if ready:
+                    out = os.path.join(root, "agents", "guard", "stage.md")
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write(text)
+                write_json(state_path, new_state)
+            texts.append(f"===== {pr['title']} · {root or '（未写 mgmt_root）'}\n{text}")
+        except Exception as e:      # 一个项目的管理目录有问题不能挡住其他项目
+            failed += 1
+            print(f"stage.py：项目「{pr.get('title')}」巡检失败，已跳过：{type(e).__name__}: {e}", file=sys.stderr)
+    beat_path = os.path.join(a.state_dir, BEAT_NAME)
     disabled = None
-    if a.disable_when_done and not a.snapshot and not a.mgmt_root:
-        prev = json.load(open(beat_path, encoding="utf-8")) if os.path.exists(beat_path) else {}
+    if a.disable_when_done and write and not a.snapshot and not a.mgmt_root and not failed:
+        prev = read_json(beat_path, {}) or {}
         ok, reason = should_disable(prev, projects, tasks, now)
         if ok:
             ws = ids.get("_meta", {}).get("workspace_id")
-            disabled = {"to_task": None, "signal": "guard_disabled", "value": reason, "threshold": "-",
+            disabled = {"to_task": None, "signal": DISABLED, "value": reason, "threshold": "-",
                         "suggest": "none", "project": "", "mgmt_root": "",
                         "journal": os.path.join(a.state_dir, "journal.md"),
                         "automation_ids": disable_guard(ws)}
@@ -744,15 +802,14 @@ def main():
             if a.json:
                 print(json.dumps(disabled, ensure_ascii=False))
             texts.append(f"已停用守护 automation：{reason}")
-    if not a.snapshot:   # 心跳：守护是否还在运行，看这个文件的 at 即可
+    if write and not a.snapshot and not a.mgmt_root:   # 心跳：守护是否还在运行，看这个文件的 at 即可
         beat = {"at": now.isoformat(), "projects": [pr["title"] for pr in projects], "alerts": n_alerts,
-                "disabled": bool(disabled),
+                "disabled": bool(disabled), "failed_projects": failed,
                 "mgmt_roots": [pr["mgmt_root"] for pr in projects if initialized(pr["mgmt_root"])]}   # note_failure 用
-        with open(beat_path, "w", encoding="utf-8") as f:
-            json.dump(beat, f, ensure_ascii=False, indent=1)
+        write_json(beat_path, beat)
     if not a.json:
         print("\n".join(texts) if texts else "没有进行中的项目。")
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

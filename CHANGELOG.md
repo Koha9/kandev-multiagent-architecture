@@ -1,0 +1,240 @@
+# 变更记录
+
+每个版本写四件事：改了什么、为什么改（触发它的事故和当时记录的数字）、代价、升级时要做什么。现在的行为以 [docs/workflow.md](docs/workflow.md) 为准，这里只记历史。评估后放弃的方案在 workflow.md「已否决的设计」。
+
+版本号是 `kandev/prompts.py` 的 `VERSION`。同一系列（major.minor 相同，例如 v3.3 和 v3.3.4）用 `ma.py apply` 就地更新，步骤 ID 和任务不变；跨系列要 `--retire`，旧 workflow 改名保留。「守护 prompt」一项按 `docs/prompts.md`「守护 automation」一节在 git 历史中的差异填写：有变化时要把新的交接 prompt 再交给 Kandev 内部的 agent 执行一次（见 [kandev/README.md](kandev/README.md)「守护 automation」）。
+
+## 未发布
+
+（进行中的改动，发布时移到新版本一节。）
+
+- **按评审修正问题树（部署侧）**：
+  - 分批：install 阶段的提问按 group 分批（basics / models / profiles / delivery / policy / install），一批最多 4 题，`ma.py questions --answers` 一次只列一批。
+  - 新增两项：
+    - `review_access`：用户在哪里看结果。remote_only 时 `remote` 推荐 pr，不能是 none。
+    - `project_defaults.run_policy`：ask / active / conservative。
+  - 改动的项：
+    - `ci` 不再依赖 `remote`；`ci=remote` 且 `remote=none` 时拒绝。
+    - `plan_only` 只在 autonomy 为 ask / 3 / 4 时问。
+    - `integration_test` 去掉 ask。
+    - `model_strategy` 改为 auto / scoped / per_role，删除 `vendors`、`reviewer_cross_vendor`。
+    - `kandev_url` 由部署 agent 检测后填；不是本机地址时 `install` 停下（`--remote-kandev`）。
+    - profiles 新增可选角色 `guard`（守护用，缺省 = intake，再缺省 = mechanical）。
+  - 总表每项标来源（用户 / agent 检测 / 推荐值），并解析 `home`、`python` 的占位。清单另记写明的答案（`explicit`），修复 `remote=none` 安装后改回 pr 时 `ci` 卡在 none 的问题。
+  - `doctor` 在缺省就要推送时，预检 git、gh 和 gh 登录。
+  - 契约：`custom/project-defaults.json` 升到 `_schema: "2"`，键为 review_access、remote、ci、autonomy、plan_only、run_policy、integration_test、paid_calls。
+  - 升级：
+    - 旧答案照样有效：删掉的键被忽略，`model_strategy: vendor` 读成 scoped，`integration_test: ask` 读成 auto。
+    - 旧的 project-defaults.json 没有 `_schema` 时，doctor 给 WARN；运行 `ma.py answer --set review_access=<值>` 重写。
+    - 已设 intake 且没设 guard 的安装，守护 profile 会从 mechanical 变成 intake，要重新 `ma.py guard` 并更新 automation。
+- **按评审修正问题树（启动与交付侧）**：
+  - 「接收」通常两次提问：
+    - 第 1 轮问需求、自主程度（选项写明各级在哪里停下等人）、交付和审查位置、运行策略预设（积极 / 保守 / 逐项自定，推荐积极）。
+    - 条件项多一轮，最后确认汇总。上限从 6 次降到 4 次。
+    - 结合测试、CI、"是否改变已有行为"不再提问，取检测值或缺省值。
+    - autonomy 4 也写「运行策略」（缺省积极）。
+    - 检测和缺省值解析由只读脚本 `kandev/intake.py probe` 完成（含 push_branch 撞名、gh 是否可用）。
+  - remote: pr 时，pm 在「人工终审」入口把集成分支推成 draft PR，终审提问给出地址；批准后「收尾合并」转为 ready。在接收的确认汇总里选 pr 即同意预览推送。
+  - 立项确认超时：autonomy 2 的任务在「立项确认」停留满 30 分钟（`guard.T_GATE`，0 关闭）没有答复时，守护发 `gate_timeout`。评审通过且没有必须由用户决定的项时，pm 按推荐答案继续，等用户追认。人工终审不设超时。
+  - 「收尾合并」：
+    - 先恢复推送地址、fetch 并做祖先检查，再合入。
+    - pr 模式不要求主目录在基线分支。
+    - ci=remote 改为轮询（先等 2 分钟，单次 ≤5 分钟，累计 30 分钟）。
+    - git 命令设 `GIT_TERMINAL_PROMPT=0`。
+  - 原样放行多查 remote / push_branch / ci 的组合。
+  - 原因：Fable 评审和实测，具体如下。
+    - 立项确认停了 1 小时 37 分，4 题全选了推荐。
+    - 用户只能在 GitHub 上审查，推送却在终审之后。
+    - 运行策略的保守推荐会重演 3 个修复模块。
+    - push 模式先合入后检查。
+  - 代价：步骤 prompt 合计 +1855 字符（接收 +427，立项确认 +301，人工终审 +615，收尾合并 +440）；`docs/intake.md` +3674 字符。
+  - 升级：
+    - 旧头照旧：没有 autonomy 行的任务不触发超时；没有「运行策略」节的按积极处理。
+    - 代码：`stage.py` 新增信号 `gate_timeout`、参数 `T_GATE`；新增 `kandev/intake.py`。
+    - 守护 prompt：无变化。
+- **复审修正**（独立 Fable 复审的 9 项）：
+  - 立项确认超时（autonomy 2）的触发条件收紧：只在 pm 的提问还挂着、且 pm 会话 `T_GATE` 分钟没有更新时触发。
+    - 用户选了"先不决定"、或刚答完一批而 pm 又发出下一批时，不会自动继续；`plan_only: true` 时不超时。
+    - **这条路径未实测**：它依赖守护的 ALERT 能送到正挂着提问的 pm 会话。送不到时没有副作用，等同不设超时。
+  - 「接收」运行 `intake.py probe` 用部署时记录的解释器：答案里的 `python` 渲染进 prompt，文档版本显示 `<python>`，不再写"本机的 Python 3"。`ma.py answer --set python=...` 之后要重新部署才生效。
+  - 预览推送先 fetch 和祖先检查，通过后才恢复推送地址，推完立即改回 DISABLED。这是"禁用推送地址"规则写明的例外。PR 地址写进 final-report「预览 PR」。
+  - `intake.py probe` 的 `resolved` 经过组合检查，不再给出 remote none + ci remote 这样的组合；gh 不可用时不推荐 pr；push_branch 同日撞名时加 `-2`…`-9`。
+  - 升级注意：
+    - 这次改了三套 workflow 的 prompt 和 `stage.py`，升级后要 `ma.py diff` → `ma.py apply --confirmed <值>`。
+      - 旧部署的「接收」里没有解释器路径，doctor 会报与本目录不一致，apply 后消失。
+      - 守护 prompt 无变化，automation 不用更新。
+    - 升级前已经以 `remote: pr` 启动、还没到人工终审的项目：pm 进入人工终审时会先问一次是否推送预览 PR，不会未经同意推送。
+    - 进行中的 autonomy 2 项目从下一次进入「立项确认」起适用超时。不想要就在 `custom/rules/params.json` 写 `{"guard": {"T_GATE": 0}}` 后重新部署。
+    - 旧安装的答案里没有 `explicit` 记录时，`project_defaults.ci` 会停在 none。运行一次 `ma.py answer --set project_defaults.ci=auto` 即可。
+  - 代价：这一轮步骤 prompt 再 +292 字符（相对上次提交合计约 +2147）。
+  - 代码：`build_workflows.py`、`verify_export.py` 也有变化。
+
+- **部署提问改成问题树**：`setup_style` 增加 guided，第一次部署推荐用它。新增两组问题：
+  - 模型选法：`model_strategy`、`vendors`、`reviewer_cross_vendor`。
+  - 项目缺省值：`project_defaults.remote/ci/autonomy/plan_only/integration_test/paid_calls`。
+
+  `ma.py questions --stage install --answers <文件>` 只列出现在该问的项，便于逐批提问；答完打印全部取值的总表。`ma.py install` 把项目缺省值写成 `<home>/custom/project-defaults.json`，由「接收」读取。之后用 `ma.py answer --set project_defaults.<键>=<值>` 修改，不需要重新部署。
+  - 原因：上一次实测中，Kandev 跑在远端主机上，用户只能通过 GitHub 推送查看结果，但部署时没有问过推送、CI 和模型选择。
+  - 升级：旧的答案和安装照常有效，缺的新项按推荐值处理。旧安装没有 project-defaults.json，doctor 会给 WARN；运行一次 `ma.py answer --set project_defaults.remote=auto` 即生成。
+  - 守护 prompt：无变化。
+- **启动项目改为逐轮提问**：「接收」先问需求和自主程度，再按回答问后续各项，最后请用户确认一份汇总（含本项目 attention.md 的绝对路径）。整个步骤最多 6 次提问。
+  - 自主程度是新头字段 `autonomy` 1–4，`mode` 由它导出：1、2 → attended，3、4 → unattended。
+  - 后续各项：计划门禁、结合测试、交付方式（新字段 `remote: none|push|pr`、`push_branch`）、CI（`ci: none|local|remote`）、额度，以及运行策略（缺陷本轮修还是只记录、旧产物保留还是删除、是否允许改变已有行为）。
+  - 「收尾合并」按 remote 推送或开 PR：先 fetch，确认不会覆盖远端，不 force；ci=remote 时等远端 CI 结果。autonomy ≤3 时，人工终审另问是否推送。
+  - 兼容：没有 autonomy 的旧头照旧，attended 按 2、unattended 按 4。
+  - 原因：实测中用户推翻了 pm 两项保守默认（保留旧产物、真实缺陷本轮不修），多了 3 个修复模块；用户和其他会话还找错了管理目录。
+  - 代价：pm 步骤各约 +156 字符，收尾合并 +783，合计 +2237。
+  - 守护 prompt 和 stage.py：无变化。
+- **遗留项分诊（【遗留分诊】）**：用在「调度」「模块下发」「项目验收」。建议、K-n、T-n、临时资源、待核对项先分成六类：
+  - 自修：小而可逆、不改产品行为的文字和测试问题。
+  - 清理：本项目残留的临时资源。
+  - 待核对：交项目验收在集成分支上核对。
+  - 工作流：写进新文件 `project/workflow-feedback.md`。
+  - 不改：记「已自行处理」。
+  - 交用户：只有这一类进「待用户确认」。
+
+  自修、清理两类在全部模块 done 后由一轮收尾自修模块修掉（status.json `tidy_round`，只做一轮）。final-report 新增「已自行处理」，K-n / T-n 表加「类别」列；人工终审只问交用户的项，另报一句已自行处理的条数。autonomy 1 时自修也先问，autonomy 4 时交用户的项按推荐答案执行。
+  - 原因：实测终审报告列了 18 条遗留项（过时措辞、行号、注释、孤儿实例、工作流脚本问题等），大半是 pm 能自己判断或修掉的，用户要逐条看。
+  - 代价：多一轮收尾自修模块（只在有自修项时）。
+- **实测缺陷修复**：
+  - external_id 带本任务 id（`{task_id}-mod-<模块>`、`{task_id}-<任务 id>`），不再与同一 workspace 里以前项目的任务撞名。
+  - 「调度」不给还没开工的模块发消息；用户在 pm 会话明确要求推送时视为授权（只推点名的分支，推完恢复 DISABLED，写 ADR）。
+  - 「验收调查」看到任务已在「完成」、模块分支上已有它的提交时视为已合入，照常验收，转交模块 agent 补记 tasks.json。原来要先退回，再开一次验收者会话。
+  - 「项目验收」核对「待核对」各项，清理没有担当者的本项目临时资源；最后一条回复必须写出结论、需要用户处理的各项和文件路径。
+  - 合并步骤写明 parent 行的格式，门禁命令逐条运行并记退出码；审核者自己启动的实例在写 review 前清理（review 新增 `temp_resources`）。
+  - pm 只认头里的 mgmt_root，attention.md 开头写明本项目的 pm 任务和管理目录。
+  - 通用规则新增：写给用户看的内容用需求原文的语言。
+  - 部署验收的临时任务标题以 `【部署验收临时】` 开头，`ma.py doctor` 对残留的这类任务给 WARN。
+  - 守护：模块任务在「模块规划」等前置模块时，会话被提前启动后空闲，不再误报 `idle_no_signal`，归为「排队：等前置模块」并在 stage.md「留意」列出（只改 stage.py；原来误报的值是 34 分钟）。
+  - check_tasks.py：merged 的任务不参与 owns / shared 重叠检查，返工任务 `<id>-r<n>` 可以接手原任务的 owns（原来 ac-02-r1 被拦下，多出一个修复模块）。这项只影响新启动的项目；进行中的项目可以把新版复制到 `<mgmt_root>/tools/`。
+  - 代价：步骤 prompt 合计 79930 → 85015 字符（语言规则约 60 字 × 17 步；【遗留分诊】615 字 × 3 步）。
+  - 守护 prompt：无变化。
+- 文档重组：新增本文件；`docs/workflow.md` 只描述现在的行为；英文只保留 `README.en.md` 和 `docs/overview.en.md`；流程图和架构图更新到现在的步骤。
+
+下面几项改变了 agent 收到的指示，还没有在真实项目上跑过（部署后做一次基准运行来验证）：
+
+- **角色卡只留职责、读写范围和质量要求**；流程、参数和判定标准只写在步骤 prompt 里（五张角色卡从约 15K 减到约 4.5K 字符）。原因：角色卡 50–80% 是步骤 prompt 的压缩复述，已经出现多处不一致，而进行中的项目用的是启动时复制的旧角色卡。只在角色卡里有的规则先搬进了 prompt：审核的 verdict 定义和"只限功能层面"、baseline 模块验收第 3 轮不通过的处理、ESCALATE 无法决策时的处理。
+- **常驻步骤（调度、等待开发）改成三段**：每轮固定动作 / 按事件 / 何时自己移动。原来开头写"只处理本次事件"，后面又有"每次被唤醒都先做"的条目；唤醒计数何时清零、何时加 1 的先后也不明确。现在：进入的那一轮先清零再加 1，每轮都先做对账与放行（等待开发）或检查守护（调度）。
+- **【刷新】规则只出现在常驻步骤里**。原来在 pm 和模块 agent 的头部，立项规划、模块下发、模块规划和「刷新」步骤自己也会收到"达到 15 次就移到刷新"。
+- **定级只有一份定义（【定级】）**，评审、模块验收、项目验收和 pm 给结合测试缺陷定级时都用它。「阻塞」统一为：功能不可用、结果错误、数据丢失或误导用户；或本步骤所依据的上一层标准明确要求的没达到（项目层是需求原文和 PA，模块层是模块契约的验收要点和 B-n）。原来 prompt 和模块验收角色卡的说法不同；pm 一侧没有"拿不准按轻微"这条，而修复模块过多正是在 pm 一侧放大的。
+- **等待开发收到合并的 REPORT 后先用 `git merge-base --is-ancestor` 核对**，提交确实在模块分支上才记 merged。
+- **合并步骤的 REPORT / ESCALATE 全文内联在 prompt 里**，不再为一条消息去读 message.md；修正了 prompt 里一处没被解释的 `\n`。
+- **建任务的参数一行一个**（模块任务、开发子任务、修复模块任务），修复模块的参数成为具名块【建修复模块】。参数和取值没有增减。
+- **门禁和停下等人时主动提问**。「立项确认」「人工终审」进入时启动 pm（原来没有 prompt，只靠 on_turn_start 把用户消息带回上一步）。pm 用 `ask_user_question_kandev` 请用户批准、退回或先不决定，并一起问还没答复的 Q-n / U-n（终审时是「需要用户处理」各项），答复记入 feedback.md 后由 pm 移动任务；直接拖动仍然有效。新增共享块【等用户】，给 W1 的接收、pm、立项评审、项目验收、收尾合并：流程停下等用户时一律提问，不论 mode。unattended 只是不为取舍和歧义提问。原因：attended 的测试项目评审通过后在「立项确认」停了约 1.5 小时，Q-1、Q-2、U-1 只写在回复正文里，没有待答的提问，守护也不告警，用户不知道在等自己。代价：门禁多一轮 pm 会话；「调度」里不阻塞项目的事（守护没在运行）仍只登记 attention.md，因为提问会阻塞常驻会话。升级：`ma.py apply` 就地更新 W1（两个门禁新增 prompt，删掉 on_turn_start）；已经停在门禁的任务不会自动收到新 prompt，需要拖出再拖回，或照常直接拖动。守护 prompt：无变化。
+- **「接收」原样放行前做两项检查**（仓库存在且是 git 仓库；模板目录有 README.md，否则改用安装目录的模板）。
+- **评审者不再读 pm 的角色卡**；不发消息的步骤（接收、收尾合并）不再带【发消息】，不给模块发消息的步骤不再带"带 session_id"那一段。
+- **管理目录的 JSON 模板删掉没有读者或写者的字段**：tasks.json 的 `branch`、`updated`、`refs`、`passes`、`review_rounds`；registry.json 的 `kandev_ids`、`agents[].status`、守护条目；status.json 的 `done`、`total`、`last_report`、`blocked_reason`、`open_decisions`。status.json 新增 `misrouted` 和模块状态的取值说明（planned / active / done / dropped）。只影响新启动的项目。
+
+守护（不需要重新部署 workflow，升级安装目录后生效）：
+
+- 同一任务的同一信号 60 分钟内只告警一次，信号中途消失再出现也不重发（原来信号消失一次就清空记录，抖动的信号每次都重发）。
+- 升级为 `pm_unresponsive` 要求同一个信号从上次告警起一直存在。
+- 信号的路由、是否升级收成一张表；规则表只在 `mgmt-template/roles/guard.md` 保留一份，自检核对它与代码一致。
+- 删除 v3.1 兼容：停在「环境基线」的任务、只在 Kandev 里设了 blocked_by 的「待开发」任务不再被特殊处理（v3.2 起不会出现）。
+
+内部整理（不改变行为）：prompt 文本和 workflow 定义移到 `kandev/prompts.py`，统一成"普通字符串 + `<<标记>>`"，漏填多填都报错；`build_workflows.py stats` 打印每个步骤的字符数和携带的共享块。守护 prompt：无变化。
+
+## v3.3.4（2026-11-22）
+
+**改了什么**
+
+- 独立安装目录和 `kandev/ma.py`：`install` 把运行所需的文件复制到安装目录（缺省 `~/.kandev-ma/<workspace id 前 8 位>/`），写进 Kandev 的路径都指向它；`diff` / `apply` / `guard` / `doctor` / `upgrade` / `answer` 覆盖部署、检查和升级。想直接用源仓库时选链接模式。
+- 部署提问清单 `kandev/deploy_questions.json`：安装时必问四项（快速还是自定义、workspace、各角色的 profile、要不要守护），缺项时脚本拒绝部署；其余只在脚本停下时才问（`--confirmed`、`--with-running`、`--retire`）。
+- 规则槽位 `rules/`：workspace、testing、quality、git、coding 五段规则和 `params.json`（「开发」并发上限、刷新阈值、守护阈值），用户的覆盖写在安装目录的 `custom/rules/`，部署时内联进步骤 prompt。
+- 升级 `ma.py upgrade`：没改过的出厂文件直接更新，用户改过的保留（新版也改了的写成 `.new`），`custom/` 不动，拒绝降级；每个项目的管理目录用 `VERSION` 记录模板版本。
+- 守护更稳：一个项目写文件失败不再挡住其他项目；告警先输出再记"已发"；去重状态和心跳损坏时按空处理，写入改为原子替换；带 BOM 的 tasks.json 能读，读不了的模块在 stage.md「留意」列出；没有前置却停在「待开发」的任务会告警；心跳文件按 workspace 区分；新增 `--dry-run`；修正负时区的时间戳。`check_owns` / `mgmt_precommit` 不再误判中文文件名和重命名。
+- 审核的头部：审核不再拿到开发的硬规则和恢复协议；重置上下文后失效的跨步骤引用改为内联。
+- 优先级规则：步骤 prompt 与角色卡、README 不一致时，以步骤 prompt 为准。
+- 自检新增：模板版本、提问清单、`ma.py` 离线测试（内存里的 Kandev 替身）、步骤名与 `stage.py` 同步、prompt 占位符。
+
+**为什么**：v3.3.3 及之前，「接收」步骤、守护和新项目的模板直接读源仓库的工作区，而步骤 prompt 是部署时的快照。在仓库里改文件或切换分支会让两者错位；删除或移动仓库会让新项目无法启动、守护停止工作，而且没有告警。守护和 prompt 的其余修复来自发布前的一轮多角度 review。
+
+**代价**：多一个要维护的安装目录，它必须在运行 Kandev 的机器上，被删除时的表现和以前删除仓库一样。进行中的项目用的是启动时复制到管理目录的角色卡，就地更新 prompt 后两者可能不同版本（`ma.py doctor` 会列出）。规则槽位和参数改完要重新部署才生效。
+
+**升级**：与 v3.3.x 同一系列，`apply` 就地更新。从 v3.3.3 及之前（没有安装清单）过来的具体步骤未单独记录；按 [kandev/README.md](kandev/README.md) 先 `ma.py install` 记录答案，再 `diff` + `apply`。守护 prompt：有变化（`arch_root` 指向安装目录，结束后由「接收」重新启用），要重新交接；心跳文件改为按 workspace 区分。
+
+**调查记录**：2026-11-22 只读调查了 Kandev 的共享 prompt 和 workflow 级 prompt（另一台机器上的实例）：有 `list / get / create / update_shared_prompt_kandev`，共享 prompt 按名称全局保存（接口没有 workspace 参数），单个上限 1 MiB，可以设为不允许 agent 修改；`workflow.prompt` 是可写的设置项（`update_settings_kandev`，target 为 workflow），未设置时 `export_workflow_kandev` 的导出里没有这个字段。`@名称` 在自动启动的步骤里是否展开要启动真实会话才能测，没有做；现在的做法（构建时内联）不依赖它。
+
+## v3.3.3（2026-11-21）
+
+来自一个 UX 打磨项目的事后调查：47 小时、14 个修复模块、多次停滞。提交时没有部署，新 prompt 和新告警没有在真实项目中验证。
+
+**改了什么、为什么**
+
+- 验收分级。此前验收中任何不通过项都判 fail 并触发修复；那个项目的 14 个修复模块里只有 3 个修的是用户会遇到的功能缺陷。现在验收者先定级：阻塞才判 fail、写修复项；轻微记「已知问题」；测试自身的问题记「测试缺陷」。
+- 硬性判定的来源。只有需求原文和 charter 的 PA 能成为 pass / fail 的依据；需求没提到的视口 × 语言矩阵、像素级判定只能写成「建议检查」。立项评审新增第 7 项检查加码。
+- 修复的规模。14 个修复模块中 6 个来自验收报告的"建议"，8 个只是文档、规格、判定脚本的同步或重判，每个都走完整的规划 → 开发 → 审核 → 合并 → 验收。现在只有 fail 才建修复模块；同一次事件里担当相同的修复项合成一个，同步写进它的「同步范围」；不建单独的重判模块；修复轮数按整个项目计，上限 2。
+- 规模分档。立项时定档（小 / 中 / 大），功能模块上限为小 2、中 5；评审、设计、文档不单独成模块。
+- 消息带会话 id。`message_task_kandev` 不带 `session_id` 时消息进任务的主会话；模块任务进过「验收调查」后主会话是验收者的，发给模块的 REPORT、INSTRUCT、ALERT 都没人处理（出现过两次，各停 3–4 小时，靠用户手动转发）。现在模块 agent 把任务 id 和会话 id 写进 tasks.json 顶层和子任务头的 parent 行，发给模块的消息和守护告警都带它，验收者把误投的消息转给模块会话。
+- 已完成的模块不再派活。COMPLETED 的任务不能移回前面的步骤，发给它的消息只会排队；修复后的结合测试重跑改由「项目验收」完成。
+- 守护新增告警：`parent_done`（模块已完成而子任务还在跑）、`session_stuck`（旧会话一直 RUNNING，发给它的消息永久排队；出现过一次，停了 9 小时）、`session_long`（常驻会话自上次重置被唤醒 ≥15 次）。连不上 Kandev 时在各项目 stage.md 留"守护故障"和连续失败次数。修了用量上限的一处漏判（上限文字以普通消息再出现一次时，旧版把任务判成"空闲未推进"，没有自动恢复）。
+- 常驻会话的长度。pm 在「调度」、模块 agent 在「等待开发」每次被唤醒大约增加 9K 字符上下文，实际出现过 46 小时、57 次唤醒没有刷新。刷新改为按 NOW 的唤醒计数（15 次），不再靠 agent 判断"会话明显变长"；常驻步骤每轮回复限 3 行，任务计划一轮只整份读一次。
+
+**代价**：几像素的溢出、文案小偏差这类轻微问题会随版本交付，小改进和遗留建议要用户在终审时过一遍「已知问题」「遗留建议」；修复任务的审核要覆盖多个模块的文件；小项目里评审和设计不再有独立的模块验收。
+
+**升级**：与 v3.3.x 同一系列，就地更新。守护 prompt：有变化（告警带 `session_id`），要重新交接。
+
+## v3.3.2（2026-11-18）
+
+**改了什么、为什么**
+
+- 放行不只靠 REPORT。合并步骤的 REPORT 是一条消息，可能发不出去：v3.3.1 上出现过参数写错后没有重试就推进了步骤，依赖它的任务停了 4 小时。而 `on_children_completed` 只在全部子任务终态时触发，还有 held 任务时单个子任务完成唤醒不了模块 agent。现在 REPORT 仍失败时合并步骤照实写进 summary 后推进；模块 agent 每次被唤醒先按 Kandev 状态对账（`mod/<模块>` 上有以任务 id 开头的提交才补记 merged）；「验收调查」「刷新」同样检查。
+- 建子任务的参数统一写在【建子任务】一段，三处原文内联。漏传 `workspace_mode` 时 Kandev 默认 `inherit_parent`，子任务共用模块任务的 worktree，换 profile 开新会话（「审核」）会失败并静默停在 SCHEDULING。现在子任务一律先建在「待开发」，读回核对工作区模式、autopilot、base 后再移到「开发」。
+- 通用规则：【工具报错】按 prompt 的参数改正后重试，不删参数绕过；【发消息】`task_id` 用 UUID、正文放 prompt。
+- 守护新增 `child_unrecorded`（子任务已完成而 tasks.json 没登记）、`session_not_started`（停在 SCHEDULING），建议写成完整的处理方法。
+- 「接收」步骤检查并重新启用守护；pm 在「调度」中发现 stage.md 过期时登记 attention.md。
+
+**代价**：未记录。
+
+**升级**：与 v3.3.x 同一系列，就地更新。守护 prompt：无变化（新告警在 `stage.py` 里）。
+
+## v3.3.1（2026-11-13）
+
+**改了什么**：W1、W2 的「完成」排到最后一步（W1：9 刷新 / 10 完成；W2：3 刷新 / 4 完成），「收尾合并」「验收调查」用 `move_to_step` 直接进入「完成」。`apply` 对同一系列的 workflow 就地同步步骤顺序、事件和 description。自检新增：「完成」是最后一步，`move_to_next` 不进入「刷新」。
+
+**为什么**：Kandev 只对没有后继步骤的步骤执行 `complete_task_on_enter`。v3.3 的「完成」后面排着「刷新」，模块任务进了「完成」但状态停在 REVIEW，blocked_by 它的模块不启动，项目停住（实测）。
+
+**代价**：未记录。
+
+**升级**：就地更新。在设置里保存这个选项不会回头处理已经停在「完成」里的任务：v3.3 上已经进入「完成」但状态不是 COMPLETED 的模块任务，要手动把状态改成 COMPLETED，依赖它的模块才会启动。守护 prompt：无变化。
+
+## v3.3（2026-11-13）
+
+**改了什么**：W1 第 0 步「待立项」换成「接收」，新增可选角色 `intake`（缺省 = mechanical）。任务描述已是完整的 `[TASK v1]` 头就原样放行；否则推导仓库、基线分支、项目名、管理目录、模板路径，缺的参数向用户提问（每批最多 4 问），再改写任务描述。新增 [docs/intake.md](docs/intake.md)，「接收」步骤运行时直接读它。`apply` 把本仓库的绝对路径写进「接收」的 prompt，导出时换回 `<ARCH_ROOT>`。
+
+**为什么**：启动项目要用户手写完整的 `[TASK v1]` 头，十几行参数里多数可以推导或有缺省值，手写容易出错，门槛高。
+
+**代价**：多一个步骤和一次轻量会话；「接收」的 prompt 里写入了本机的绝对路径（v3.3.4 改为指向安装目录）。
+
+**升级**：与 v3.2 不同系列，`apply` 要带 `--retire`，旧 workflow 改名为"<名称> (v3.2)"，任务保留。守护 prompt：无变化（`stage.py` 改为「接收」中的任务不告警）。
+
+## v3.2（2026-11-13）
+
+按知识边界重新分工（当时比较的三个方案见 [docs/history/responsibility-map.html](docs/history/responsibility-map.html)，采用方案 C），之后做了三轮模拟并逐轮修改。
+
+**改了什么**
+
+- 角色新增 `module`、`module_auditor`、`plan_auditor`。
+- W1 去掉「环境基线」步骤，环境和骨架改由 baseline 模块经 W2 + W3 完成；「调度」只做路由。
+- W2「验收调查」改由独立的模块验收者做，先做覆盖核对，结论写成修复项。
+- W3「合并」改为合并门禁 + 自己快进合入模块分支，只支持本地合并，PR 只用于收尾合并。
+- charter 新增模块边界表（B-n）、跨模块信息的四级规则、路由备注规则；新增 `tools/check_tasks.py`。
+- 第 1 轮模拟后：等模块决定的开发任务移到不计 WIP 的「等待决策」；集成分支冲突写成修复项交担当模块；各循环补上上限和出口；有依赖的模块从依赖模块的分支切出；收尾合并恢复推送地址；修复模块做轻；共享文件字段 `shared`；公共头部按角色裁剪。
+- 第 2 轮模拟后：判为 misrouted 的修复模块自行结束；已知问题的测试用例标为预期失败；W3「待开发」任务不再设 blocked_by，前置关系只记在 tasks.json；registry 记录各模块的 `current_branch`；只涉及共享文件的冲突就地解决。
+- 第 3 轮模拟后：放行条件为前置 merged 或 dropped；创建 W2 任务时 `base_branch` 一律传已存在的 `mod/baseline`。
+
+**为什么**：v3.1 中 pm 自己做环境基线，要写代码，骨架和脚本没有审核和验收，pm 的上下文里堆满环境细节；模块 agent 自己验收自己的模块，容易只核对自己写下的 MA；模块 agent 逐个合并子任务分支，成为串行瓶颈。详见 workflow.md「已否决的设计」。
+
+**代价**：未记录。裁剪头部后三套 workflow 的 prompt 合计从 57k 降到 44k 字符。
+
+**升级**：与 v3.1 不同系列，旧 workflow 改名保留。守护 prompt：有变化，要重新交接（`stage.py` 兼容 v3.1 的步骤名）。
+
+## v3.1（2026-11-10）
+
+初始公开版本：三套 Kandev workflow（项目管理 / 模块管理 / 开发）、管理目录模板、守护 automation、基准项目。之前的设计稿在 [docs/history/](docs/history/)。
+
+v3.1 发布后、v3.2 之前的改动（版本号没有变）：
+
+- 加入结合测试模块（2026-11-13）：`[TASK v1]` 头新增 `integration_test: auto | off`；其他模块完成后合并到集成分支，写并运行自动化结合测试。原因：各模块分支到项目验收才第一次合并，没有任何任务负责写跨模块测试，各模块都通过，但界面删除后仍然显示、无法删除（实测）。守护 prompt：有变化。
+- 门禁中用户意见的收集（feedback.md）；任务文档改用任务计划的命名章节。
+- 文档重组（面向人的 README、面向 agent 的 AGENTS.md、示例 workflow 导出）、手绘架构图、英文文档。

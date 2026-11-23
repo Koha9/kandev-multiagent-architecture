@@ -18,3 +18,15 @@ kandev/guard_state/
 
 # 具体开发项目的试点记录：涉及个人项目，只留在本机，不进版本库
 evaluation/pilot-*/
+
+# ma.py：安装清单、用户的规则定制、被替换文件的备份（见 AGENTS.md）
+ma-manifest.json
+kandev/answers*.local.json
+custom/
+kandev/export.local/
+*.new.*
+*.mine.*
+*.tmp
+*.bak
+*.new
+*.mine

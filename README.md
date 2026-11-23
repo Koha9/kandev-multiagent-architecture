@@ -2,7 +2,7 @@
 
 **中文** | [English](README.en.md)
 
-在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。当前版本 v3.3.3。
+在 [Kandev](https://github.com/kdlbs/kandev) 上让多个编码 agent 分工协作、无人值守或半值守地完成中到大型软件项目的一套 workflow：三套 Kandev workflow、项目管理目录模板、部署与守护脚本。
 
 ## 简介
 
@@ -39,7 +39,7 @@
 
 ![架构图：W1 项目管理、W2 模块管理、W3 开发三层，加上管理目录和守护](docs/architecture.svg)
 
-（图为 v3.1，步骤以 [docs/workflow.md](docs/workflow.md) 的表格为准：v3.2 去掉了「环境基线」步骤，改由 baseline 模块完成。）黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；更详细的流程图（包括 agent 之间允许哪些交互）见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
+黄色步骤是需要人的门禁：「立项确认」只在 attended 或 plan_only 模式下停留，「人工终审」总是由人批准；进入门禁时 pm 会主动向你提问。每一步做什么、怎么流转、会话怎么管理，见 [docs/workflow.md](docs/workflow.md)；三套 workflow 各自的流程图和 agent 之间允许的消息路径见 [docs/workflow-diagrams.md](docs/workflow-diagrams.md)。
 
 ## 怎么使用
 
@@ -47,11 +47,18 @@
 
 - 本机运行着 Kandev，外部 MCP 可用（默认 `http://localhost:38429/mcp`）。
 - Python 3（脚本只用标准库）。
-- 5 个必填 agent profile：`pm`、`auditor`（与 pm 不同）、`developer`、`reviewer`（与 developer 不同，最好换厂商）、`mechanical`（合并门禁，编码模型）。可选 `plan_auditor`（立项评审，最强模型，缺省 = auditor）、`module`（缺省 = pm）、`module_auditor`（与 module 不同，缺省 = auditor）、`intake`（入口的「接收」步骤，轻量模型即可，缺省 = mechanical）。
+- 在 Kandev 里为各角色准备好 agent profile：5 个必填角色，4 个可选角色，规划与验证、开发与审核要用不同的 profile。选法见 [docs/workflow.md](docs/workflow.md)「角色与 profile」。
 
 ### 方式一：交给 agent（推荐）
 
-把下面的 prompt 复制给一个能访问本机文件和 Kandev MCP 的 agent（例如 Claude Code、Codex，或 Kandev 里的任务 agent）。agent 的入口文档是 [AGENTS.md](AGENTS.md)，里面写了部署、验收、启动项目、跑基准、修改 workflow 的具体步骤和需要先问你的地方。
+把下面的 prompt 复制给一个能访问本机文件和 Kandev MCP 的 agent（例如 Claude Code、Codex，或 Kandev 里的任务 agent）。agent 的入口文档是 [AGENTS.md](AGENTS.md)，里面写了部署、验收、启动项目、跑基准、定制、升级、修改 workflow 的具体步骤和需要先问你的地方。
+
+部署时会发生这几件事：
+
+1. **agent 问你四件事**：快速安装还是自定义、部署到哪个 workspace、各角色用哪个 profile、要不要建守护。
+2. **文件放在哪里**：缺省是独立安装，运行所需的文件复制到安装目录 `~/.kandev-ma/<workspace id 前 8 位>/`，Kandev 里的 workflow 只引用它，之后删除或移动本仓库也能运行。下面提示词里的 `<安装目录>` 就是它（选了链接模式时是本仓库）。
+3. **有一步要你自己动手**：外部的 agent 建不了 Kandev automation。它会给你一个交接文件，请你在任一 Kandev 任务里把其中的「交接 prompt」交给 agent，守护就建好了。
+4. **项目跑起来以后**只需要看两个文件和两个门禁，见下面的「运行中看哪里」。
 
 **部署并验收**
 
@@ -66,7 +73,7 @@
 **启动一个项目**
 
 ```text
-按 <本仓库的本机路径>/AGENTS.md 的 C 节，在 Kandev 里用多 Agent workflow 启动一个新项目：
+按 <安装目录>/AGENTS.md 的 C 节，在 Kandev 里用多 Agent workflow 启动一个新项目：
 - 仓库：<本机绝对路径>，基线分支：<main>
 - 模式：attended（关键节点等我确认）
 - 需求（按重要度排序）：
@@ -78,15 +85,17 @@
 **跑基准项目，检验部署效果**
 
 ```text
-按 <本仓库的本机路径>/AGENTS.md 的 D 节跑一次基准项目，结束后把指标追加到 evaluation/bench/results.md，
+按 <安装目录>/AGENTS.md 的 D 节跑一次基准项目，结束后把指标追加到 evaluation/bench/results.md，
 并告诉我总时长、审核退回次数、守护告警次数和需求覆盖情况。开始前先告诉我预计的费用和时长。
 ```
 
 ### 方式二：手动部署
 
-1. 按 [kandev/README.md](kandev/README.md) 填写 `kandev/profiles.local.json`，运行 `check_docs.py`、`build_workflows.py apply`、`verify_export.py`。
+1. 按 [kandev/README.md](kandev/README.md) 写好答案文件，运行 `ma.py install`、`ma.py apply`、`ma.py doctor`。
 2. 按 [kandev/handoff/guard-automation.md](kandev/handoff/guard-automation.md) 创建守护 automation。
-3. 在「多Agent · 项目管理」新建任务，选好仓库，描述里写需求，然后 Start task。任务从「接收」步骤开始：它会推导仓库、分支、管理目录等参数，缺的（运行模式、是否先看计划等）向你提问，再交给 pm。想跳过提问，可以按 [docs/workflow.md](docs/workflow.md)「部署与启动」的 `[TASK v1]` 模板写好完整描述；各参数的含义和缺省值见 [docs/intake.md](docs/intake.md)。
+3. 在「多Agent · 项目管理」新建任务，选好仓库，描述里写需求，然后 Start task。任务从「接收」步骤开始：它会推导仓库、分支、管理目录等参数，缺的（运行模式、是否先看计划等）向你提问，再交给 pm。想跳过提问，可以按 [docs/intake.md](docs/intake.md) 的 `[TASK v1]` 模板写好完整描述，各参数的含义和缺省值也在那里。
+
+定制与升级：规则（git、编码、测试、工作区、质量）、角色卡和参数都可以改，见 [rules/README.md](rules/README.md) 和 [AGENTS.md](AGENTS.md) 的 F、G 两节；让 agent 代做时，它会先按提问清单向你确认。
 
 想先看看 workflow 长什么样：[kandev/export/](kandev/export/README.md) 是从实际部署导出的三套 workflow。
 
@@ -95,35 +104,40 @@
 - Kandev 看板：每个任务在哪一步。
 - `<mgmt_root>/project/attention.md`：需要你决定的事。
 - `<mgmt_root>/agents/guard/stage.md`：现在在等谁。
-- 「立项确认」「人工终审」：把任务拖到下一步表示批准；在任务里发消息表示带着意见退回。
+- 「立项确认」「人工终审」：进入时 pm 会向你提问（批准 / 退回修改 / 先不决定），并一起问需要你决定的各项。也可以不等提问，直接把任务拖到下一步表示批准，或在 pm 会话里发消息带着意见退回。其他需要你处理才能继续的情况，W1 的 agent 也会用提问通知你。
 
 ## 文档地图
 
 | 想了解 | 看哪里 |
 |---|---|
-| 整体设计：角色、步骤、门禁、并发、已知限制、已否决的设计 | [docs/workflow.md](docs/workflow.md) |
-| 流程图 | [docs/workflow-diagrams.md](docs/workflow-diagrams.md)（也可以用浏览器打开 `docs/workflow-diagrams.html`；图为 v3.1，步骤以 workflow.md 的表格为准） |
+| 整体设计：角色、步骤、门禁、并发、已知限制、已否决的设计 | [docs/workflow.md](docs/workflow.md)（英文概览：[docs/overview.en.md](docs/overview.en.md)） |
+| 流程图 | [docs/workflow-diagrams.md](docs/workflow-diagrams.md) |
+| 各版本改了什么、为什么改、升级注意事项 | [CHANGELOG.md](CHANGELOG.md) |
+| 启动项目的参数（`[TASK v1]` 头） | [docs/intake.md](docs/intake.md) |
 | 各步骤的完整 prompt 与配置 | [docs/prompts.md](docs/prompts.md)（由 `kandev/build_workflows.py` 生成） |
-| 管理目录的构造与文档格式 | [docs/mgmt-workspace.md](docs/mgmt-workspace.md) |
+| 管理目录的设计与文档格式 | [docs/mgmt-workspace.md](docs/mgmt-workspace.md) |
 | agent 之间怎么通信 | [mgmt-template/protocol/message.md](mgmt-template/protocol/message.md) |
 | 被开发项目要遵守的约定：额度、副作用、约束清单、测试、截图、合并与推送 | [docs/project-conventions.md](docs/project-conventions.md) |
-| 复制到每个项目的模板、角色卡和检查脚本 | [mgmt-template/](mgmt-template/README.md) |
-| 部署脚本 | [kandev/README.md](kandev/README.md) |
+| 复制到每个项目的模板（目录结构、恢复协议）、角色卡和检查脚本 | [mgmt-template/](mgmt-template/README.md) |
+| 可定制的规则和参数 | [rules/README.md](rules/README.md) |
+| 安装、部署、升级的命令 | [kandev/README.md](kandev/README.md) |
 | 示例 workflow（Kandev 导出） | [kandev/export/](kandev/export/README.md) |
 | 基准项目与指标采集 | [evaluation/](evaluation/README.md) |
 | 调研：成功案例、省 token、Kandev 机制、GitHub 作为协作平台 | [reports/多Agent协作与Kandev工作流调研.md](reports/多Agent协作与Kandev工作流调研.md) |
 | 与 dsh-superagent 的对比 | [reports/借鉴-dsh-superagent.md](reports/借鉴-dsh-superagent.md) |
 | 平台选型：要不要换掉 Kandev | [reports/平台选型-是否替换Kandev.md](reports/平台选型-是否替换Kandev.md) |
-| 早期设计稿 | [docs/history/](docs/history/) |
+| 早期设计稿、责任分工方案对比图 | [docs/history/](docs/history/) |
 
 ## 目录结构
 
 ```
-├─ AGENTS.md         给 agent 的入口：部署、验收、启动项目、跑基准、修改 workflow
-├─ docs/             架构文档、流程图、生成的 prompt、管理目录与项目约定
-├─ kandev/           部署脚本、守护脚本、示例 workflow（export/）、交接 prompt
+├─ AGENTS.md         给 agent 的入口：部署、验收、启动项目、跑基准、定制、升级、修改 workflow
+├─ CHANGELOG.md      各版本的变更记录
+├─ docs/             架构文档、流程图、生成的 prompt、启动参数、管理目录与项目约定、英文概览
+├─ kandev/           安装与部署入口（ma.py）、守护脚本、示例 workflow（export/）、交接 prompt
+├─ rules/            可定制的规则槽位（git、编码、测试等）和参数的出厂版本
 ├─ mgmt-template/    每个项目的管理目录模板：角色卡、消息协议、检查脚本
 ├─ evaluation/       基准项目与指标采集
-├─ reports/          调研报告
-└─ research_notes/   调研笔记
+├─ reports/          调研报告（只在源仓库，不随安装复制）
+└─ research_notes/   调研笔记（同上）
 ```

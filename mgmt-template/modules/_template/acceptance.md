@@ -26,7 +26,7 @@
 | MA-1 | pass / fail / unverified(原因) | |
 
 ### 修复项
-<!-- 只写阻塞级的 fail（F-n），以及属于本模块、要退回去改测试的测试缺陷（T-n，契约只改测试）；没有写"无"。定级和格式见 roles/module-auditor.md。 -->
+<!-- 只写阻塞级的 fail（F-n），以及属于本模块、要退回去改测试的测试缺陷（T-n，契约只改测试）；没有写"无"。定级和格式见步骤 prompt【定级】【修复项】；担当写任务 id，或说明需要新任务。 -->
 | 编号 | 担当 | 复现步骤 | 期望 | 实际 | 疑似位置 | 对应 |
 |---|---|---|---|---|---|---|
 | F-1 | auth-02 | `pytest tests/auth/test_login.py -k locked` | 返回 423 | 返回 500 | src/auth/api/login.py | MA-3 |
@@ -53,4 +53,4 @@
 
 ### 结论
 - 通过（「修复项」为空）→ REPORT 消息 id：M-mod-audit.auth-...（有 unverified 或 K-n 时 result=partial，逐条列出）
-- 不通过 → 退回「等待开发」：N 条修复项（第 3 轮或涉及其他模块时另发 ESCALATE <id>）
+- 不通过 → 退回「等待开发」：N 条修复项（到了轮数上限或涉及其他模块时另发 ESCALATE <id>）

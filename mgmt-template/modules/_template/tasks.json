@@ -1,7 +1,5 @@
 {
   "module": "auth",
-  "branch": "mod/auth",
-  "updated": "2026-11-09 10:00",
   "module_task_id": null,
   "module_session_id": null,
   "_module_ids": "module_task_id=模块任务的 Kandev task id，module_session_id=模块 agent 的 Kandev 会话 id：「模块规划」时写入，会话变了就更新。pm、验收者和守护用它把消息发到模块 agent 的会话",
@@ -16,14 +14,11 @@
       "owns": ["src/auth/models/", "tests/auth/test_models.py"],
       "blocked_by": [],
       "acceptance": ["AC-1 密码以 argon2 哈希存储 · covers: MA-1", "AC-2 用户名唯一约束 · covers: MA-2"],
-      "refs": ["R-1"],
       "ui": false,
       "tests": ["pytest tests/auth/test_models.py -q"],
       "boundaries": ["B-1"],
       "kandev_task_id": null,
       "status": "planned",
-      "passes": false,
-      "review_rounds": 0,
       "note": ""
     },
     {
@@ -32,14 +27,11 @@
       "owns": ["src/auth/api/login.py", "tests/auth/test_login.py"],
       "blocked_by": ["auth-01"],
       "acceptance": ["AC-1 正确凭据返回 token · covers: MA-3", "AC-2 错误凭据返回 401 BAD_CREDENTIALS · covers: MA-3"],
-      "refs": ["R-1"],
       "ui": false,
       "tests": ["pytest tests/auth/test_login.py -q"],
       "boundaries": [],
       "kandev_task_id": null,
       "status": "planned",
-      "passes": false,
-      "review_rounds": 0,
       "note": ""
     }
   ]

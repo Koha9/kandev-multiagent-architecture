@@ -1,4 +1,5 @@
-"""stage.py 的离线回归测试：python kandev/tests/test_stage.py（也由 check_docs.py 调用）。只用标准库。"""
+"""stage.py 的离线回归测试：python kandev/tests/test_stage.py（也由 check_docs.py 调用）。只用标准库。
+本文件里每个 test_ 开头的函数都会自动运行，不用登记。分类规则的先后见 PRIORITY（test_priority）。"""
 import json
 import os
 import sys
@@ -14,12 +15,13 @@ PM, MOD = "00000000-0000-0000-0000-0000000000aa", "00000000-0000-0000-0000-00000
 def run(state, now):
     snap = json.load(open(os.path.join(HERE, "stage_snapshot.json"), encoding="utf-8"))
     for t in snap["tasks"]:
-        t.setdefault("description", ""), t.setdefault("sessions", []), t.setdefault("blockers", [])
+        t.setdefault("description", ""), t.setdefault("sessions", [])
     rows, alerts, new_state = evaluate(snap["tasks"], ts(now), state, snap["pm_task"])
     return {r["title"]: r["category"] for r in rows}, [(a["signal"], a["to_task"]) for a in alerts], new_state
 
 
-def main():
+def test_snapshot():
+    """stage_snapshot.json 连续巡检三次：分类、阈值、去重。"""
     cats, alerts, st = run({}, "2026-11-09T05:00:00+00:00")
     assert cats["core-01"] == "完成", cats
     assert cats["core-02"] == "等上级：可放行", cats          # 前置已完成，但刚进入，未到阈值
@@ -37,25 +39,69 @@ def main():
     assert not any(a[0] == "pm_unresponsive" for a in alerts), alerts   # pm 不在常驻步骤：不移到刷新
     assert ("running_stale", MOD) in alerts, alerts
     assert ("hold_ready", MOD) not in alerts, alerts         # 距上次告警 50 分钟，去重
-    test_grouping()
-    test_parse_reset()
-    test_usage_limit()
-    test_limit_resume()
-    test_should_disable()
-    test_steps_v32()
-    test_pm_unresponsive()
-    test_w1_idle_and_decision()
-    test_hold_from_tasks_json()
-    test_load_blockers()
-    test_child_unrecorded()
-    test_session_not_started()
-    test_load_statuses()
-    test_suggest_complete()
-    test_session_long()
-    test_stuck_and_parent_done()
-    test_module_session_routing()
-    test_note_failure()
-    print("OK test_stage")
+
+
+def test_ts():
+    assert ts("2026-11-09T05:00:00Z") == ts("2026-11-09T05:00:00+00:00") == ts("2026-11-09T05:00:00")
+    assert ts("2026-11-09T05:00:00.123456789Z") == ts("2026-11-09T05:00:00.123456+00:00")
+    assert ts("2026-11-09T05:00:00.123-05:00") == ts("2026-11-09T10:00:00.123Z")       # 负时区 + 小数秒
+    assert ts("2026-11-09T14:00:00.5+09:00") == ts("2026-11-09T05:00:00.5Z") and ts("") is None
+
+
+def test_load_modules_tolerant():
+    """tasks.json 带 BOM 能读；编码不对或形状不对的模块记入 unreadable，不抛错，也不影响其他模块。"""
+    import tempfile
+    from stage import load_modules
+    doc = {"module_task_id": "M1", "module_session_id": "S1",
+           "tasks": [{"id": "a-1", "status": "merged", "kandev_task_id": "K1"},
+                     {"id": "a-2", "status": "held", "kandev_task_id": "K2", "blocked_by": ["a-1"]}]}
+    with tempfile.TemporaryDirectory() as root:
+        for name, data in (("bom", json.dumps(doc).encode("utf-8-sig")), ("utf16", json.dumps(doc).encode("utf-16")),
+                           ("list", b"[1, 2]"), ("cut", b'{"tasks": [')):
+            os.makedirs(os.path.join(root, "modules", name))
+            with open(os.path.join(root, "modules", name, "tasks.json"), "wb") as f:
+                f.write(data)
+        got = load_modules(root)
+        assert got["blockers"] == {"K1": [], "K2": ["merged"]} and got["statuses"] == {"K1": "merged", "K2": "held"}, got
+        assert got["sessions"] == {"M1": "S1"} and got["unreadable"] == ["cut", "list", "utf16"], got
+
+
+def test_main_isolation():
+    """一个项目的管理目录写不进去：其他项目照常巡检，告警照常输出；损坏的去重状态按空处理；--dry-run 什么都不写。"""
+    import subprocess
+    import tempfile
+    stage_py = os.path.join(os.path.dirname(HERE), "stage.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        bad, good, state = (os.path.join(tmp, n) for n in ("bad", "good", "state"))
+        for root in (bad, good):
+            os.makedirs(root)
+            open(os.path.join(root, "README.md"), "w").close()
+        open(os.path.join(bad, "agents"), "w").close()            # agents 是文件：stage.md 写不进去
+        idle = [{"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "s"}]     # 卡住 2 小时 → running_stale
+        tasks = [{"id": uid(n), "title": f"pm-{name}", "workflow": "多Agent · 项目管理", "step": "调度", "state": "IN_PROGRESS",
+                  "description": f"mgmt_root: {root}", "sessions": idle} for n, (name, root) in enumerate((("bad", bad), ("good", good)), 1)]
+        snap = os.path.join(tmp, "snap.json")
+        json.dump({"tasks": tasks}, open(snap, "w", encoding="utf-8"))
+
+        def cli(*extra, now="2026-11-09T05:00:00+00:00"):
+            r = subprocess.run([sys.executable, stage_py, "--snapshot", snap, "--now", now, "--json", *extra],
+                               capture_output=True, text=True, encoding="utf-8")
+            return r.returncode, [json.loads(l) for l in r.stdout.splitlines() if l.strip()], r.stderr
+
+        out_md = os.path.join(good, "agents", "guard", "stage.md")
+        code, alerts, err = cli("--state-dir", state, "--dry-run")
+        assert code == 0 and len(alerts) == 2 and not os.path.exists(state) and not os.path.exists(out_md), (code, alerts, err)
+        code, alerts, err = cli()                                  # 快照模式不带 --state-dir：也不写
+        assert code == 0 and not os.path.exists(out_md), (code, err)
+        code, alerts, err = cli("--state-dir", state)
+        assert code == 1 and "pm-bad" in err and os.path.exists(out_md), (code, err)
+        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # 出错的项目告警也已输出
+        assert not os.path.exists(os.path.join(state, f"{uid(1)}.json")), "写不进去的项目不应记为已告警"
+        with open(os.path.join(state, f"{uid(2)}.json"), "w") as f:
+            f.write('{"0000')                                      # 写到一半的状态文件
+        code, alerts, err = cli("--state-dir", state, now="2026-11-09T05:20:00+00:00")
+        assert code == 1 and "pm-good" in {a["project"] for a in alerts}, (code, alerts, err)
+        assert json.load(open(os.path.join(state, f"{uid(2)}.json"), encoding="utf-8")), "状态文件应被重新写好"
 
 
 def test_stuck_and_parent_done():
@@ -296,14 +342,245 @@ def test_load_statuses():
         assert load_statuses(os.path.join(root, "nope")) == {}
 
 
-def test_suggest_complete():
-    """每个可能发出的信号都有建议（evaluate 用 SUGGEST[...] 取值，缺了会 KeyError）。"""
-    import inspect
-    import re
+def test_signal_table():
+    """信号表 SIGNALS 的形状；classify 给出表里没有的信号时立即报错（即使停留时间还没到阈值）。"""
     import stage
-    src = inspect.getsource(stage.classify)                       # classify 产生的信号都要在 SUGGEST 里
-    signals = set(re.findall(r'"([a-z_]+)" if ', src)) | set(re.findall(r'r\("[^"]+", "([a-z_]+)"', src))
-    assert signals and signals <= set(stage.SUGGEST), signals - set(stage.SUGGEST)
+    for name, sig in stage.SIGNALS.items():
+        assert sig.to in (stage.SUPERIOR, stage.SELF, stage.TO_PM) and isinstance(sig.escalate, bool), name
+        assert sig.suggest and sig.session in (None, "limit", "long"), name
+        assert sig.message is None or sig.session, name                 # 原样发出的消息必须指明发到哪个会话
+    assert not {stage.ESCALATED, stage.DISABLED} & set(stage.SIGNALS)
+    for due in (True, False):
+        try:
+            stage.verdict("等上级：不存在", "no_such_signal", due=due)
+        except KeyError:
+            continue
+        raise AssertionError("信号表里没有的信号应当报错")
+    assert stage.verdict("等上级：可放行", "hold_ready", 3, 10, due=False)["signal"] is None
+    assert {r[-2] for r in PRIORITY if r[-2]} == set(stage.SIGNALS), "PRIORITY 应覆盖信号表里的每个信号"
+
+
+# 分类规则的先后：从上到下就是 classify 的判断顺序，每行是"同时满足后面几条规则的条件时，这一条生效"。
+# (说明, workflow, 步骤, 上级模块, 任务的其他字段, 期望的分类, 期望的信号, 期望的告警对象)
+# 上级模块：LIVE = 还在「等待开发」的模块任务，GONE = 已完成的模块任务。告警对象：PM1 / LIVE / ME（任务自己）/ None（不告警）。
+PM1, LIVE, GONE, ME = "pm", "live", "gone", "me"
+_FRESH = {"state": "RUNNING", "updated_at": "2026-11-09T04:58:00Z", "session_id": "aaaaaaaa-new"}
+_STALE = {"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "bbbbbbbb-old"}
+_IDLE = {"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z", "session_id": "cccccccc-idle"}
+_ENDED = {"state": "COMPLETED", "updated_at": "2026-11-09T04:00:00Z", "session_id": "dddddddd-done"}
+_FAILED = {"state": "FAILED", "updated_at": "2026-11-09T04:00:00Z", "session_id": "eeeeeeee-fail"}
+_LIM_DUE = {"session_id": "S-lim", "at": "2026-11-09T03:00:00+00:00", "resets_at": "2026-11-09T04:00:00+00:00"}
+_LIM_WAIT = {**_LIM_DUE, "resets_at": "2026-11-09T06:00:00+00:00"}
+PRIORITY = [
+    ("完成的模块留着卡住的会话", "模块管理", "完成", None, {"state": "COMPLETED", "sessions": [_ENDED, _STALE]},
+     "等上级：已完成但会话卡住", "session_stuck", PM1),
+    ("完成但 tasks.json 未登记", "开发", "完成", LIVE, {"state": "COMPLETED", "own_status": "todo"},
+     "等上级：完成未登记", "child_unrecorded", LIVE),
+    ("完成先于其他一切", "开发", "完成", LIVE, {"state": "COMPLETED", "own_status": "merged", "perm": 1, "limit": _LIM_DUE},
+     "完成", None, None),
+    ("权限请求先于提问、门禁、用量上限", "项目管理", "人工终审", None, {"perm": 2, "question": True, "limit": _LIM_DUE},
+     "等人：权限请求", None, None),
+    ("autonomy 2 立项确认的提问挂了 60 分钟：超时先于提问 → pm 自己", "项目管理", "立项确认", None,
+     {"question": True, "sessions": [_IDLE], "description": "[TASK v1]\nautonomy: 2\nmode: attended\nmgmt_root: D:/p1-mgmt"},
+     "等人：立项确认（超时）", "gate_timeout", ME),
+    ("提问先于用量上限", "开发", "开发", LIVE, {"question": True, "limit": _LIM_DUE, "sessions": [_IDLE]},
+     "等人：提问", None, None),
+    ("门禁先于用量上限", "项目管理", "人工终审", None, {"limit": _LIM_DUE, "sessions": [_IDLE]},
+     "等人：人工终审", None, None),
+    ("用量上限已重置，先于旧会话卡住", "开发", "开发", LIVE, {"limit": _LIM_DUE, "sessions": [_IDLE, _STALE]},
+     "等上限：已重置，待恢复", "limit_resume", ME),
+    ("用量上限未重置，先于等待决策", "开发", "等待决策", LIVE, {"limit": _LIM_WAIT, "sessions": [_IDLE]},
+     "等上限：等待重置", None, None),
+    ("旧会话卡住先于模块已完成", "开发", "开发", GONE, {"sessions": [_FRESH, _STALE]},
+     "等上级：旧会话卡住", "session_stuck", PM1),
+    ("模块已完成先于等待决策", "开发", "等待决策", GONE, {"sessions": [_IDLE]},
+     "等上级：模块已完成", "parent_done", PM1),
+    ("接收的会话失败只给人看", "项目管理", "接收", None, {"sessions": [_FAILED]},
+     "等人：接收会话失败", None, None),
+    ("等待决策先于会话失败", "开发", "等待决策", LIVE, {"sessions": [_FAILED]},
+     "等上级：等待决策", "decision_pending", LIVE),
+    ("会话失败先于会话未启动", "开发", "审核", LIVE, {"state": "SCHEDULING", "sessions": [_FAILED]},
+     "等上级：会话失败", "session_failed", LIVE),
+    ("模块任务会话失败 → pm", "模块管理", "模块规划", None, {"sessions": [_FAILED]},
+     "等上级：会话失败", "session_failed", PM1),
+    ("pm 会话失败 → pm 自己", "项目管理", "调度", None, {"sessions": [_FAILED]},
+     "等上级：会话失败", "session_failed", ME),
+    ("会话未启动先于空闲未推进", "开发", "审核", LIVE, {"state": "SCHEDULING", "sessions": [_ENDED]},
+     "等上级：会话未启动", "session_not_started", LIVE),
+    ("W2 会话未启动只给人看", "模块管理", "验收调查", None, {"state": "SCHEDULING", "sessions": [_ENDED]},
+     "等人：会话未启动", None, None),
+    ("前置失败先于可放行", "开发", "待开发", LIVE, {"blocker_status": ["merged", "failed"]},
+     "等上级：前置失败", "hold_broken", LIVE),
+    ("前置全部完成", "开发", "待开发", LIVE, {"blocker_status": ["merged", "dropped"]},
+     "等上级：可放行", "hold_ready", LIVE),
+    ("空闲未推进", "开发", "审核", LIVE, {"sessions": [_IDLE]},
+     "等上级：空闲未推进", "idle_no_signal", LIVE),
+    ("W1 空闲未推进只给人看", "项目管理", "项目验收", None, {"sessions": [_IDLE]},
+     "等人：空闲未推进", None, None),
+    ("最新会话疑似卡住", "开发", "开发", LIVE, {"sessions": [_STALE]},
+     "等上级：疑似卡住", "running_stale", LIVE),
+    ("疑似卡住先于会话过长", "模块管理", "等待开发", None, {"sessions": [_STALE], "long": {"session_id": "S-long", "wakes": 99}},
+     "等上级：疑似卡住", "running_stale", PM1),
+    ("开发步骤前置未满足先于排队", "开发", "开发", LIVE, {"blocker_status": ["todo"]},
+     "等上级：开发步骤前置未满足", "dev_blocked", LIVE),
+    ("WIP 未准入", "开发", "开发", LIVE, {"wip_step": True, "wip_admitted": False, "sessions": [_FRESH]},
+     "排队", None, None),
+    ("待开发，前置未完成", "开发", "待开发", LIVE, {"blocker_status": ["todo"]},
+     "待开发", None, None),
+    ("常驻会话过长", "模块管理", "等待开发", None, {"sessions": [_IDLE], "long": {"session_id": "S-long", "wakes": 99}},
+     "常驻：会话过长", "session_long", ME),
+    ("常驻", "模块管理", "等待开发", None, {"sessions": [_IDLE]},
+     "常驻", None, None),
+    ("运行中", "开发", "开发", LIVE, {"sessions": [_FRESH]},
+     "运行中", None, None),
+]
+
+
+def test_priority():
+    """PRIORITY 逐行核对：分类、信号、告警对象。每个任务都已在当前步骤停留 30 分钟（停留阈值都已满足）。"""
+    now = ts("2026-11-09T05:00:00Z")
+    ids = {PM1: uid(1), LIVE: uid(11), GONE: uid(12), ME: uid(50)}
+    for name, wf, step, parent, extra, want_cat, want_sig, want_to in PRIORITY:
+        desc = f"parent: mod:a @ task {ids[parent]}" if parent else f"pm: task {uid(1)}"
+        me = task(1 if wf == "项目管理" else 50, wf, step, "[TASK v1]\nmgmt_root: D:/p1-mgmt" if wf == "项目管理" else desc)
+        me.update({k: ([dict(x) for x in v] if k == "sessions" else v) for k, v in extra.items()})
+        tasks = [task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt"),
+                 task(11, "模块管理", "等待开发", f"pm: task {uid(1)}"),
+                 task(12, "模块管理", "完成", f"pm: task {uid(1)}", state="COMPLETED")]
+        tasks = [t for t in tasks if t["id"] != me["id"]] + [me]
+        state = {t["id"]: {"step": t["step"], "since": "2026-11-09T04:30:00+00:00"} for t in tasks}
+        rows, alerts, _ = evaluate(tasks, now, state, uid(1))
+        mine = [a for a in alerts if a["object"].endswith(me["id"])]
+        assert rows[-1]["category"] == want_cat, (name, rows[-1]["category"])
+        want = [(want_sig, me["id"] if want_to == ME else ids[want_to])] if want_sig else []
+        assert [(a["signal"], a["to_task"]) for a in mine] == want, (name, mine)
+
+
+def test_gate_timeout():
+    """立项确认超时：autonomy 2、plan_only 不是 true、pm 的提问还挂着、且最新会话 ≥T_GATE 分钟没有更新才告警。"""
+    import stage
+    now = ts("2026-11-09T05:00:00Z")
+    head = "[TASK v1]\n{}mode: attended\nmgmt_root: D:/p1-mgmt"
+
+    def sig(extra_head, asked="2026-11-09T04:30:00Z", step="立项确认", question=True, since="2026-11-09T03:00:00+00:00"):
+        """asked：pm 会话最后一次更新（发出提问）的时间；since：任务进入本步骤的时间。"""
+        t = task(1, "项目管理", step, head.format(extra_head))
+        t.update({"question": question, "sessions": [{**_IDLE, "updated_at": asked}], "since": ts(since)})
+        return stage.classify(t, now, {t["id"]: t})
+
+    hit = sig("autonomy: 2\n")
+    assert (hit["category"], hit["signal"], hit["value"], hit["threshold"]) == ("等人：立项确认（超时）", "gate_timeout", 30, stage.T_GATE), hit
+    assert sig("autonomy: 2\nplan_only: false\n")["signal"] == "gate_timeout"
+    for extra in ("autonomy: 1\n", "autonomy: 3\n", "autonomy: 2\nplan_only: true\n", ""):
+        got = sig(extra)
+        assert got["signal"] is None and got["category"] == "等人：提问", (extra, got)
+    # 用户选了"先不决定"：没有待答的提问，停留再久也不触发
+    got = sig("autonomy: 2\n", question=False)
+    assert got["signal"] is None and got["category"] == "等人：立项确认", got
+    # 用户 5 分钟前答了第 1 批、pm 刚发出第 2 批：任务已在本步骤 2 小时，但提问只挂了 5 分钟
+    got = sig("autonomy: 2\n", asked="2026-11-09T04:55:00Z")
+    assert got["signal"] is None and got["category"] == "等人：提问", got
+    assert sig("autonomy: 2\n", asked="2026-11-09T04:45:00Z")["signal"] is None, "提问挂着没到 T_GATE 不告警"
+    assert sig("autonomy: 2\n", step="人工终审")["signal"] is None, "人工终审不设超时"
+    keep, stage.T_GATE = stage.T_GATE, 0
+    try:
+        assert sig("autonomy: 2\n")["signal"] is None, "T_GATE=0 关闭"
+    finally:
+        stage.T_GATE = keep
+
+
+def test_dedup_flapping():
+    """时有时无的信号在 60 分钟内只告警一次（旧版在信号消失的那次巡检清掉记录，回来就立刻重发）；
+    一直存在的信号满 60 分钟重发；换过步骤算新的情况。"""
+    now = ts("2026-11-09T05:00:00Z")
+
+    def patrol(t, minutes, st, sessions=None, **fields):
+        at = now + timedelta(minutes=minutes)
+        if sessions is not None:
+            t["sessions"] = [{"state": s, "updated_at": (at - timedelta(minutes=age)).isoformat(), "session_id": "S"}
+                             for s, age in sessions]
+        t.update(fields)
+        _, alerts, st = evaluate([t], at, st, uid(1))
+        return [(a["signal"], a["to_task"]) for a in alerts], st
+
+    idle, running = [("WAITING_FOR_INPUT", 15)], [("RUNNING", 1)]
+    hit = [("idle_no_signal", uid(11))]
+    d = task(21, "开发", "审核", f"parent: mod:a @ task {uid(11)}")
+    got, st = patrol(d, 0, {}, idle)
+    assert got == hit, got
+    got, st = patrol(d, 20, st, running)                    # 信号消失一次
+    assert got == [] and st[uid(21)]["alerts"], (got, st)   # 记录保留
+    got, st = patrol(d, 40, st, idle)                       # 又出现：距上次告警 40 分钟，不重发
+    assert got == [], got
+    got, st = patrol(d, 59, st, idle)
+    assert got == [], got
+    got, st = patrol(d, 60, st, idle)                       # 满 60 分钟重发
+    assert got == hit, got
+    got, st = patrol(d, 80, st, running)
+    got, st = patrol(d, 125, st, running)                   # 过期的记录被清掉
+    assert got == [] and st[uid(21)]["alerts"] == {}, (got, st)
+    got, st = patrol(d, 130, st, idle)
+    assert got == hit, got
+
+    d = task(22, "开发", "审核", f"parent: mod:a @ task {uid(11)}")     # 一直存在：0、60 分钟各一次
+    sent, st = [], {}
+    for m in (0, 20, 40, 60, 80):
+        got, st = patrol(d, m, st, idle)
+        sent.append(len(got))
+    assert sent == [1, 0, 0, 1, 0], sent
+
+    lim = {"session_id": "S-dev", "at": "2026-11-09T03:00:00+00:00", "resets_at": "2026-11-09T04:00:00+00:00"}
+    d = task(23, "开发", "开发", f"parent: mod:a @ task {uid(11)}")     # 恢复后又碰到上限：距上次恢复满 60 分钟才再发
+    got, st = patrol(d, 0, {}, idle, limit=lim)
+    assert got == [("limit_resume", uid(23))], got
+    got, st = patrol(d, 20, st, running, limit=None)
+    got, st = patrol(d, 40, st, idle, limit=lim)
+    assert got == [], got
+    got, st = patrol(d, 60, st, idle, limit=lim)
+    assert got == [("limit_resume", uid(23))], got
+
+    d = task(24, "开发", "等待决策", f"parent: mod:a @ task {uid(11)}")  # 换过步骤再回来：新的情况，不受上次告警影响
+    got, st = patrol(d, 0, {}, idle)
+    got, st = patrol(d, 12, st, idle)
+    assert got == [("decision_pending", uid(11))], got
+    got, st = patrol(d, 20, st, running, step="开发")
+    got, st = patrol(d, 25, st, idle, step="等待决策")
+    got, st = patrol(d, 37, st, idle)
+    assert got == [("decision_pending", uid(11))], got
+
+
+def test_escalation_needs_continuity():
+    """pm_unresponsive：只有信号自上次告警起每次巡检都在，才升级；中途消除过就只重发原信号，再持续 60 分钟才升级。"""
+    now = ts("2026-11-09T05:00:00Z")
+    pm = task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt")
+
+    def patrol(minutes, st, stuck=True):
+        at = now + timedelta(minutes=minutes)
+        pm["sessions"] = [{"state": "RUNNING", "updated_at": (at - timedelta(minutes=120 if stuck else 1)).isoformat()}]
+        _, alerts, st = evaluate([pm], at, st, uid(1))
+        return [a["signal"] for a in alerts], st
+
+    got, st = patrol(0, {})
+    assert got == ["running_stale"] and st[uid(1)]["streak"] == "running_stale", (got, st)
+    got, st = patrol(20, st, stuck=False)                   # pm 动了一下：信号消除
+    assert got == [] and st[uid(1)]["streak"] is None, (got, st)
+    got, st = patrol(40, st)                                # 又卡住：60 分钟内不重发
+    assert got == [], got
+    got, st = patrol(65, st)                                # 到期：重发原信号，不升级
+    assert got == ["running_stale"], got
+    got, st = patrol(100, st)
+    assert got == [], got
+    got, st = patrol(130, st)                               # 这次是连续 65 分钟没消除：升级
+    assert got == ["pm_unresponsive"], got
+
+    got, st = patrol(0, {})                                 # 对照：一直没消除
+    got, st = patrol(30, st)
+    got, st = patrol(65, st)
+    assert got == ["pm_unresponsive"], got
+
+    old = {uid(1): {"step": "调度", "since": now.isoformat(), "alerts": {"running_stale": now.isoformat()}}}
+    got, st = patrol(65, old)                               # 升级前写下的状态文件没有 streak：按一直没消除处理
+    assert got == ["pm_unresponsive"], got
 
 
 def test_parse_reset():
@@ -384,11 +661,11 @@ def test_should_disable():
 
 
 def test_steps_v32():
-    """v3.2 的步骤（无「环境基线」）与 v3.1 兼容：旧步骤名不报错，新步骤按预期分类。"""
+    """各步骤按预期分类；不认识的步骤名不报错。"""
     now = ts("2026-11-09T05:00:00Z")
     idle = [{"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:00:00Z"}]   # 空闲 60 分钟
     cases = [
-        ("项目管理", "环境基线", idle, "等人：空闲未推进"),      # v3.1 旧 workflow 中的任务仍要能分类
+        ("项目管理", "环境基线", idle, "运行中"),                # v3.1 的步骤（已不支持）：和其他不认识的步骤名一样
         ("项目管理", "模块下发", idle, "等人：空闲未推进"),
         ("项目管理", "接收", idle, "等人：空闲未推进"),          # v3.3 入口：描述还没有 [TASK v1] 头，不告警
         ("项目管理", "接收", [], "排队"),
@@ -464,15 +741,15 @@ def test_w1_idle_and_decision():
 
 
 def test_hold_from_tasks_json():
-    """v3.2：「待开发」的前置取自 tasks.json 的 status；v3.1 的 Kandev 前置仍然有效。"""
+    """「待开发」的前置只取自 tasks.json 的 status（W3 任务不设 Kandev 的 blocked_by）。"""
     now = ts("2026-11-09T05:00:00Z")
     later = now + timedelta(minutes=15)
 
-    def cat(statuses, kblockers=(), extra=(), step="待开发"):
+    def cat(statuses, step="待开发"):
         h = task(30, "开发", step, f"parent: mod:a @ task {uid(11)}")
-        h["blocker_status"], h["blockers"] = statuses, list(kblockers)
-        rows, first, st = evaluate([h, *extra], now, {}, uid(1))
-        rows, second, st = evaluate([h, *extra], later, st, uid(1))      # 15 分钟后（去重：同一信号不重复）
+        h["blocker_status"] = statuses
+        rows, first, st = evaluate([h], now, {}, uid(1))
+        rows, second, st = evaluate([h], later, st, uid(1))              # 15 分钟后（去重：同一信号不重复）
         return rows[0]["category"], [(a["signal"], a["to_task"]) for a in first + second]
 
     assert cat(["merged", "dropped"]) == ("等上级：可放行", [("hold_ready", uid(11))])
@@ -480,17 +757,8 @@ def test_hold_from_tasks_json():
     assert cat(["merged", None]) == ("待开发", [])                                   # blocked_by 在 tasks.json 里查不到
     assert cat(["merged", "failed"]) == ("等上级：前置失败", [("hold_broken", uid(11))])
     assert cat(["held"]) == ("待开发", [])
+    assert cat([]) == ("等上级：可放行", [("hold_ready", uid(11))])                    # 登记了、没有前置，却一直停在「待开发」
     assert cat(None) == ("待开发（tasks.json 中查不到前置）", [])                      # 读不到 tasks.json：只显示，不告警
-    # v3.1：Kandev 里的前置
-    k_done = task(40, "开发", "完成", "", state="COMPLETED")
-    k_run = task(41, "开发", "开发", "")
-    k_bad = task(42, "开发", "开发", "", state="FAILED")
-    assert cat(None, [uid(40)], [k_done]) == ("等上级：可放行", [("hold_ready", uid(11))])
-    assert cat(None, [uid(40), uid(41)], [k_done, k_run]) == ("待开发", [])
-    assert cat(None, [uid(42)], [k_bad]) == ("等上级：前置失败", [("hold_broken", uid(11))])
-    # 两种来源任一表明未完成就不放行
-    assert cat(["merged"], [uid(41)], [k_run]) == ("待开发", [])
-    assert cat(["todo"], [uid(40)], [k_done]) == ("待开发", [])
     # 「开发」步骤里前置未满足、没有会话：不再无声地排队，向模块 agent 告警一次
     c, al = cat(["todo"], step="开发")
     assert c == "等上级：开发步骤前置未满足" and al == [("dev_blocked", uid(11))], (c, al)
@@ -498,6 +766,71 @@ def test_hold_from_tasks_json():
     assert c == "排队" and al == [], (c, al)
     c, al = cat(None, step="开发")                                                   # 没有前置信息：照常排队
     assert c == "排队" and al == [], (c, al)
+
+
+def test_module_prereqs():
+    """W2 任务在「模块规划」、Kandev 的 blocked_by 还没解除，会话却被提前启动后空闲（实测：结合测试模块收到 pm 的消息后
+    空闲 34 分钟，误报 idle_no_signal）→ 排队：等前置模块，不告警；前置全部完成后照常 idle_no_signal。"""
+    from stage import WAIT_PREREQ, kandev_deps, render
+    now = ts("2026-11-09T05:00:00Z")
+    idle = {"state": "WAITING_FOR_INPUT", "updated_at": "2026-11-09T04:26:00Z", "session_id": "s-idle"}
+    stale = {"state": "RUNNING", "updated_at": "2026-11-09T03:00:00Z", "session_id": "s-stale"}
+
+    def mod(n, name, step, extra="", state="IN_PROGRESS"):
+        t = task(n, "模块管理", step, f"[TASK v1]\nrole: module\nscope: mod:{name}\npm: task {uid(1)}\n{extra}", state)
+        t["title"] = f"mod:{name}"
+        return t
+
+    def world(base_done=True, auth_done=False, ui_done=False):
+        return [task(1, "项目管理", "调度", "[TASK v1]\nmgmt_root: D:/p1-mgmt"),
+                mod(11, "baseline", "完成" if base_done else "等待开发", "kind: baseline\nbranch: mod/baseline base main",
+                    "COMPLETED" if base_done else "IN_PROGRESS"),
+                mod(12, "auth", "完成" if auth_done else "等待开发", "branch: mod/auth base mod/baseline",
+                    "COMPLETED" if auth_done else "IN_PROGRESS"),
+                mod(13, "ui", "完成" if ui_done else "模块规划", "branch: mod/ui base mod/auth",
+                    "COMPLETED" if ui_done else "IN_PROGRESS"),
+                mod(15, "auth-fix-1", "模块规划", "branch: mod/auth-fix-1 base mod/auth"),
+                mod(14, "integration-test", "模块规划", "kind: integration\nbranch: mod/integration-test base integration")]
+
+    def check(tasks, sessions=(idle,)):
+        tasks[-1]["sessions"] = [dict(s) for s in sessions]
+        state = {t["id"]: {"step": t["step"], "since": "2026-11-09T04:20:00+00:00"} for t in tasks}
+        rows, alerts, _ = evaluate(tasks, now, state, uid(1))
+        it = next(r for r in rows if r["id"] == uid(14))
+        return it, [(a["signal"], a["to_task"]) for a in alerts if a["object"].endswith(uid(14))], rows, alerts
+
+    it, al, rows, alerts = check(world())
+    assert (it["category"], it["value"], al) == (WAIT_PREREQ, "mod:auth、mod:ui", []), (it, al)   # 修复模块不算前置
+    text = render(rows, alerts, "now")
+    assert f"- mod:integration-test（模块规划）：{WAIT_PREREQ}（mod:auth、mod:ui）" in text, text
+    it, al, *_ = check(world(base_done=False, auth_done=True, ui_done=True))
+    assert (it["category"], it["value"]) == (WAIT_PREREQ, "mod:baseline"), it
+    it, al, *_ = check(world(auth_done=True, ui_done=True))                                  # 前置全部完成：照常告警
+    assert it["category"] == "等上级：空闲未推进" and al == [("idle_no_signal", uid(1))], (it, al)
+    it, al, *_ = check(world(), sessions=(stale,))                                           # 会话卡住仍然报
+    assert al == [("running_stale", uid(1))], al
+    it, al, *_ = check(world(), sessions=())                                                 # 还没有会话
+    assert it["category"] == WAIT_PREREQ and al == [], (it, al)
+
+    # 普通模块：依赖 baseline 和 branch 行 base 指向的模块；修复模块、baseline 没有推导出的前置
+    w = world()
+    w[3]["sessions"] = [dict(idle)]
+    rows, alerts, _ = evaluate(w, now, {t["id"]: {"step": t["step"], "since": "2026-11-09T04:20:00+00:00"} for t in w}, uid(1))
+    by = {r["id"]: r for r in rows}
+    assert (by[uid(13)]["category"], by[uid(13)]["value"]) == (WAIT_PREREQ, "mod:auth"), by[uid(13)]
+    assert by[uid(15)]["category"] == "排队", by[uid(15)]
+
+    # Kandev 返回的依赖（没有 scope 也生效）；不属于本项目的 id 忽略
+    plain = task(30, "模块管理", "模块规划", f"pm: task {uid(1)}")
+    plain.update({"sessions": [dict(idle)], "deps": [uid(12), "ffffffff-0000-0000-0000-000000000000"]})
+    rows, alerts, _ = evaluate(world()[:3] + [plain], now, {plain["id"]: {"step": "模块规划", "since": "2026-11-09T04:20:00+00:00"}}, uid(1))
+    assert (rows[-1]["category"], rows[-1]["value"]) == (WAIT_PREREQ, "mod:auth") and not alerts, (rows[-1], alerts)
+    plain["deps"] = ["ffffffff-0000-0000-0000-000000000000"]
+    rows, alerts, _ = evaluate([plain], now, {plain["id"]: {"step": "模块规划", "since": "2026-11-09T04:20:00+00:00"}}, uid(1))
+    assert rows[-1]["category"] == "等上级：空闲未推进", rows[-1]
+
+    assert kandev_deps({}) is None and kandev_deps({"blocked_by": []}) == []
+    assert kandev_deps({"depends_on": ["a", {"id": "b"}, {"task_id": "c"}, 3]}) == ["a", "b", "c"]
 
 
 def test_load_blockers():
@@ -526,7 +859,7 @@ def uid(n):
 
 def task(n, wf, step, desc, state="IN_PROGRESS"):
     return {"id": uid(n), "title": f"t{n}", "workflow": f"多Agent · {wf}", "step": step, "state": state,
-            "description": desc, "sessions": [], "blockers": []}
+            "description": desc, "sessions": []}
 
 
 def test_grouping():
@@ -547,6 +880,18 @@ def test_grouping():
         uid(1): ("D:/p1-mgmt", sorted([uid(1), uid(11), uid(21)])),
         uid(2): ("D:/p2-mgmt", sorted([uid(2), uid(12), uid(22)])),
     }, got                                                   # 已完成的项目和无法归属的任务不出现
+
+
+def main():
+    tests = [(n, f) for n, f in globals().items() if n.startswith("test_") and callable(f)]
+    assert len(tests) >= 20, "没有找到测试函数"
+    for name, fn in tests:
+        try:
+            fn()
+        except Exception:
+            print(f"FAIL {name}", file=sys.stderr)
+            raise
+    print("OK test_stage")
 
 
 if __name__ == "__main__":

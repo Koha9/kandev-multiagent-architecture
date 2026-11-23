@@ -1,8 +1,6 @@
-# 管理 workspace 构造（抗压缩版）
+# 管理 workspace 的设计（抗压缩）
 
-**中文** | [English](mgmt-workspace.en.md)
-
-> 配套 [workflow.md](workflow.md)。可直接复制的模板在 `mgmt-template/`，消息格式在 `mgmt-template/protocol/message.md`，各步骤的 prompt 在 [prompts.md](prompts.md)。
+> 配套 [workflow.md](workflow.md)。本文件讲管理目录为什么这样设计，以及任务文档、格式约定和 JSON 字段。目录结构和恢复协议的条文在 [mgmt-template/README.md](../mgmt-template/README.md)（可直接复制的模板也在那里），消息格式在 [mgmt-template/protocol/message.md](../mgmt-template/protocol/message.md)，各步骤的 prompt 在 [prompts.md](prompts.md)。
 
 ## 1. 目标
 
@@ -26,71 +24,32 @@
 | R3 | **恢复只读文件** | 恢复时只读 README → 角色卡 → 自己的 NOW | 依赖对话摘要导致的偏差，以及重复调查 |
 
 R1 的配套机制是**幂等**：
-- `create_task_kandev` 一律带 `external_id`（模块用 `mod-<模块>`，开发任务用任务 ID）。恢复时如果看到未确认的创建意图，用相同的 `external_id` 重新调用即可，不会重复建任务。
+- `create_task_kandev` 一律带 `external_id`（模块用 `<pm 任务 id>-mod-<模块>`，开发任务用 `<模块任务 id>-<任务 ID>`，避免与同一 workspace 里以前的项目撞名）。恢复时如果看到未确认的创建意图，用相同的 `external_id` 重新调用即可，不会重复建任务。
 - 消息带唯一的 `id`，接收方按 id 去重。
 - `move_task_kandev` 和 `step_complete_kandev` 重做之前，先确认任务当前所在的步骤。这是检查自己动作的结果，不属于"查询别人"。
 
 ---
 
-## 3. 恢复协议（写进 README 和每个 workflow prompt）
+## 3. 恢复协议
 
-```
-1. 从任务描述的 [TASK v1] 头确认自己的 scope 和 mgmt_root
-2. 读 <mgmt_root>/roles/<角色>.md
-3. 读自己的 NOW
-   - 管理类：<mgmt_root>/agents/<scope>/NOW.md
-   - 开发：Kandev 任务文档 now
-   - 审核、守护：没有 NOW，直接从头开始（这两类工作本身是幂等的）
-4. 处理「未确认的意图」：用相同幂等键重做，或确认已完成后删除
-5. 处理「等待中」：看对话里有没有回复；超时则按消息协议重发或升级
-6. 从「下一步」第 1 条继续
-```
+恢复协议的条文只在 [mgmt-template/README.md](../mgmt-template/README.md) 维护：它被复制成每个项目管理目录的 README，agent 恢复时读的就是那一份；各步骤 prompt 里的恢复步骤由 `kandev/build_workflows.py` 生成。
+
+设计上的要点：
+
+- 入口固定：任务描述的 `[TASK v1]` 头给出 scope 和 `mgmt_root`，由此找到角色卡和自己的 NOW，三次读取以内恢复。
+- 管理类 agent 的 NOW 在 `agents/<scope>/NOW.md`，开发的在 Kandev 任务文档 `now`；审核、评审、模块验收、守护没有 NOW，直接从头开始（这几类工作本身是幂等的）。
+- 恢复后先处理「未确认的意图」（用相同幂等键重做，或确认已完成后删除），再处理「等待中」，最后从「下一步」第 1 条继续。
+- 不为了恢复去翻对话历史或别人的 NOW。
 
 ---
 
 ## 4. 目录结构与写者
 
-```
-<project>-mgmt/                         放在开发 worktree 之外
-├─ README.md                 地图 + 恢复协议                 PM（初始化后基本不改）
-├─ roles/                    角色卡（全量规则）              只读（从模板复制）
-│   ├─ pm.md
-│   ├─ module.md
-│   ├─ module-auditor.md
-│   ├─ developer.md
-│   ├─ reviewer.md
-│   └─ guard.md
-├─ protocol/
-│   └─ message.md            消息与交接格式                  只读（从模板复制）
-├─ tools/                    check_owns / check_tasks / quota / mgmt_precommit  只读（从模板复制）
-├─ project/
-│   ├─ charter.md            需求原文 R-n、目标、范围、模块、模块边界 B-n、PA  PM
-│   ├─ attention.md          需要用户处理的事（附推荐答案）  PM
-│   ├─ conventions.md        协作规范、约束清单              PM
-│   ├─ environment.md        环境、命令、冒烟测试、合并门禁、共享文件  baseline 模块 agent（或 mod:baseline-fix-<n>）
-│   ├─ registry.json         担当表（谁负责什么、task id）   PM
-│   ├─ status.json           全局状态快照                    PM
-│   ├─ final-report.md       项目验收报告                    项目验收步骤（auditor）；「收尾」节由收尾合并步骤写
-│   └─ decisions/
-│       └─ ADR-0001-*.md     跨模块决策，一事一文件          PM
-├─ agents/                   管理类 agent 的私有状态
-│   ├─ pm/
-│   │   ├─ NOW.md                                             PM
-│   │   └─ journal.md                                         PM
-│   ├─ mod-<模块>/
-│   │   ├─ NOW.md                                             该模块 agent
-│   │   └─ journal.md                                         该模块 agent
-│   └─ guard/
-│       ├─ journal.md                                         守护
-│       └─ stage.md          现在在等谁                      kandev/stage.py 生成（去重状态在架构仓库的 kandev/guard_state/）
-├─ modules/<模块>/
-│   ├─ spec.md               模块目标 + 模块验收标准         该模块 agent
-│   ├─ interfaces.md         接口契约（对外 + 任务之间）      该模块 agent
-│   ├─ tasks.json            开发任务清单                    该模块 agent
-│   └─ acceptance.md         验收记录与修复项（只追加）      该模块的验收者（mod-audit:<模块>）
-├─ evidence/<任务id>/        界面截图                        该任务的开发
-└─ quota/ledger.json         额度账本                        只由 tools/quota.py 写
-```
+目录结构和每个文件的写者见 [mgmt-template/README.md](../mgmt-template/README.md)「目录」一表（唯一来源）。管理目录放在仓库和所有 worktree 之外。几条不在那张表里的说明：
+
+- `roles/`、`protocol/`、`tools/` 从模板复制，项目内只读；`agents/_template/`、`modules/_template/` 留在原处作为复制源。
+- `agents/guard/stage.md` 由 `kandev/stage.py` 生成，去重状态在安装目录的 `kandev/guard_state/`，不在管理目录里。
+- 修复模块用自己的 `modules/<模块>-fix-<n>/`，原模块目录只读。
 
 开发和审核**不写管理目录**（截图 `evidence/<任务id>/` 和额度账本由脚本写入除外）。它们的状态和交付物放在**各自 Kandev 任务的任务文档**里：
 
@@ -175,12 +134,11 @@ ID 规则：
 |---|---|---|
 | `project`、`mgmt_root`、`repo`、`base_branch` | 项目常量 | 初始化后不改 |
 | `agents[].scope` | 唯一标识 | 否 |
-| `agents[].role` | `pm` / `module` / `guard` | 否 |
+| `agents[].role` | `pm` / `module` | 否 |
 | `agents[].kandev_task_id` | 创建后回填 | 是 |
 | `agents[].owns` | 担当范围（文件或职责），用于"问谁" | 需 ADR |
 | `agents[].branch` | 模块分支 | 否 |
 | `agents[].current_branch` | 当前分支：原分支，或最新的修复分支；所有合并各模块分支的地方只合它 | 是（修复模块完成时 pm 更新） |
-| `agents[].status` | `active` / `done` / `failed` | 是 |
 
 开发任务的担当关系不进 registry，记在对应模块的 `tasks.json`。
 
@@ -189,9 +147,9 @@ ID 规则：
 | 字段 | 说明 |
 |---|---|
 | `phase` | `planning` / `dispatch` / `developing` / `project-acceptance` / `final-review` / `done` |
-| `modules[]` | `name`、`kandev_task_id`、`status`（`blocked` / `planning` / `developing` / `accepting` / `reported` / `done` / `failed`）、`done`、`total`、`last_report`（消息 id）、`blocked_reason` |
+| `modules[]` | `name`、`kandev_task_id`、`status`（`planned` / `active` / `done` / `dropped`） |
 | `open_escalations[]` | 待处理的升级：`msg`、`from`、`topic`、`since` |
-| `open_decisions[]` | 讨论中的 ADR 编号 |
+| `misrouted[]` | 修复模块报告"缺陷不归本模块"的记录（调度步骤写） |
 
 ### tasks.json（模块任务清单，模块 agent 写）
 
@@ -201,7 +159,6 @@ ID 规则：
 | `owns` | 这个任务允许修改的路径，也就是它的担当范围 | 需重新规划 |
 | `blocked_by` | 前置任务 id（只记在这里，Kandev 的「待开发」任务不设 blocked_by） | 需重新规划 |
 | `acceptance` | AC 列表，每条写 `covers: MA-n` | 需重新规划，并在 acceptance.md 记一笔 |
-| `refs` | 需求出处（charter 的 R 编号） | 需重新规划 |
 | `tests` | 可直接执行的测试命令列表（契约中的测试命令与它一致） | 需重新规划 |
 | `boundaries` | 本任务落实的 B-n（本模块是提供方），可为空 | 需重新规划 |
 | `shared` | 可选；environment.md「共享文件」中本任务要追加条目的文件（多个任务可共有，只追加自己的条目，不算 owns 重叠） | 需重新规划 |
@@ -209,8 +166,6 @@ ID 规则：
 | `ui` | 是否改动界面；true 时 report 要附截图 | 需重新规划 |
 | `kandev_task_id` | 创建后回填 | 是 |
 | `status` | `planned` / `creating` / `held`（在「待开发」等前置）/ `todo` / `merged`（合并步骤的 REPORT 到达后）/ `dropped` / `failed`（含被拆分取代，note 写取代它的任务） | 是 |
-| `passes` | 验收被退回时，模块 agent 按 acceptance.md 回写；验收通过后模块随即结束，以 acceptance.md 最后一轮为准（验收者不写 tasks.json） | 是 |
-| `review_rounds` | 审核轮数 | 是 |
 | `note` | 一行备注 | 是 |
 
 ---

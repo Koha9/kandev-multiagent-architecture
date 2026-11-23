@@ -1,7 +1,5 @@
 # 示例 workflow（Kandev 导出）
 
-**中文** | [English](README.en.md)
-
 这三个文件是从一个实际部署的 Kandev workspace 用 `export_workflow_kandev` 导出的，内容与 `build_workflows.py` 生成的完全一致。本机相关的 ID 已经换成占位符。
 
 | 文件 | workflow | 步骤 |
@@ -17,11 +15,11 @@
   1. 导入时 profile 按 model / mode 匹配。同一个模型有多个 profile 时可能匹配错，导入后要逐个步骤检查。
   2. W1、W2 的 prompt 里引用了下一层 workflow 的 ID，需要导入后手动替换：
      - W2「模块规划」prompt：`<W3_ID>`、`<W3_DEV_STEP_ID>`、`<W3_HOLD_STEP_ID>`
-     - W1「接收」prompt：`<ARCH_ROOT>`（本仓库在运行 Kandev 的机器上的绝对路径，用正斜杠）
+     - W1「接收」prompt：`<ARCH_ROOT>`（安装目录在运行 Kandev 的机器上的绝对路径，用正斜杠；链接模式下是本仓库）
      - W1「模块下发」prompt：`<W2_ID>`、`<W2_PLAN_STEP_ID>`
 
-推荐用 `python kandev/build_workflows.py apply` 部署，它会自动处理上面两点，见 [kandev/README.md](../README.md)。
+推荐用 `ma.py install` + `ma.py apply` 部署，它会自动处理上面两点，见 [kandev/README.md](../README.md)。
 
 ## 重新导出
 
-部署后在 `kandev/` 下运行 `python verify_export.py`，会覆盖这里的三个文件，并用 `kandev_ids.json` 里的 ID 自动替换成占位符。
+`ma.py apply` 部署后会自动重新导出，覆盖这里的三个文件，并把本机的 ID 和路径替换成占位符（手动运行：`python kandev/verify_export.py`）。

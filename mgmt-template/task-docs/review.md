@@ -1,6 +1,6 @@
 # review · rev:<任务id>
 
-<!-- Kandev 任务文档 review，写者：审核 agent。每轮覆盖写，历史轮次由模块 agent 在验收时汇总。读者：开发 agent、模块 agent。 -->
+<!-- Kandev 任务文档 review，写者：审核 agent。每轮覆盖写。读者：开发 agent、模块 agent。 -->
 
 ```yaml
 task: auth-02
@@ -20,9 +20,12 @@ criteria:                 # evidence 必须是审核者亲自确认的内容，�
   - id: AC-2
     result: pass
     evidence: test_login_bad_credentials
-visual_check: null        # ui: true 时：截图是否存在、是否与 AC 一致boundary_check:           # 至少 1 个边界情况的亲自抽查
+visual_check: null        # ui: true 时：截图是否存在、是否与 AC 一致
+boundary_check:           # 至少 1 个边界情况的亲自抽查
   - case: 空题库时抽题
     result: 返回 count=0，没有异常（test_practice.py::test_empty_bank）
+temp_resources: 无         # 审核中自己启动的实例、端口、临时目录：已清理 | <清不掉的资源和原因>
+suggestions: []           # 非硬性的问题和改进想法：只作建议，不作为退回的理由
 findings:                 # 只指出问题，不写实现方案
   - severity: high        # high | medium | low
     where: src/auth/api/login.py:42

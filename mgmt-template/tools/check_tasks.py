@@ -3,7 +3,8 @@
 用法：
   python <mgmt_root>/tools/check_tasks.py --tasks <mgmt_root>/modules/<模块>/tasks.json [--boundaries B-1,B-3]
 
-检查项（status 为 dropped / failed 的任务不参与第 2、3 项的检查，但仍计入第 1、4 项）：
+检查项（status 为 dropped / failed / merged 的任务不参与第 2、3 项的检查，但仍计入第 1、4 项；merged 的任务仍计入第 5 项）：
+  merged 不参与：已合入的任务不会再改文件，返工任务（<原 id>-r<n>）、修复任务接手原任务的 owns 是正常的
   1. 任务 id 非空且唯一
   2. 每个任务 owns 非空；不同任务的 owns 不重叠
      （规范化后路径相等，或一个是另一个的目录前缀；`src/a/` 与 `src/a/b.py` 重叠，`src/a` 与 `src/ab.py` 不重叠）
@@ -19,7 +20,8 @@ import argparse
 import json
 import sys
 
-SKIPPED = {"dropped", "failed"}
+SKIPPED = {"dropped", "failed"}          # 不参与第 2、3、5 项
+FINISHED = SKIPPED | {"merged"}           # 不参与第 2、3 项
 MAX_DEPTH = 3
 
 
@@ -100,7 +102,7 @@ def check(tasks, boundaries=None):
         else:
             seen[tid] = i
     ids = set(seen)
-    active = [t for t in tasks if t.get("id") in ids and t.get("status") not in SKIPPED]
+    active = [t for t in tasks if t.get("id") in ids and t.get("status") not in FINISHED]
 
     owns, shared = {}, {}
     for t in active:

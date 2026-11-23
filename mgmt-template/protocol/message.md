@@ -1,6 +1,7 @@
 # 消息与交接协议 KMSG v1
 
 > 所有 agent 都要遵守。跨任务通信用消息（第 3–5 节），同一任务内的步骤交接用 handoff（第 6 节）。
+> 本文件只管消息长什么样、收发时的约定和交接格式。工具参数、带不带 `session_id`、怎样算已发出、报错怎么办，见步骤 prompt 的【发消息】【工具报错】。
 
 ## 1. 基本原则：谁担当就问谁
 
@@ -8,15 +9,13 @@
    - 模块级、项目级：`project/registry.json` 的 `owns`
    - 任务级：`modules/<模块>/tasks.json` 的 `owns`
    - 查到担当者后，**直接问它**。
-2. **不做非必要的自行查询**：
-   - 不翻别人的对话记录
-   - 不读别人的代码去推测意图
-   - 不向第三方打听别人担当的事
-3. **不用问、可以直接读的只有 4 类**：
+2. **别人的决定和意图以担当者的回答为准；公开交付物和已合入的代码可以直接读。** 不翻别人的对话记录，不向第三方打听别人担当的事。
+3. **不用问、可以直接读的**：
    - 自己的状态文件
    - 上级下发给你的契约和指令
    - 别人明确交付给你的交付物（`report`、`review`、消息里 refs 指向的文件）
    - 公共规范（README、roles、conventions、environment、interfaces）
+   - 仓库里已合入的代码和文档
 4. **自己本职内的验证不算查询**。例如审核重跑测试、验收跑集成测试。
 5. **不知道该问谁**：问自己的上级"这归谁"，不要猜。
 6. **被问到不归自己担当的事**：回一条 ANSWER，写明"不在我的担当范围，应问 X"（转介），**不要替别人去查**。
@@ -38,12 +37,11 @@
 
 | 用途 | 工具 | 注意 |
 |---|---|---|
-| 跨任务消息 | `message_task_kandev` | 参数是 `task_id`（接收方任务的 UUID，不能写 `self`；上级的 UUID 在 [TASK v1] 头 parent 行 `task` 之后）和 `prompt`（消息全文），回复某个会话时加 `session_id`。**发给模块任务的消息一律带 `session_id`=模块 agent 的会话 id**（上级模块：[TASK v1] 头 parent 行 `session` 之后；其他模块：`modules/<模块>/tasks.json` 顶层的 `module_session_id`）：不带时消息进任务的主会话，模块进过「验收调查」后那是验收者的会话，没人处理。已完成（COMPLETED）的模块任务不发消息，需要它再做事由 pm 建修复模块任务。没有返回错误才算已发出，失败按报错改正后用同一个 id 加 `resend: 1` 重试。对方运行中：排队；空闲或已完成：开启新的一轮；失败或已取消：报错 |
+| 跨任务消息 | `message_task_kandev` | 参数和 `session_id` 的规则见步骤 prompt 的【发消息】。对方运行中：排队；空闲：开启新的一轮；任务已完成（COMPLETED）：只会排队，没人处理；失败或已取消：报错 |
 | 子任务问父任务 | `ask_parent_question_kandev` | 父任务用 `message_task_kandev` 并带 `reply_to_question_id` 回答 |
 | 退回 | `move_task_kandev` + `instructions` | instructions 只写摘要和 review 文档指针 |
 | 步骤交接 | `step_complete_kandev` 的 `handoff` | 只传给下一步，≤8KB |
-| 问用户 | `ask_user_question_kandev` | 只有 pm 能用 |
-| 打断 | `delivery_mode: interrupt` | 只有直接父任务能用，只用于紧急止损 |
+| 问用户 | `ask_user_question_kandev` | 只在 W1：pm 和「接收」；立项评审、项目验收、收尾合并只在停下等人时用。W2 / W3 经上级到 pm |
 
 ## 3. 消息信封
 
@@ -186,7 +184,7 @@ must_know:          # ≤5 条，下一步不知道就会做错的事
 | 审核 → 合并 | `review` | 无（verdict=pass） |
 | 模块规划 → 等待开发 | `modules/<m>/tasks.json` | 关键路径上的任务 |
 | 验收调查 → 完成 | `modules/<m>/acceptance.md` | 上报消息的 id |
-| 立项规划 → 人工确认 | `project/charter.md` | 需要用户确认的点 |
+| 立项规划 → 立项评审 → 立项确认 | `project/charter.md` | 需要用户确认的点 |
 
 ## 7. 示例
 

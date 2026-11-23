@@ -3,7 +3,7 @@
 <!-- Kandev 任务文档 now，写者：开发 agent。覆盖写，≤30 行。标题不要改名。 -->
 
 - updated：YYYY-MM-DD HH:MM
-- step：开发 | 合并 · entry <n>
+- step：开发 · entry <n>
 - branch：<worktree 分支> · base mod/<模块>
 
 ## 当前目标

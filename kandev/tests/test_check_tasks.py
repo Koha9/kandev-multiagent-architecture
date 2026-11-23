@@ -79,6 +79,22 @@ def main():
     code, out = run([task("a"), task("b", status="dropped", boundaries=["B-1"])], "--boundaries", "B-1")
     assert code == 1 and has(out, "B-1"), out
 
+    # merged 的任务不参与 owns / shared 重叠：返工任务 <id>-r<n> 接手原任务的 owns（实测 ac-02-r1 被误拒）
+    code, out = run([task("ac-02", owns=["src/ac/"], status="merged"), task("ac-02-r1", owns=["src/ac/"])])
+    assert code == 0, out
+    code, out = run([task("a", owns=["src/a/"], status="merged"), task("b", shared=["src/a/routes.py"])])
+    assert code == 0, out
+    code, out = run([task("a", owns=["src/a/"]), task("b", owns=["src/a/x.py"], status="merged"),
+                     task("c", owns=["src/a/y.py"])])                                       # 未合入的之间照常检查
+    assert code == 1 and has(out, "a 与 c", "owns 重叠") and not has(out, "a 与 b"), out
+    # merged 的任务仍计入 id 唯一、blocked_by 引用和边界覆盖
+    code, out = run([task("a", status="merged"), task("a", owns=["src/z/"])])
+    assert code == 1 and has(out, "a", "id 重复"), out
+    code, out = run([task("a", status="merged"), task("b", blocked_by=["a"])])
+    assert code == 0, out
+    code, out = run([task("a", status="merged", boundaries=["B-1"])], "--boundaries", "B-1")
+    assert code == 0, out
+
     # shared：不参与 owns 重叠；必须是文件；不能同时是别的任务的 owns
     code, out = run([task("a", shared=["requirements.txt", "src/routes.py"]), task("b", shared=["requirements.txt"])])
     assert code == 0, out
