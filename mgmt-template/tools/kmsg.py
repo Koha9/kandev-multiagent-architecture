@@ -36,7 +36,8 @@ def parse_parent(line):
     scope = re.search(r"([^\s@]+)\s*@\s*task\b", text, re.I)
     if not scope:
         raise ArgError(f"parent 行里找不到上级的 scope（`mod:<模块> @ task ...`）：{line!r}")
-    sess = re.search(r"\bsession\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.:-]*)", text[task.end():], re.I)
+    # session 要紧跟在 task UUID 之后，本身像一个 id（至少 8 个字符，不含 <>、中文、空格）：没填的占位（<本会话的 … ID>）当作没有
+    sess = re.match(r"\s*[,，]?\s*session\s*[:=]?\s*([A-Za-z0-9][A-Za-z0-9_.:-]{7,})(?=\s|$|[,，（(])", text[task.end():], re.I)
     return scope.group(1), task.group(1), (sess.group(1) if sess else None)
 
 
@@ -117,6 +118,8 @@ def main(argv=None):
     try:
         if not a.self_scope.strip() or not a.self_task.strip():
             raise ArgError("--self-scope 和 --self-task 不能为空")
+        if not re.fullmatch(UUID, a.self_task.strip()):
+            raise ArgError(f"--self-task 要是本任务的 UUID（步骤 prompt 第一行「运行在 Kandev 任务 …」中的那个）：{a.self_task!r}")
         parent = parse_parent(a.parent)
         text = report(a, parent) if a.kind == "report" else escalate(a, parent)
     except ArgError as e:

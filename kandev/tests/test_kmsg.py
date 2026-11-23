@@ -81,6 +81,15 @@ def test_missing_session_is_null():
     code, out, err = report(f"parent: mod:auth @ task {PARENT}")
     assert code == 0, err
     assert out["task_id"] == PARENT and out["session_id"] is None, out
+    # 没填的占位不能被当成 session id
+    code, out, err = report(f"parent: mod:auth @ task {PARENT} session <本会话的 Kandev Session ID>")
+    assert code == 0 and out["session_id"] is None, (out, err)
+
+
+def test_bad_self_task_exit_2():
+    code, _, err = run("report", "--self-scope", "dev:auth-02", "--self-task", "{task_id}", "--parent", LINE,
+                       "--refs", "abc1234", "--evidence", "x")
+    assert code == 2 and "UUID" in err, err
 
 
 def test_bad_parent_exit_2():

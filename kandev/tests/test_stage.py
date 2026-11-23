@@ -98,13 +98,20 @@ def test_main_isolation():
         assert code == 0 and not os.path.exists(out_md), (code, err)
         code, alerts, err = cli("--state-dir", state)
         assert code == 1 and "pm-bad" in err and os.path.exists(out_md), (code, err)
-        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # 出错的项目告警也已输出
-        assert not os.path.exists(os.path.join(state, f"{uid(1)}.json")), "写不进去的项目不应记为已告警"
+        assert {a["project"] for a in alerts} == {"pm-bad", "pm-good"}, alerts          # stage.md 写不进去不影响告警
+        assert os.path.exists(os.path.join(state, f"{uid(1)}.json")), "告警已输出的项目要记为已发"
         with open(os.path.join(state, f"{uid(2)}.json"), "w") as f:
             f.write('{"0000')                                      # 写到一半的状态文件
         code, alerts, err = cli("--state-dir", state, now="2026-11-09T05:20:00+00:00")
-        assert code == 1 and "pm-good" in {a["project"] for a in alerts}, (code, alerts, err)
+        got = {a["project"] for a in alerts}
+        assert code == 1 and "pm-good" in got and "pm-bad" not in got, (code, alerts, err)   # pm-bad 已记为已发，不重发
         assert json.load(open(os.path.join(state, f"{uid(2)}.json"), encoding="utf-8")), "状态文件应被重新写好"
+        # 去重状态写不进去：这个项目本轮不输出告警（守护会执行已输出的行，输出了却没记下就会在下一轮重发）
+        state2 = os.path.join(tmp, "state2")
+        os.makedirs(os.path.join(state2, f"{uid(2)}.json"))         # 状态文件的位置是目录：写不进去
+        code, alerts, err = cli("--state-dir", state2)
+        got = {a["project"] for a in alerts}
+        assert code == 1 and "pm-good" not in got and "pm-bad" in got and "pm-good" in err, (code, alerts, err)
 
 
 def test_stuck_and_parent_done():

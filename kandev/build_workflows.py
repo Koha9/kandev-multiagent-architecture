@@ -154,14 +154,25 @@ def sync_structure(k, wf, wid):
                          f"{[(n, sorted(d)) for n, _, d in diffs]} reordered={reordered}")
 
 
+PARAMS_HEAD = ("<!-- 由 ma.py apply（build_workflows apply）生成，不要手改；重新部署时覆盖。"
+               "步骤 prompt 里写了这个文件的路径，要建任务时整份读。 -->\n\n"
+               "文中的 `<本任务的 UUID>` 是读这个文件的 agent 所在任务的 UUID（它的步骤 prompt 第一行「运行在 Kandev 任务 …」中的那个），"
+               "照写进参数时换成它。\n\n")
+
+
+def params_text(block):
+    """参数文件正文：Kandev 只替换步骤 prompt 里的 {task_id}，文件里的要换成 <本任务的 UUID>，由读文件的 agent 代入。"""
+    return PARAMS_HEAD + block.replace("{task_id}", TASK_ID_IN_FILE) + "\n"
+
+
 def params_contents(arch, id2, st2, id3, st3):
     """常驻步骤（W1 调度、W2 等待开发）按需读的建任务参数文件：{路径: 内容}。ID 已填好。"""
-    head = ("<!-- 由 ma.py apply（build_workflows apply）生成，不要手改；重新部署时覆盖。"
-            "步骤 prompt 里写了这个文件的路径，要建任务时整份读。 -->\n\n")
-    return {
-        params_file(arch, id3): head + child_task_spec(id3, st3["开发"], st3["待开发"]) + "\n",
-        params_file(arch, id2): head + fix_module_task(id2, st2["模块规划"]) + "\n",
-    }
+    out = {}
+    if id3:
+        out[params_file(arch, id3)] = params_text(child_task_spec(id3, st3["开发"], st3["待开发"]))
+    if id2:
+        out[params_file(arch, id2)] = params_text(fix_module_task(id2, st2["模块规划"]))
+    return out
 
 
 def write_params_files(arch, id2, st2, id3, st3):
@@ -193,10 +204,12 @@ def cmd_apply(a):
     id3, st3 = import_one(k, a.workspace, wf3, a.retire_existing)
     sync_structure(k, wf3, id3)
     bind(k, wf3, st3, profiles, sync_prompts=True)
+    write_params_files(arch_root(), None, None, id3, st3)     # 「等待开发」的新 prompt 生效之前写好它要读的文件
     wf2 = w2(id3, st3["开发"], st3["待开发"], arch_root())
     id2, st2 = import_one(k, a.workspace, wf2, a.retire_existing)
     sync_structure(k, wf2, id2)
     bind(k, wf2, st2, profiles, sync_prompts=True)
+    write_params_files(arch_root(), id2, st2, None, None)     # 「调度」同理
     # 「接收」运行 intake.py 用的解释器：部署答案里的 python（裸 python 在 Windows 上可能是占位程序）
     dep = manifest.deployment(manifest.load(arch_root()), a.workspace) or {}
     python = (dep.get("answers", {}).get("python") or PY_PLACEHOLDER).replace(chr(92), "/")
@@ -204,7 +217,6 @@ def cmd_apply(a):
     id1, st1 = import_one(k, a.workspace, wf1, a.retire_existing)
     sync_structure(k, wf1, id1)
     bind(k, wf1, st1, profiles, sync_prompts=True)
-    write_params_files(arch_root(), id2, st2, id3, st3)
     for name, wid, st in ((W1_NAME, id1, st1), (W2_NAME, id2, st2), (W3_NAME, id3, st3)):
         out[name] = {"workflow_id": wid, "steps": st}
     out["_meta"] = {"version": VERSION, "workspace_id": a.workspace, "arch_root": arch_root(), "python": python, "url": a.url}

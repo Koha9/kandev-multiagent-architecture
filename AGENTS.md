@@ -81,7 +81,7 @@
    python <home>/kandev/ma.py diff
    python <home>/kandev/ma.py apply
    ```
-   `diff` 说明 workspace 里的现状（没有同名 workflow / 可以就地更新 / 属于另一个系列）和将要改变的内容。`apply` 做自检、导入或就地更新、生成守护交接文件、重新导出。它停下来要求 `--confirmed`、`--with-running` 或 `--retire` 时，按它的说明问用户后再带上参数运行。
+   `diff` 说明 workspace 里的现状（没有同名 workflow / 可以就地更新 / 属于另一个系列）和将要改变的内容。`apply` 做自检、导入或就地更新、生成建任务参数文件和守护交接文件、重新导出。它停下来要求 `--confirmed`、`--with-running` 或 `--retire` 时，按它的说明问用户后再带上参数运行。
    - 链接模式下同一个仓库可以部署到多个 workspace：每个 workspace 写一份答案各 `install` 一次，之后的命令加 `--workspace <id>`。独立安装是每个 workspace 一个安装目录。
 6. **守护**：按 `apply` 结尾打印的说明做。用户选了 `yes`：你在 Kandev 内部且有 `create_automation_kandev` 时，执行交接文件（`<home>/kandev/handoff/guard-handoff.<前 8 位>.local.md`）里的「交接 prompt」；没有这个工具（外部 MCP 没有）时把交接文件的路径交给用户，请用户在任一 Kandev 任务里把「交接 prompt」交给 agent。用户选了 `skip`：不建，提醒用户项目卡住时不会有告警。
 7. 接着做 B，最后把安装目录的路径告诉用户。
@@ -91,7 +91,7 @@
 逐项核对，最后用一张表汇报每项 pass / fail / unverified（附原因）。路径相对 `<home>`。
 
 1. **自检**：`python kandev/check_docs.py` 全部 OK。
-2. **部署一致**：`python kandev/ma.py doctor` 没有 FAIL，WARN 逐条说明。它核对：已部署的三套 workflow（prompt、步骤顺序、事件、开关、会话策略）与安装目录一致；写进 Kandev 的路径指向本目录；ids 文件里的步骤与脚本一致；守护 automation 存在。再看一眼 `python kandev/verify_export.py --ids <ids 文件>` 的输出：所有带 prompt 的步骤 `prof=` 不是 `-`，并且是第 A2 步确认的模型（接收 = intake，立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
+2. **部署一致**：`python kandev/ma.py doctor` 没有 FAIL，WARN 逐条说明。它核对：已部署的三套 workflow（prompt、步骤顺序、事件、开关、会话策略）与安装目录一致；常驻步骤要读的建任务参数文件（`kandev/handoff/params-*.local.md`，apply 生成）存在且与部署一致；写进 Kandev 的路径指向本目录；ids 文件里的步骤与脚本一致；守护 automation 存在。再看一眼 `python kandev/verify_export.py --ids <ids 文件>` 的输出：所有带 prompt 的步骤 `prof=` 不是 `-`，并且是第 A2 步确认的模型（接收 = intake，立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
    - 守护的 profile 是 `guard`（没写时取 intake / mechanical），看交接文件里的 `agent profile` 一行。
    - `doctor` 的「交付预检」WARN（git / gh 不可用，或 gh 没登录）要讲给用户：缺省就要推送的部署需要先解决。
 3. **「待开发」行为**（会启动一次真实会话：先问用户，不做就记 unverified）：

@@ -448,6 +448,9 @@ def with_action(al, to_scope, now, seq=1):
     sig, to, sid = al["signal"], al.get("to_task"), al.get("session_id")
     if sig == DISABLED:
         al["action"], al["journal_line"] = None, f"guard_disabled：已停用「{GUARD_NAME}」automation（{al['value']}）"
+    elif not to:        # 找不到接收方（例如开发任务头里没有 parent）：不生成 task_id 为空的调用
+        al["action"] = None
+        al["journal_line"] = f"{sig}={al.get('value')}（{al.get('object')}）：找不到接收方任务，未发送"
     elif sig == ESCALATED:
         wf, step = al.get("workflow_id"), al.get("refresh_step_id")
         if wf and step:
@@ -820,23 +823,30 @@ def main():
             journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
                        else os.path.join(a.state_dir, "journal.md"))
             scopes = {t["id"]: task_scope(t) for t in pr["tasks"]}
+            # 先记"已发"，记成功才输出这个项目的告警：守护对已输出的行照常执行（即使脚本最后退出码非 0），
+            # 所以状态没存下的项目不能输出，否则下一轮会再发一次。记不下 → 本轮不发，下一轮重试。
+            # 先算好全部 action（这里出错不会已经记了"已发"），再记状态，记成功才统一输出
             for al in alerts:
                 al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
                 if al["signal"] == ESCALATED:
                     al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
                 n_msgs += al["signal"] not in (ESCALATED, "limit_resume")
                 with_action(al, scopes.get(al["to_task"], "-"), now, n_msgs)
-                if a.json:
+            if write:
+                write_json(state_path, new_state)
+            if a.json:
+                for al in alerts:
                     print(json.dumps(al, ensure_ascii=False))
             n_alerts += len(alerts)
-            # 告警已经输出，再记"已发"和 stage.md：这两步失败最多让告警重发一次，不会把没发出的告警记成已发
-            if write:
-                if ready:
+            if write and ready:     # stage.md 只给人看：写不进去不影响告警，单独记一次失败
+                try:
                     out = os.path.join(root, "agents", "guard", "stage.md")
                     os.makedirs(os.path.dirname(out), exist_ok=True)
                     with open(out, "w", encoding="utf-8") as f:
                         f.write(text)
-                write_json(state_path, new_state)
+                except OSError as e:
+                    failed += 1
+                    print(f"stage.py：项目「{pr.get('title')}」的 stage.md 写不进去（告警照常输出）：{e}", file=sys.stderr)
             texts.append(f"===== {pr['title']} · {root or '（未写 mgmt_root）'}\n{text}")
         except Exception as e:      # 一个项目的管理目录有问题不能挡住其他项目
             failed += 1

@@ -394,6 +394,16 @@ assert f"{home}/kandev/handoff/params-{w2id}.local.md" in dispatch and "external
 child = open(os.path.join(home, "kandev", "handoff", f"params-{w3id}.local.md"), encoding="utf-8").read()
 fixp = open(os.path.join(home, "kandev", "handoff", f"params-{w2id}.local.md"), encoding="utf-8").read()
 assert f'workflow_id="{w3id}"' in child and "<<" not in child and f'workflow_id="{w2id}"' in fixp and "<<" not in fixp, child[:300]
+# Kandev 不替换文件里的 {task_id}：文件里写成 <本任务的 UUID>，并附上两段要附进契约的要求
+assert "{task_id}" not in child and "{task_id}" not in fixp and "<本任务的 UUID>-<任务 id>" in child, child[:600]
+assert "【界面要求】" in child and "【结合测试要求】" in child
+assert f'「开发」workflow_step_id="{ids[W3]["steps"]["开发"]}"' in waiting        # 放行要用的 ID 留在 prompt 里
+# doctor 核对参数文件：被改过就 FAIL
+fpath = os.path.join(home, "kandev", "handoff", f"params-{w2id}.local.md")
+open(fpath, "a", encoding="utf-8").write("手改\n")
+code, out = run("doctor")
+assert code != 0 and "建任务参数文件" in out, out
+open(fpath, "w", encoding="utf-8", newline="\n").write(fixp)
 assert json.load(open(os.path.join(home, "kandev", "profiles.local.json"), encoding="utf-8"))["pm"] == "p1"
 py = dep["answers"]["python"]                               # 「接收」运行 intake.py 用部署答案里的解释器，不用裸 python
 assert f"{py} {home}/kandev/intake.py probe" in intake["prompt"] and bw.PY_PLACEHOLDER not in intake["prompt"], intake["prompt"][:900]
