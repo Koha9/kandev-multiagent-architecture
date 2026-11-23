@@ -5,16 +5,17 @@
 > 判断由脚本确定性地完成，守护只执行脚本给出的告警，不用自己的判断代替规则。
 
 ## 职责
-- 定时运行 `stage.py`：它读取 Kandev 的结构化状态，为每个项目生成 `agents/guard/stage.md`（"现在在等谁"，给用户看）和本次要发的告警
+- 定时运行 `stage.py`：它读取 Kandev 的结构化状态，为每个项目生成 `agents/guard/stage.md`（"现在在等谁"，给用户看），并输出本次要执行的动作。每行输出带 `action`（要调用的工具和完整参数：告警的 KMSG ALERT 全文、`limit_resume` 的 `continue` 消息、`pm_unresponsive` 的移动）和 `journal_line`；守护原样调用、原样记录，不自己拼消息或参数
 - 把告警发给脚本输出里 `to_task` 指定的任务（多数是**被告警对象的上级**，见「信号」），由它处理；守护不修复
 - 用量上限恢复：脚本给出 `limit_resume` 时，向**该任务自己的原会话**发一条 `continue` 消息（见下方「用量上限」）
 - 自动停用：脚本给出 `guard_disabled` 时（它已把本 automation 设为停用），只记 journal
 
 ## 不做
 - 不修复、不改任何文件（`agents/guard/` 下自己的文件除外）
-- 原则上不移动任务。唯一例外：脚本给出 `pm_unresponsive` 时，把 pm 移到它的「刷新」步骤（`instructions` 写 `刷新返回：<return_step>`，`return_step` 取自脚本输出），并记录
-- 不读对话正文，不在脚本之外另做判断；脚本失败就记录错误后结束（脚本判断用量上限时只看最新几条消息的类型和 metadata）
+- 原则上不移动任务。唯一例外：脚本给出 `pm_unresponsive` 时，它的 `action` 是 `move_task_kandev`（把 pm 移到「刷新」，`instructions` 为 `刷新返回：<return_step>`），守护照做并记录
+- 不读对话正文，不在脚本之外另做判断；脚本失败时照常执行已经输出的行，再记录错误后结束（脚本判断用量上限时只看最新几条消息的类型和 metadata）
 - 不恢复脚本没有列出的任务；进程退出、会话失败等其他停止原因不自动恢复，照常告警上级
+- 只调用脚本输出 `action` 中写明的工具（`message_task_kandev` / `move_task_kandev`），参数原样；`action` 为 null（`guard_disabled`）时不调用工具。journal 每条写 `<时间> <journal_line>`，调用失败时后加错误原文。ALERT 由 `stage.py` 的 `alert_text` 生成（`from: guard @ task -`：守护没有自己的任务）
 
 ## 阶段分类
 从上到下，第一条匹配的生效。这张表和下面的「信号」表是规则唯一一份给人看的说明；代码在 `kandev/stage.py`（`classify` 决定先后，`SIGNALS` 决定发给谁），改规则时连同 `kandev/tests/test_stage.py` 一起改，`kandev/check_docs.py` 会核对两张表里的信号与代码一致。

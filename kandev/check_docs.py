@@ -8,7 +8,7 @@
   5. docs/workflow.md 标题中的版本号与 VERSION 一致
   6. stage.py 的离线回归测试通过；intake.py（「接收」的只读探测）的测试通过
   7. check_tasks.py（tasks.json 契约检查）的测试通过
-  8. check_owns.py（改动范围检查）的测试通过
+  8. check_owns.py（改动范围检查）、kmsg.py（合并步骤的消息生成）的测试通过
   9. mgmt_precommit.py（管理目录钩子）的测试通过
  10. prompt 中引用的 <ARCH_ROOT>/... 文件在本仓库中存在；docs/intake.md 列出了 [TASK v1] 头的每个字段
  11. 步骤结构：「完成」（complete_task_on_enter）是每个 workflow 的最后一个步骤，move_to_next 不进入「刷新」
@@ -139,6 +139,8 @@ def check_arch_refs():
         for s in wf["steps"]:
             for ref in re.findall(re.escape(bw.ARCH_PLACEHOLDER) + r"/([\w./-]+)", s.get("prompt", ""), re.ASCII):
                 ref = ref.rstrip(".")
+                if ref.startswith("kandev/handoff/params-"):   # apply 生成的建任务参数文件（ma.py doctor 核对它存在且与部署一致）
+                    continue
                 if ref not in seen and not os.path.exists(os.path.join(ROOT, ref)):
                     problems.append(f"prompt 引用 {bw.ARCH_PLACEHOLDER}/{ref}，本仓库中不存在")
                 seen.add(ref)
@@ -181,6 +183,10 @@ def check_tasks_test():
 
 def check_owns_test():
     return run_test("check_owns.py", "test_check_owns.py")
+
+
+def check_kmsg_test():
+    return run_test("kmsg.py", "test_kmsg.py")
 
 
 def check_precommit_test():
@@ -348,7 +354,7 @@ def main():
     checks = [("prompts.md", check_prompts), ("链接", check_links), ("步骤名", check_steps),
               ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test), ("intake 测试", check_intake_test),
               ("check_tasks 测试", check_tasks_test),
-              ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
+              ("check_owns 测试", check_owns_test), ("kmsg 测试", check_kmsg_test), ("precommit 测试", check_precommit_test),
               ("接收文档", check_arch_refs), ("步骤结构", check_structure),
               ("模板版本", check_template_version), ("提问清单", check_questions), ("ma 测试", check_ma_test),
               ("步骤名同步", check_stage_names), ("占位符", check_placeholders), ("共享块位置", check_block_placement), ("信号表", check_guard_signals)]

@@ -360,7 +360,7 @@ sys.path[:0] = [os.path.join(home, "kandev"), os.path.join(home, "kandev", "test
 import ma, fake_kandev
 import build_workflows as bw
 fake_kandev.install()
-W1 = bw.W1_NAME
+W1, W2, W3 = bw.W1_NAME, bw.W2_NAME, bw.W3_NAME
 
 
 def run(*args):
@@ -385,6 +385,15 @@ ids = json.load(open(os.path.join(home, "kandev", "kandev_ids.json"), encoding="
 assert ids["_meta"]["arch_root"] == home and ids[W1]["workflow_id"] == wf(W1)["id"], ids["_meta"]
 intake = next(s for s in wf(W1)["steps"] if s["name"] == "接收")
 assert f"{home}/docs/intake.md" in intake["prompt"] and intake["agent_profile_id"] == "p5", intake["prompt"][:300]
+# 常驻步骤不内联建任务参数，只带 apply 生成的参数文件路径；文件里的 ID 是真实 ID
+w2id, w3id = ids[W2]["workflow_id"], ids[W3]["workflow_id"]
+waiting = next(s for s in wf(W2)["steps"] if s["name"] == "等待开发")["prompt"]
+dispatch = next(s for s in wf(W1)["steps"] if s["name"] == "调度")["prompt"]
+assert f"{home}/kandev/handoff/params-{w3id}.local.md" in waiting and "parent_id=\"self\"" not in waiting, waiting[-600:]
+assert f"{home}/kandev/handoff/params-{w2id}.local.md" in dispatch and "external_id={task_id}-mod-<模块>-fix-<n>" not in dispatch
+child = open(os.path.join(home, "kandev", "handoff", f"params-{w3id}.local.md"), encoding="utf-8").read()
+fixp = open(os.path.join(home, "kandev", "handoff", f"params-{w2id}.local.md"), encoding="utf-8").read()
+assert f'workflow_id="{w3id}"' in child and "<<" not in child and f'workflow_id="{w2id}"' in fixp and "<<" not in fixp, child[:300]
 assert json.load(open(os.path.join(home, "kandev", "profiles.local.json"), encoding="utf-8"))["pm"] == "p1"
 py = dep["answers"]["python"]                               # 「接收」运行 intake.py 用部署答案里的解释器，不用裸 python
 assert f"{py} {home}/kandev/intake.py probe" in intake["prompt"] and bw.PY_PLACEHOLDER not in intake["prompt"], intake["prompt"][:900]

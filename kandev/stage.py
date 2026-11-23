@@ -15,9 +15,12 @@ mgmt-template/roles/guard.md。代码里对应的是 classify（先后）、SIGN
   python stage.py --mgmt-root <管理目录> [--json]                               # 只看一个项目
   python stage.py --snapshot snapshot.json --now 2026-11-09T05:00:00+00:00 [--json]   # 离线测试，不连 Kandev
 
-输出：--json 时标准输出每行一个要发出的告警（to_task、object、step、signal、value、threshold、suggest、project、mgmt_root、
+输出：--json 时标准输出每行一个要执行的动作（to_task、object、step、signal、value、threshold、suggest、project、mgmt_root、
 journal；limit_resume 另带 session_id 和 message，pm_unresponsive 另带 return_step、workflow_id、refresh_step_id，
-发给模块任务或常驻会话的另带 session_id）；否则打印给人看的摘要。退出码 1：连不上 Kandev，或有项目巡检失败。
+发给模块任务或常驻会话的另带 session_id）。每行还带守护照做的两项（见 with_action）：
+  action        {"tool": "message_task_kandev" | "move_task_kandev", "args": {...}}，守护原样调用；null = 不调用工具
+  journal_line  追加到 journal 指向的文件的一行（不含时间）
+否则打印给人看的摘要。退出码 1：连不上 Kandev，或有项目巡检失败。
 状态：去重状态在 --state-dir（默认 kandev/guard_state/，不提交），按 pm 任务 id 分文件；心跳是同目录的 last_run.json
 （非缺省的 ids 文件是 last_run.<workspace 前 8 位>.json，见 beat_name）。不带 --dry-run 的运行会把看到的告警记为已发。
 只用标准库。
@@ -424,6 +427,54 @@ def evaluate(tasks, now, state, pm_task):
     return rows, alerts, new_state
 
 
+# ------------------------------------------------------------------ actions (守护照做的工具调用)
+def task_scope(t):
+    """KMSG 信封 to: 行用的 scope：[TASK v1] 头的 scope；没有时 pm 任务为 pm，其他用任务标题。"""
+    return header_field(t.get("description"), "scope") or ("pm" if t["workflow"].endswith("项目管理") else t["title"])
+
+
+def alert_text(al, to_scope, msg_id):
+    """KMSG v1 ALERT 全文（格式见 mgmt-template/protocol/message.md 第 3、4 节）。守护没有自己的任务，from 的 task 写 -。"""
+    return "\n".join([
+        "[KMSG v1]", f"id: {msg_id}", "type: ALERT", "from: guard @ task -", f"to: {to_scope} @ task {al['to_task']}",
+        "reply: none", "reply_to: -", "due: -", "refs: -", "---",
+        f"对象：{al['object']}", f"信号：{al['signal']}={al['value']}（阈值 {al['threshold']}）", f"建议：{al['suggest']}",
+    ])
+
+
+def with_action(al, to_scope, now, seq=1):
+    """给一行输出补上 action 和 journal_line（守护原样执行，不再自己拼参数）。
+    seq：本次运行中第几条 ALERT；同一秒内的第 2 条起 id 加 -<seq>，接收方按 id 去重，不能重复。"""
+    sig, to, sid = al["signal"], al.get("to_task"), al.get("session_id")
+    if sig == DISABLED:
+        al["action"], al["journal_line"] = None, f"guard_disabled：已停用「{GUARD_NAME}」automation（{al['value']}）"
+    elif sig == ESCALATED:
+        wf, step = al.get("workflow_id"), al.get("refresh_step_id")
+        if wf and step:
+            al["action"] = {"tool": "move_task_kandev", "args": {
+                "task_id": to, "workflow_id": wf, "workflow_step_id": step, "instructions": f"刷新返回：{al['return_step']}"}}
+            al["journal_line"] = f"pm_unresponsive → task {to}：移到「刷新」（刷新返回：{al['return_step']}）"
+        else:
+            al["action"] = None
+            al["journal_line"] = (f"pm_unresponsive → task {to}：ids 文件缺少「项目管理」的 workflow_id 或「刷新」步骤，"
+                                  "未移动（请重新运行 ma.py apply）")
+    elif sig == "limit_resume":
+        args = {"task_id": to, "prompt": al["message"]}
+        if sid:
+            args["session_id"] = sid
+        al["action"] = {"tool": "message_task_kandev", "args": args}
+        al["journal_line"] = f"limit_resume → task {to} session {sid or '-'}：发送 continue（上限重置于 {al['value']}）"
+    else:
+        stamp = now.astimezone().strftime("%y%m%d-%H%M%S")
+        mid = f"M-guard-{stamp}" + (f"-{seq}" if seq > 1 else "")
+        args = {"task_id": to, "prompt": alert_text(al, to_scope, mid)}
+        if sid:
+            args["session_id"] = sid
+        al["action"] = {"tool": "message_task_kandev", "args": args}
+        al["journal_line"] = f"ALERT {mid} {sig}={al['value']} → task {to}（{al['object']}）"
+    return al
+
+
 # ------------------------------------------------------------------ data collection
 def read_json(path, default=None):
     """读 JSON 文件；不存在、编码不对（带 BOM 可以）、内容损坏都返回 default，不抛错。"""
@@ -752,7 +803,7 @@ def main():
     projects = group_projects(tasks)
     if a.mgmt_root:
         projects = [pr for pr in projects if norm(pr["mgmt_root"]) == norm(a.mgmt_root)]
-    texts, n_alerts, failed = [], 0, 0
+    texts, n_alerts, failed, n_msgs = [], 0, 0, 0
     for pr in projects:
         try:
             root, ready = pr["mgmt_root"], initialized(pr["mgmt_root"])
@@ -768,10 +819,13 @@ def main():
             text = render(rows, alerts, now.astimezone().strftime("%Y-%m-%d %H:%M"), mods and mods["unreadable"])
             journal = (os.path.join(root, "agents", "guard", "journal.md") if ready
                        else os.path.join(a.state_dir, "journal.md"))
+            scopes = {t["id"]: task_scope(t) for t in pr["tasks"]}
             for al in alerts:
                 al.update({"project": pr["title"], "mgmt_root": root, "journal": journal})
                 if al["signal"] == ESCALATED:
                     al.update({"workflow_id": w1.get("workflow_id"), "refresh_step_id": w1.get("steps", {}).get("刷新")})
+                n_msgs += al["signal"] not in (ESCALATED, "limit_resume")
+                with_action(al, scopes.get(al["to_task"], "-"), now, n_msgs)
                 if a.json:
                     print(json.dumps(al, ensure_ascii=False))
             n_alerts += len(alerts)
@@ -798,6 +852,7 @@ def main():
                         "suggest": "none", "project": "", "mgmt_root": "",
                         "journal": os.path.join(a.state_dir, "journal.md"),
                         "automation_ids": disable_guard(ws)}
+            with_action(disabled, None, now)
             n_alerts += 1
             if a.json:
                 print(json.dumps(disabled, ensure_ascii=False))

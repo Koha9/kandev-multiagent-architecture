@@ -693,6 +693,16 @@ def cmd_doctor(a):
         stale = [n for n, steps in want_steps.items() if set(ids.get(n, {}).get("steps", {})) != steps]
         if stale:
             add("FAIL", tag + f"ids 文件里的步骤与脚本不一致（{'、'.join(stale)}）：守护会认不出这些步骤，重新 apply")
+        elif meta.get("version") == b.VERSION:   # 常驻步骤要建任务时读的参数文件（apply 生成）；内容应与当前 ID 一致
+            try:
+                want = b.params_contents(ROOT, ids[b.W2_NAME]["workflow_id"], ids[b.W2_NAME]["steps"],
+                                         ids[b.W3_NAME]["workflow_id"], ids[b.W3_NAME]["steps"])
+            except KeyError:
+                want = {}
+            bad = [os.path.relpath(p, ROOT) for p, text in want.items()
+                   if not os.path.exists(p) or open(p, encoding="utf-8").read() != text]
+            if bad:
+                add("FAIL", tag + f"建任务参数文件缺失或与部署不一致（{'、'.join(bad)}）：调度、等待开发要建任务时会读它，重新 apply")
         bp = beat_path(ROOT, dep, ws)
         beat = json.load(open(bp, encoding="utf-8")) if os.path.exists(bp) else None
         if a.offline:

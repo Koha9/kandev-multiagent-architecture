@@ -25,7 +25,7 @@
 | `modules/<模块>/acceptance.md` | 模块验收记录与修复项 | 该模块的验收者（mod-audit:<模块>） |
 | `evidence/<任务id>/` | 界面截图 | 该任务的开发 |
 | `quota/ledger.json` | 额度账本 | 只由 `tools/quota.py` 写 |
-| `tools/` | check_owns、check_tasks、quota、mgmt_precommit 脚本 | 只读 |
+| `tools/` | check_owns、check_tasks、quota、mgmt_precommit、kmsg（合并步骤的 KMSG）脚本 | 只读 |
 | `agents/_template/`、`modules/_template/` | 复制源 | 不改 |
 | `VERSION` | 本目录来自哪个版本的模板 | 只读 |
 
