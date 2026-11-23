@@ -15,7 +15,7 @@
 | `{PYTHON}` | 本机 Python 解释器的绝对路径（只用标准库） |
 | `{IDS_FILE}` | 本 workspace 的 ids 文件名（`ma.py install` 定的）：第一个 workspace 是 `kandev_ids.json`，链接模式的其他 workspace 带前 8 位 id，例如 `kandev_ids.7f64865e.json` |
 | `{GUARD_PROMPT_FILE}` | `ma.py` 生成的守护 prompt 全文（`guard-prompt.<workspace 前 8 位>.local.md` 的绝对路径） |
-| `{GUARD_PROFILE_ID}` | 守护用的 agent profile id（答案 `profiles` 中的 `mechanical`，便宜模型即可） |
+| `{GUARD_PROFILE_ID}` | 守护用的 agent profile id（答案 `profiles` 中的 `guard`，便宜模型即可；没写时取 `intake`，再没有取 `mechanical`） |
 | `{KANDEV_URL}` | Kandev 外部 MCP 地址（答案的 `kandev_url`，缺省 `http://localhost:38429/mcp`；stage.py 用它只读查询） |
 
 参考配置（已验证可用）：schedule `*/20`、hidden run（`automation_run`）、上面的 profile、并发 1、不挂仓库（`repository_mode=none`）、Local 执行器（不建 worktree）、`reuse_thread`（复用同一个任务）。

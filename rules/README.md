@@ -9,7 +9,7 @@
 | `quality.md` | 主动性与验证的要求 | 有内容 |
 | `git.md` | 你的 git 习惯 | 空，不注入 |
 | `coding.md` | 对所有项目都适用的编码习惯 | 空，不注入 |
-| `params.json` | `dev_wip`（「开发」步骤的并发上限）、`refresh_wakes`（常驻会话被唤醒多少次后刷新）、`guard`（守护阈值，分钟：`T_IDLE`、`T_DECISION`、`T_HOLD`、`T_STALE`、`T_DEDUP`） | 出厂值 |
+| `params.json` | `dev_wip`（「开发」步骤的并发上限）、`refresh_wakes`（常驻会话被唤醒多少次后刷新）、`guard`（守护阈值，分钟：`T_IDLE`、`T_DECISION`、`T_HOLD`、`T_STALE`、`T_DEDUP`、`T_GATE`（autonomy 2 的立项确认超时，0 关闭）） | 出厂值 |
 
 ## 注入到哪些角色
 

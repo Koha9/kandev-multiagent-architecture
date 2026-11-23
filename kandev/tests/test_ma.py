@@ -40,39 +40,98 @@ def test_slots_and_answers():
     assert keys({}) == sorted(q["key"] for q in mf.questions("install") if q["ask"] == "always")
     full, problems = mf.validate(ANSWERS)
     assert not problems and full["install_mode"] == "standalone" and full["kandev_url"].startswith("http")
-    guided = sorted(q["key"] for q in mf.questions("install") if q["ask"] == "guided" and not q.get("when"))
-    assert keys({**ANSWERS, "setup_style": "guided"}) == guided           # guided：问题树的第一级也要回答
-    pd = {"remote": "auto", "autonomy": "ask", "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}
-    g = {**ANSWERS, "setup_style": "guided", "model_strategy": "auto", "project_defaults": pd}
-    assert keys(g) == ["project_defaults.ci"]                              # 下一级：remote 不是 none 才问 CI
-    assert keys({**g, "project_defaults": {**pd, "remote": "none"}}) == []   # remote=none：CI 不适用
-    assert mf.validate({**g, "project_defaults": {**pd, "remote": "none", "ci": "local"}})[0]["project_defaults"]["ci"] == "none"
-    assert keys({**g, "model_strategy": "vendor", "project_defaults.ci": "auto"}) == ["reviewer_cross_vendor", "vendors"]   # 带点的键也可以平铺
-    assert keys({**g, "model_strategy": "vendor", "vendors": [], "reviewer_cross_vendor": "no",
-                 "project_defaults.ci": "auto"}) == ["vendors"]
-    assert keys({**g, "project_defaults": {**pd, "autonomy": "5", "ci": "auto"}}) == ["project_defaults.autonomy"]
-    assert keys({**g, "project_defaults": {**pd, "autonomy": 3, "plan_only": True, "ci": "auto"}}) == []   # 数字、布尔记成字符串
+    guided = sorted(q["key"] for q in mf.tree() if q["ask"] == "guided" and not q.get("when") and not q.get("after"))
+    assert keys({**ANSWERS, "setup_style": "guided"}) == guided           # guided：这一级的项都要回答（缺的 install 拒绝）
+    pd = {"remote": "auto", "ci": "auto", "autonomy": "ask", "plan_only": "ask", "run_policy": "ask", "integration_test": "auto",
+          "paid_calls": "ask"}
+    g = {**ANSWERS, "setup_style": "guided", "review_access": "ask", "model_strategy": "auto", "project_defaults": pd}
+    assert keys(g) == []
+    assert keys({k: v for k, v in g.items() if k != "review_access"}) == ["review_access"]
+    # ci 不依赖 remote：只在本地的项目也可以在本地跑 CI 的检查；ci=remote 才需要推送
+    local_ci = mf.validate({**g, "project_defaults": {**pd, "remote": "none", "ci": "local"}})
+    assert not local_ci[1] and local_ci[0]["project_defaults"]["ci"] == "local"
+    assert keys({**g, "project_defaults": {**pd, "remote": "none", "ci": "remote"}}) == ["project_defaults.ci"]
+    assert keys({**g, "review_access": "remote_only", "project_defaults": {**pd, "remote": "none"}}) == ["project_defaults.remote"]
+    noted = mf.cross_checks(mf.flatten({"project_defaults": {"autonomy": "4", "plan_only": "true", "remote": "push"}}))
+    assert noted[0] == [] and len(noted[1]) == 2 and mf.cross_checks(mf.flatten(g)) == ([], [])       # 提示不拒绝安装
+    assert keys({**g, "project_defaults": {**pd, "autonomy": "4", "plan_only": "true", "remote": "push"}}) == []
+    # review_access=remote_only：没回答的 remote 推荐值变成 pr；回答了的不动
+    quick_remote = mf.validate({**ANSWERS, "review_access": "remote_only"})
+    assert not quick_remote[1] and quick_remote[0]["project_defaults"]["remote"] == "pr"
+    assert mf.validate({**ANSWERS, "review_access": "remote_only", "project_defaults.remote": "push"})[0]["project_defaults"]["remote"] == "push"
+    assert mf.recommended(next(q for q in mf.tree() if q["key"] == "project_defaults.remote"), {"review_access": "local"}) == "auto"
+    # plan_only 只在 autonomy 是 ask / 3 / 4 时适用；1、2 时不问，写 ask
+    two = {k: v for k, v in pd.items() if k != "plan_only"}
+    assert keys({**g, "project_defaults": {**two, "autonomy": "4"}}) == ["project_defaults.plan_only"]
+    fixed = mf.validate({**g, "project_defaults": {**two, "autonomy": "2", "plan_only": "false"}})
+    assert not fixed[1] and fixed[0]["project_defaults"]["plan_only"] == "ask"
+    assert keys({**g, "project_defaults": {**pd, "autonomy": "5"}}) == ["project_defaults.autonomy"]
+    assert keys({**g, "project_defaults": {**pd, "autonomy": 3, "plan_only": True}}) == []   # 数字、布尔记成字符串
+    assert keys({**g, "project_defaults.autonomy": "3", "project_defaults": two}) == ["project_defaults.plan_only"]   # 带点的键也可以平铺
     assert keys({**ANSWERS, "project_defaults": {"remot": "pr"}}) == ["project_defaults.remot"]
     assert keys({**ANSWERS, "project_defaults": "pr"}) == ["project_defaults"]
-    custom = {**g, "setup_style": "custom", "project_defaults.ci": "auto"}
-    assert keys(custom) == ["install_mode", "kandev_url", "python"]   # 自定义：可选项也要回答；home 等 install_mode 答了再问
-    assert keys({**custom, "install_mode": "standalone"}) == ["home", "kandev_url", "python"]
-    assert keys({**custom, "install_mode": "link", "python": "p", "kandev_url": "u"}) == []   # 链接模式不问 home
-    # 旧的答案（没有新增的键）：quick 照样通过；已记录的 custom 答案在 apply / doctor 时不因新增的项失败
-    old_custom = {**ANSWERS, "setup_style": "custom", "install_mode": "standalone", "home": "h", "python": "p", "kandev_url": "u"}
-    assert not mf.validate(old_custom, strict=False)[1] and mf.validate(old_custom)[1]
-    assert mf.project_defaults(old_custom) == {"_source": mf.project_defaults({})["_source"], "remote": "auto", "ci": "auto",
-                                               "autonomy": "ask", "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}
-    # 问题树：没有 when 引用不存在的键；先问的项排在依赖它的项前面
-    order = [q["key"] for q in mf.questions("install")]
-    for q in mf.questions("install"):
-        for k in list(q.get("when", {})) + q.get("after", []):
+    custom = {**g, "setup_style": "custom"}
+    assert keys(custom) == ["install_mode", "python"]   # 自定义：可选项也要回答；home 等 install_mode 答了再问；kandev_url 不问
+    assert keys({**custom, "install_mode": "standalone"}) == ["home", "python"]
+    assert keys({**custom, "install_mode": "link", "python": "p"}) == []   # 链接模式不问 home
+    # _agent：agent 检测后自己填的键。不是答案；必须问的项不能列在里面；不认识的键报错
+    assert keys({**ANSWERS, "kandev_url": "http://h:1/mcp", "_agent": ["kandev_url"], "_note": "x"}) == []
+    assert mf.agent_keys({**ANSWERS, "kandev_url": "http://h:1/mcp", "_agent": ["kandev_url", "python"]}) == ["kandev_url"]
+    for bad in (["workspace_id"], ["nope"], "kandev_url", [1]):
+        assert keys({**ANSWERS, "_agent": bad}) == ["_agent"], bad
+    assert sorted(mf.explicit_keys({**ANSWERS, "review_access": "local"})) == sorted([*ANSWERS, "review_access"])
+    # 旧的答案：quick 照样通过；已记录的 custom 答案在 apply / doctor 时不因新增的项失败；
+    # 已删除的提问（vendors、reviewer_cross_vendor）静默丢弃，改了名的取值（vendor、integration_test=ask）换成新值
+    old_custom = {**ANSWERS, "setup_style": "custom", "install_mode": "standalone", "home": "h", "python": "p", "kandev_url": "u",
+                  "model_strategy": "vendor", "vendors": ["Claude Code"], "reviewer_cross_vendor": "yes",
+                  "project_defaults": {"remote": "none", "ci": "none", "integration_test": "ask"}}
+    full, problems = mf.validate(old_custom, strict=False)
+    assert not problems and mf.validate(old_custom)[1] and "vendors" not in full and full["model_strategy"] == "scoped", (full, problems)
+    assert mf.project_defaults(old_custom) == {
+        "_schema": "2", "_source": mf.project_defaults({})["_source"], "review_access": "ask", "remote": "none", "ci": "none",
+        "autonomy": "ask", "plan_only": "ask", "run_policy": "ask", "integration_test": "auto", "paid_calls": "ask"}
+    assert mf.resolve({"python": "<x>", "home": "~/.kandev-ma/<workspace id 前 8 位>", "workspace_id": WS}, "r")["home"] \
+        .endswith(".kandev-ma/11111111")
+    assert mf.resolve({"python": "<x>", "install_mode": "link"}, "r") == {"python": sys.executable.replace("\\", "/"),
+                                                                           "install_mode": "link", "home": "r"}
+    # 问题树：没有 when 引用不存在的键；先问的项排在依赖它的项前面；每项有 group，一批最多 4 题
+    order = [q["key"] for q in mf.tree()]
+    for q in mf.tree():
+        assert q.get("group"), q["key"]
+        for k in list(q.get("when", {})) + q.get("after", []) + [k for r in q.get("recommended_when", []) for k in r["when"]]:
             assert k in order and order.index(k) < order.index(q["key"]), (q["key"], k)
+    assert "remote_kandev" not in order and all(q["ask"] == "when_prompted" for q in mf.questions("install") if q not in mf.tree())
     status = lambda answers: {q["key"]: st for q, st, _ in mf.walk(answers)[1]}       # noqa: E731
     s = status({})
     assert s["setup_style"] == "pending" and s["model_strategy"] == "deferred" and s["profiles"] == "deferred"
     s = status({"setup_style": "quick", "workspace_id": WS, "guard_automation": "yes"})
-    assert s["profiles"] == "pending" and s["project_defaults.remote"] == "default" and s["vendors"] == "skipped"
+    assert s["profiles"] == "pending" and s["project_defaults.remote"] == "default" and s["kandev_url"] == "default"
+    # 逐批：一批 = 一个 group，按清单顺序，每批最多 4 题，直到问完
+    ask = lambda answers: [q["key"] for q, st, _ in mf.walk(answers)[1] if st == "pending"]       # noqa: E731
+    step = {"setup_style": "guided"}
+    assert ask(step) == ["workspace_id", "guard_automation"] and status(step)["review_access"] == "later"
+    step.update({"workspace_id": WS, "guard_automation": "yes"})
+    assert ask(step) == ["review_access", "model_strategy"] and status(step)["project_defaults.ci"] == "later"
+    step.update({"review_access": "remote_only", "model_strategy": "scoped"})
+    assert ask(step) == ["profiles"]
+    step["profiles"] = PROFILES
+    assert ask(step) == ["project_defaults.remote", "project_defaults.ci", "project_defaults.autonomy"]
+    step.update({"project_defaults.remote": "pr", "project_defaults.ci": "auto", "project_defaults.autonomy": "2"})
+    assert ask(step) == ["project_defaults.run_policy", "project_defaults.integration_test", "project_defaults.paid_calls"]
+    step.update({"project_defaults.run_policy": "active", "project_defaults.integration_test": "off", "project_defaults.paid_calls": "deny"})
+    assert ask(step) == [] and not mf.validate(step)[1]
+    assert ask({**step, "setup_style": "custom"}) == ["install_mode", "python"]
+    # check_docs 的清单检查：一批超过 4 题、缺 group、条件推荐引用后面的键或给出选项之外的值都报错
+    import check_docs
+    qs = mf.questions()
+    assert not check_docs.check_questions(qs)
+    edit = lambda key, **kw: [{**q, **kw} if q["key"] == key else q for q in qs]       # noqa: E731
+    assert any("最多 4 题" in p for p in check_docs.check_questions(edit("review_access", group="policy")))
+    assert any("缺少 group" in p for p in check_docs.check_questions(edit("review_access", group="")))
+    assert any("recommended_when" in p for p in check_docs.check_questions(
+        edit("project_defaults.remote", recommended_when=[{"when": {"project_defaults.ci": "local"}, "value": "pr"}])))
+    assert any("value 不在 options" in p for p in check_docs.check_questions(
+        edit("project_defaults.remote", recommended_when=[{"when": {"review_access": "remote_only"}, "value": "mr"}])))
     assert keys({**ANSWERS, "guard_automation": "maybe"}) == ["guard_automation"]
     assert keys({**ANSWERS, "install_mod": "link"}) == ["install_mod"]                      # 拼错的键不能被静默忽略
     assert keys({**ANSWERS, "workspace_id": 123}) == ["workspace_id"]
@@ -81,6 +140,9 @@ def test_slots_and_answers():
     assert mf.check_profiles({**PROFILES, "auditor": "p1"}) and mf.check_profiles({**PROFILES, "reviewer": "p3"})
     assert mf.check_profiles({k: v for k, v in PROFILES.items() if k != "pm"})
     assert not mf.check_profiles({**PROFILES, "intake": "p5"})
+    # 守护的 profile：可选角色 guard，缺省 = intake，再缺省 = mechanical
+    assert not mf.check_profiles({**PROFILES, "guard": "p9"}) and mf.full_profiles({**PROFILES, "guard": "p9"})["guard"] == "p9"
+    assert mf.full_profiles(PROFILES)["guard"] == "p5" and mf.full_profiles({**PROFILES, "intake": "p6"})["guard"] == "p6"
 
 
 def test_install_customize_upgrade(tmp):
@@ -106,18 +168,37 @@ def test_install_customize_upgrade(tmp):
     write(ans, json.dumps({**ANSWERS, "home": home, "python": "C:/nope/python.exe"}))
     assert "找不到解释器" in run(src, "ma.py", "install", "--answers", ans, expect=2) and not os.path.exists(home)
 
-    # 提问循环：只列出现在该问的项；答完后打印总表
+    # 提问循环：只列出这一批（一个 group）该问的项；答完后打印标明来源的总表
     write(ans, json.dumps({"setup_style": "guided", "workspace_id": WS}))
     out = run(src, "ma.py", "questions", "--stage", "install", "--answers", ans)
-    assert "guard_automation" in out and "project_defaults.remote" in out and "project_defaults.ci（" not in out, out
-    assert "[install] profiles" not in out and "没有待问的问题" not in out, out
-    write(ans, json.dumps({**ANSWERS, "home": home}))
+    assert "[install] guard_automation" in out and "这一批（basics） 1 个问题" in out, out
+    assert "[install] review_access" not in out and "[install] profiles" not in out and "没有待问的问题" not in out, out
+    write(ans, json.dumps({"setup_style": "guided", "workspace_id": WS, "guard_automation": "yes", "review_access": "remote_only",
+                           "model_strategy": "auto", "profiles": PROFILES}))
+    out = run(src, "ma.py", "questions", "--stage", "install", "--answers", ans)
+    assert "这一批（delivery） 3 个问题" in out and "[install] project_defaults.remote" in out and "推荐：pr" in out, out
+    assert "[install] project_defaults.run_policy" not in out and "project_defaults.plan_only" in out, out   # 下一批只列名字
+    write(ans, json.dumps({**ANSWERS, "home": home, "kandev_url": "http://localhost:38429/mcp", "_agent": ["kandev_url"],
+                           "project_defaults": {"autonomy": "4", "plan_only": "true"}}))
     out = run(src, "ma.py", "questions", "--stage", "install", "--answers", ans)
     assert "没有待问的问题，可以运行 install" in out and "project_defaults.ci = auto（推荐值）" in out, out
+    assert "kandev_url = http://localhost:38429/mcp（agent 检测）" in out and "setup_style = quick（用户）" in out, out
+    assert f"home = {home}（用户）" in out and f"python = {sys.executable}".replace("\\", "/") in out and "<运行" not in out and "<workspace" not in out, out
+    assert "提示：autonomy=4 且 plan_only=true" in out, out
+    write(ans, json.dumps({**ANSWERS, "review_access": "remote_only", "project_defaults": {"remote": "none"}}))
+    assert "答案之间有冲突" in run(src, "ma.py", "questions", "--stage", "install", "--answers", ans, expect=2)
+    write(ans, json.dumps({**ANSWERS, "_agent": ["profiles"]}))
+    assert "不能由 agent 决定" in run(src, "ma.py", "questions", "--stage", "install", "--answers", ans, expect=2)
     write(ans, json.dumps({**ANSWERS, "projct_defaults": {}}))
     assert "不认识的键" in run(src, "ma.py", "questions", "--stage", "install", "--answers", ans, expect=2)
     out = run(src, "ma.py", "questions", "--stage", "install")
-    assert "    [install] project_defaults.ci" in out and "仅当 project_defaults.remote 为 auto / push / pr" in out, out
+    assert "    [install] project_defaults.plan_only" in out and "仅当 project_defaults.autonomy 为 ask / 3 / 4" in out, out
+    assert "review_access 为 remote_only 时推荐 pr" in out and "[install] remote_kandev（ma.py 停下来时才问）" in out, out
+
+    # kandev_url 不是本机地址：install 停下，用户确认这台就是 Kandev 主机后带 --remote-kandev 才继续（这里只验证停下）
+    write(ans, json.dumps({**ANSWERS, "home": home, "kandev_url": "http://10.0.0.5:38429/mcp", "_agent": ["kandev_url"]}))
+    out = run(src, "ma.py", "install", "--answers", ans, expect=2)
+    assert "--remote-kandev" in out and not os.path.exists(home), out
 
     write(ans, json.dumps({**ANSWERS, "home": home}))
     run(src, "ma.py", "install", "--answers", ans)
@@ -162,30 +243,51 @@ def test_install_customize_upgrade(tmp):
     # 项目缺省值：install 写出 custom/project-defaults.json；answer --set 改它；doctor 打印一行
     pd_path = os.path.join(home, "custom", "project-defaults.json")
     pd = json.load(open(pd_path, encoding="utf-8"))
-    assert {k: v for k, v in pd.items() if k != "_source"} == {"remote": "auto", "ci": "auto", "autonomy": "ask",
-                                                              "plan_only": "ask", "integration_test": "ask", "paid_calls": "ask"}, pd
-    run(home, "ma.py", "answer", "--set", "project_defaults.remote=none", "--set", "project_defaults.autonomy=3")
+    assert {k: v for k, v in pd.items() if k != "_source"} == {
+        "_schema": "2", "review_access": "ask", "remote": "auto", "ci": "auto", "autonomy": "ask", "plan_only": "ask",
+        "run_policy": "ask", "integration_test": "auto", "paid_calls": "ask"}, pd
+    dep = mf.load(home)["deployments"][WS]
+    assert "project_defaults.remote" not in dep["explicit"] and {"profiles", "home", "python"} <= set(dep["explicit"]), dep["explicit"]
+    # 没回答过的项跟着前面的答案重新取推荐值：review_access=remote_only → remote 变成 pr；写明过的不跟着变
+    out = run(home, "ma.py", "answer", "--set", "review_access=remote_only")
     pd = json.load(open(pd_path, encoding="utf-8"))
-    assert pd["remote"] == "none" and pd["ci"] == "none" and pd["autonomy"] == "3" and os.path.exists(pd_path + ".bak"), pd
-    for bad in ("project_defaults.remote=github", "project_defaults.nope=1"):
+    assert pd["review_access"] == "remote_only" and pd["remote"] == "pr" and "project_defaults.remote=pr" in out, (pd, out)
+    assert os.path.exists(pd_path + ".bak")
+    assert "review_access=remote_only" in run(home, "ma.py", "answer", "--set", "project_defaults.remote=none", expect=2)   # 交叉校验
+    run(home, "ma.py", "answer", "--set", "review_access=local")
+    assert json.load(open(pd_path, encoding="utf-8"))["remote"] == "auto"
+    run(home, "ma.py", "answer", "--set", "project_defaults.remote=none", "--set", "project_defaults.autonomy=3",
+        "--set", "project_defaults.ci=local", "--set", "project_defaults.run_policy=active")
+    pd = json.load(open(pd_path, encoding="utf-8"))
+    assert pd["remote"] == "none" and pd["ci"] == "local" and pd["autonomy"] == "3" and pd["run_policy"] == "active", pd
+    run(home, "ma.py", "answer", "--set", "review_access=remote_only", expect=2)      # remote=none 是写明的：不跟着变，冲突
+    for bad in ("project_defaults.remote=github", "project_defaults.nope=1", "project_defaults.ci=remote", "vendors=[\"x\"]"):
         run(home, "ma.py", "answer", "--set", bad, expect=2)
-    run(home, "ma.py", "answer", "--set", "project_defaults.remote=pr")
-    assert json.load(open(pd_path, encoding="utf-8"))["ci"] == "auto"       # remote 不是 none：ci 回到推荐值
+    run(home, "ma.py", "answer", "--set", "project_defaults.integration_test=ask")      # 旧取值：静默按 auto
+    assert json.load(open(pd_path, encoding="utf-8"))["integration_test"] == "auto"
+    run(home, "ma.py", "answer", "--set", "project_defaults.remote=pr", "--set", "project_defaults.ci=auto")
+    assert json.load(open(pd_path, encoding="utf-8"))["ci"] == "auto"
     assert mf.load(home)["deployments"][WS]["answers"]["project_defaults"]["remote"] == "pr"
-    assert "remote=pr，ci=auto，autonomy=3" in run(home, "ma.py", "doctor", "--offline")
-    # 新增提问之前的安装：答案里没有新键、没有 project-defaults.json，doctor 不 FAIL，answer 照常能用
+    out = run(home, "ma.py", "doctor", "--offline")
+    assert "remote=pr，ci=auto，autonomy=3" in out and "交付预检" in out and "FAIL" not in out, out      # remote=pr：预检 git / gh
+    # 新增提问之前的安装：答案里没有新键和 explicit、没有 project-defaults.json，doctor 不 FAIL，answer 照常能用
     m = mf.load(home)
-    saved = dict(m["deployments"][WS]["answers"])
-    m["deployments"][WS]["answers"] = {k: v for k, v in saved.items() if k not in ("project_defaults", "model_strategy")}
+    saved = dict(m["deployments"][WS])
+    m["deployments"][WS] = {k: v for k, v in saved.items() if k not in ("explicit", "agent")}
+    m["deployments"][WS]["answers"] = {**{k: v for k, v in saved["answers"].items()
+                                          if k not in ("project_defaults", "model_strategy", "review_access")},
+                                       "vendors": ["x"], "reviewer_cross_vendor": "no"}
     mf.save(home, m)
     shutil.move(pd_path, pd_path + ".moved")
     out = run(home, "ma.py", "doctor", "--offline")
     assert "FAIL" not in out and "project-defaults.json" in out, out
     run(home, "ma.py", "answer", "--set", "guard_automation=yes")
     assert not os.path.exists(pd_path)
+    old = mf.load(home)["deployments"][WS]
+    assert "vendors" not in old["answers"] and old["answers"]["home"] == home and "guard_automation" in old["explicit"], old
     shutil.move(pd_path + ".moved", pd_path)
     m = mf.load(home)
-    m["deployments"][WS]["answers"] = saved
+    m["deployments"][WS] = saved
     mf.save(home, m)
     shutil.move(os.path.join(tmp, "src-kandev"), os.path.join(src, "kandev"))
 
@@ -284,6 +386,12 @@ assert ids["_meta"]["arch_root"] == home and ids[W1]["workflow_id"] == wf(W1)["i
 intake = next(s for s in wf(W1)["steps"] if s["name"] == "接收")
 assert f"{home}/docs/intake.md" in intake["prompt"] and intake["agent_profile_id"] == "p5", intake["prompt"][:300]
 assert json.load(open(os.path.join(home, "kandev", "profiles.local.json"), encoding="utf-8"))["pm"] == "p1"
+py = dep["answers"]["python"]                               # 「接收」运行 intake.py 用部署答案里的解释器，不用裸 python
+assert f"{py} {home}/kandev/intake.py probe" in intake["prompt"] and bw.PY_PLACEHOLDER not in intake["prompt"], intake["prompt"][:900]
+assert ids["_meta"]["python"] == py and chr(92) not in py, ids["_meta"]
+assert bw.PY_PLACEHOLDER + " " + bw.ARCH_PLACEHOLDER + "/kandev/intake.py probe" in bw.all_workflows()[2]["steps"][0]["prompt"]   # 文档版本保留占位
+import verify_export                                        # 导出时解释器路径换回占位符（导出本身要连 Kandev，这里只查替换表）
+assert verify_export.placeholders(ids)[py] == bw.PY_PLACEHOLDER and verify_export.placeholders(ids)[home] == bw.ARCH_PLACEHOLDER
 
 code, out = run("diff")                                     # 刚部署完：没有差异
 assert code == 0 and "0 个步骤的 prompt、0 处结构有变化" in out, out
@@ -293,6 +401,12 @@ assert run("apply")[0] == 2 and run("apply", "--confirmed", "nope")[0] == 2     
 code, out = run("apply")
 assert h not in out, "拒绝信息里不能直接给出 confirm 值"
 assert run("apply", "--confirmed", h)[0] == 0
+code, out = run("answer", "--set", f"python={py}")           # 改 python：提示要重新部署（它写在「接收」的 prompt 里）
+assert code == 0 and "重新部署" in out and "接收" in out, out
+keep = intake["prompt"]
+intake["prompt"] = keep.replace(py, "C:/old/python.exe")    # 已部署的是旧解释器：diff 要看得到
+assert "C:/old/python.exe" in run("diff")[1]
+intake["prompt"] = keep
 
 intake["prompt"] += "\n被人在界面上改过"                    # 已部署的被改动：diff 和 doctor 都要看得到
 next(s for s in wf(bw.W3_NAME)["steps"] if s["name"] == "开发")["wip_limit"] = 9

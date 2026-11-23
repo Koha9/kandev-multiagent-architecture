@@ -7,5 +7,6 @@
   "module": "<可选，缺省 = pm。模块管理（模块规划 / 等待开发 / 刷新），强模型>",
   "module_auditor": "<可选，缺省 = auditor。模块验收（验收调查），强模型，必须与 module 不同>",
   "plan_auditor": "<可选，缺省 = auditor。立项评审，上下文小、影响最大，适合最强模型，必须与 pm 不同>",
-  "intake": "<可选，缺省 = mechanical。接收（W1 第 0 步：把用户输入整理成 [TASK v1] 头，缺的参数提问），轻量模型即可，例如 Sonnet>"
+  "intake": "<可选，缺省 = mechanical。接收（W1 第 0 步：把用户输入整理成 [TASK v1] 头，缺的参数提问），轻量模型即可，例如 Sonnet>",
+  "guard": "<可选，缺省 = intake（再缺省 = mechanical）。守护 automation（每 20 分钟运行一条脚本、转发告警；不绑定任何步骤），便宜模型即可>"
 }

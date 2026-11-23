@@ -22,7 +22,8 @@ With several workspaces, pass --ids-out so each workspace keeps its own ids file
 profiles.json maps roles to Kandev agent profile IDs (see profiles.example.json):
   required: {"pm": "...", "auditor": "...", "developer": "...", "reviewer": "...", "mechanical": "..."}
   optional: "module" (default = pm), "module_auditor" (default = auditor), "plan_auditor" (default = auditor),
-            "intake" (default = mechanical; W1 step 0 接收, a light model is enough)
+            "intake" (default = mechanical; W1 step 0 接收, a light model is enough),
+            "guard" (default = intake; the guard automation, bound to no step: ma.py puts it in the guard handoff)
 
 Import matches profiles by name/model/mode, which is ambiguous when several similar profiles exist,
 so workflows are imported without profiles and profiles are bound afterwards by ID.
@@ -39,7 +40,7 @@ from kandev_client import DEFAULT_URL, Kandev  # noqa: E402,F401
 from manifest import OPTIONAL_ROLES, REQUIRED_ROLES, full_profiles  # noqa: E402,F401
 import prompts  # noqa: E402
 from prompts import *  # noqa: E402,F401,F403  其他脚本通过本模块使用的名字（VERSION、W1_NAME、guard_prompt、all_workflows……）
-from prompts import (ARCH_PLACEHOLDER, GUARD_AUTOMATION, GUARD_PROMPT, VERSION, W1_NAME, W2_NAME, W3_NAME,  # noqa: E402,F401
+from prompts import (ARCH_PLACEHOLDER, GUARD_AUTOMATION, GUARD_PROMPT, PY_PLACEHOLDER, VERSION, W1_NAME, W2_NAME, W3_NAME,  # noqa: E402,F401
                      all_workflows, arch_root, guard_prompt, structure_problems, w1, w2, w3)
 
 
@@ -178,13 +179,16 @@ def cmd_apply(a):
     id2, st2 = import_one(k, a.workspace, wf2, a.retire_existing)
     sync_structure(k, wf2, id2)
     bind(k, wf2, st2, profiles, sync_prompts=True)
-    wf1 = w1(id2, st2["模块规划"], arch_root())
+    # 「接收」运行 intake.py 用的解释器：部署答案里的 python（裸 python 在 Windows 上可能是占位程序）
+    dep = manifest.deployment(manifest.load(arch_root()), a.workspace) or {}
+    python = (dep.get("answers", {}).get("python") or PY_PLACEHOLDER).replace(chr(92), "/")
+    wf1 = w1(id2, st2["模块规划"], arch_root(), python)
     id1, st1 = import_one(k, a.workspace, wf1, a.retire_existing)
     sync_structure(k, wf1, id1)
     bind(k, wf1, st1, profiles, sync_prompts=True)
     for name, wid, st in ((W1_NAME, id1, st1), (W2_NAME, id2, st2), (W3_NAME, id3, st3)):
         out[name] = {"workflow_id": wid, "steps": st}
-    out["_meta"] = {"version": VERSION, "workspace_id": a.workspace, "arch_root": arch_root(), "url": a.url}
+    out["_meta"] = {"version": VERSION, "workspace_id": a.workspace, "arch_root": arch_root(), "python": python, "url": a.url}
     with open(a.ids_out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     print(f"ids written to {a.ids_out}")

@@ -380,6 +380,9 @@ PRIORITY = [
      "完成", None, None),
     ("权限请求先于提问、门禁、用量上限", "项目管理", "人工终审", None, {"perm": 2, "question": True, "limit": _LIM_DUE},
      "等人：权限请求", None, None),
+    ("autonomy 2 立项确认的提问挂了 60 分钟：超时先于提问 → pm 自己", "项目管理", "立项确认", None,
+     {"question": True, "sessions": [_IDLE], "description": "[TASK v1]\nautonomy: 2\nmode: attended\nmgmt_root: D:/p1-mgmt"},
+     "等人：立项确认（超时）", "gate_timeout", ME),
     ("提问先于用量上限", "开发", "开发", LIVE, {"question": True, "limit": _LIM_DUE, "sessions": [_IDLE]},
      "等人：提问", None, None),
     ("门禁先于用量上限", "项目管理", "人工终审", None, {"limit": _LIM_DUE, "sessions": [_IDLE]},
@@ -451,6 +454,39 @@ def test_priority():
         assert rows[-1]["category"] == want_cat, (name, rows[-1]["category"])
         want = [(want_sig, me["id"] if want_to == ME else ids[want_to])] if want_sig else []
         assert [(a["signal"], a["to_task"]) for a in mine] == want, (name, mine)
+
+
+def test_gate_timeout():
+    """立项确认超时：autonomy 2、plan_only 不是 true、pm 的提问还挂着、且最新会话 ≥T_GATE 分钟没有更新才告警。"""
+    import stage
+    now = ts("2026-11-09T05:00:00Z")
+    head = "[TASK v1]\n{}mode: attended\nmgmt_root: D:/p1-mgmt"
+
+    def sig(extra_head, asked="2026-11-09T04:30:00Z", step="立项确认", question=True, since="2026-11-09T03:00:00+00:00"):
+        """asked：pm 会话最后一次更新（发出提问）的时间；since：任务进入本步骤的时间。"""
+        t = task(1, "项目管理", step, head.format(extra_head))
+        t.update({"question": question, "sessions": [{**_IDLE, "updated_at": asked}], "since": ts(since)})
+        return stage.classify(t, now, {t["id"]: t})
+
+    hit = sig("autonomy: 2\n")
+    assert (hit["category"], hit["signal"], hit["value"], hit["threshold"]) == ("等人：立项确认（超时）", "gate_timeout", 30, stage.T_GATE), hit
+    assert sig("autonomy: 2\nplan_only: false\n")["signal"] == "gate_timeout"
+    for extra in ("autonomy: 1\n", "autonomy: 3\n", "autonomy: 2\nplan_only: true\n", ""):
+        got = sig(extra)
+        assert got["signal"] is None and got["category"] == "等人：提问", (extra, got)
+    # 用户选了"先不决定"：没有待答的提问，停留再久也不触发
+    got = sig("autonomy: 2\n", question=False)
+    assert got["signal"] is None and got["category"] == "等人：立项确认", got
+    # 用户 5 分钟前答了第 1 批、pm 刚发出第 2 批：任务已在本步骤 2 小时，但提问只挂了 5 分钟
+    got = sig("autonomy: 2\n", asked="2026-11-09T04:55:00Z")
+    assert got["signal"] is None and got["category"] == "等人：提问", got
+    assert sig("autonomy: 2\n", asked="2026-11-09T04:45:00Z")["signal"] is None, "提问挂着没到 T_GATE 不告警"
+    assert sig("autonomy: 2\n", step="人工终审")["signal"] is None, "人工终审不设超时"
+    keep, stage.T_GATE = stage.T_GATE, 0
+    try:
+        assert sig("autonomy: 2\n")["signal"] is None, "T_GATE=0 关闭"
+    finally:
+        stage.T_GATE = keep
 
 
 def test_dedup_flapping():

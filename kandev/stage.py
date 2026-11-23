@@ -36,7 +36,8 @@ import slots  # noqa: E402
 
 PARAMS = slots.params()   # rules/params.json，可被 custom/rules/params.json 覆盖
 
-GATES = {"立项确认", "人工终审"}
+GATE_PLAN = "立项确认"
+GATES = {GATE_PLAN, "人工终审"}
 RESIDENT = {"调度", "等待开发"}
 HOLD, DECISION, DONE, INTAKE, MOD_PLAN = "待开发", "等待决策", "完成", "接收", "模块规划"
 WAIT_PREREQ = "排队：等前置模块"         # W2 任务在「模块规划」、前置模块没有全部完成（不告警；数值是未完成的前置模块标题）
@@ -48,6 +49,7 @@ IDLE_STATES = {"WAITING_FOR_INPUT", "IDLE", "COMPLETED"}
 LIMIT_STATES = {"WAITING_FOR_INPUT", "IDLE"}          # 用量上限停下后会话的状态（实测为 WAITING_FOR_INPUT）
 ACTIVE_STATES = {"RUNNING", "STARTING"}
 T_IDLE, T_DECISION, T_HOLD, T_STALE, T_DEDUP = 10, 10, 10, 45, 60
+T_GATE = 30                               # autonomy 2 的任务在「立项确认」的提问挂了这么久（最新会话没有更新）→ gate_timeout（0 = 关闭）
 T_LIMIT_FALLBACK, T_LIMIT_MARGIN, T_BEAT = 60, 2, 60
 T_WAKES = PARAMS["refresh_wakes"]         # 常驻会话自上次重置被唤醒这么多次 → session_long（与 build_workflows.REFRESH_WAKES 同一个参数）
 globals().update({k: v for k, v in PARAMS.get("guard", {}).items() if k in slots.GUARD_PARAMS})   # 用户定制的守护阈值（分钟）
@@ -244,6 +246,9 @@ SIGNALS = {
         "该开发任务还没结束，但它的模块任务已经完成（数值是模块任务标题），没有模块 agent 会处理它的 REPORT、提问和放行，"
         "也不能给已完成的模块发指令。它如果是多余的 → 请用户取消；它的工作还需要 → 为这个模块建修复模块任务接手，"
         "契约写明接手这个任务（任务 id、分支），原任务请用户取消")),
+    "gate_timeout": Sig(SELF, False, (
+        "立项确认的提问已挂了很久（见数值，分钟）而用户没有答复：按「立项确认」步骤 prompt 第 6 步处理"
+        "（评审通过、未答复的项都有推荐答案且不涉及额度授权、删除数据、删减需求 → 按推荐答案继续并登记\"默认采用\"；否则保持停下）")),
     "decision_pending": Sig(SUPERIOR, True, "unblock"),
     "session_failed": Sig(SUPERIOR, True, "unblock"),
     "session_not_started": Sig(SUPERIOR, True, (
@@ -292,6 +297,12 @@ def classify(t, now, by_id):
         return r("完成")
     if t.get("perm"):
         return r("等人：权限请求", value=t["perm"])
+    # 立项确认超时：只在 pm 的门禁提问还挂着（用户没有答复）时成立，时间从最新会话最后一次更新算起，
+    # 所以"先不决定"（没有待答提问）和刚发出下一批提问（会话刚更新）都不会触发。排在"提问"之前。
+    if (step == GATE_PLAN and T_GATE and t.get("question") and idle >= T_GATE
+            and header_field(t.get("description"), "autonomy") == "2"
+            and header_field(t.get("description"), "plan_only") != "true"):
+        return r("等人：立项确认（超时）", "gate_timeout", idle, T_GATE)
     if t.get("question"):
         return r("等人：提问")
     if step in GATES:

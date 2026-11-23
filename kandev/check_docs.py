@@ -6,7 +6,7 @@
   3. docs/workflow.md 中 W1 / W2 / W3 表格的步骤名与 build_workflows.py 一致
   4. prompt 中引用的 <mgmt_root>/... 路径在 mgmt-template 中存在（运行时生成的路径除外）
   5. docs/workflow.md 标题中的版本号与 VERSION 一致
-  6. stage.py 的离线回归测试通过
+  6. stage.py 的离线回归测试通过；intake.py（「接收」的只读探测）的测试通过
   7. check_tasks.py（tasks.json 契约检查）的测试通过
   8. check_owns.py（改动范围检查）的测试通过
   9. mgmt_precommit.py（管理目录钩子）的测试通过
@@ -171,6 +171,10 @@ def check_stage_test():
     return run_test("stage.py", "test_stage.py")
 
 
+def check_intake_test():
+    return run_test("intake.py", "test_intake.py")
+
+
 def check_tasks_test():
     return run_test("check_tasks.py", "test_check_tasks.py")
 
@@ -189,9 +193,11 @@ def check_template_version():
     return [] if v == bw.VERSION else [f"mgmt-template/VERSION 是 {v}，应为 {bw.VERSION}"]
 
 
-def check_questions():
-    problems, keys, covers = [], set(), set()
-    for q in mf.questions():
+def check_questions(qs=None):
+    """qs：要检查的提问清单（缺省读 deploy_questions.json；测试传入改过的清单）。"""
+    problems, keys, covers, groups = [], set(), set(), {}
+    qs = mf.questions() if qs is None else qs
+    for q in qs:
         for f in ("key", "stage", "ask", "question"):
             if not q.get(f):
                 problems.append(f"deploy_questions.json：{q.get('key', '?')} 缺少 {f}")
@@ -199,11 +205,23 @@ def check_questions():
             problems.append(f"deploy_questions.json：{q.get('key')} 的 stage / ask 取值不对")
         if q.get("key") in keys:
             problems.append(f"deploy_questions.json：key 重复 {q.get('key')}")
-        if q.get("ask") == "custom" and "recommended" not in q:
+        if q.get("ask") in ("custom", "detect") and "recommended" not in q:
             problems.append(f"deploy_questions.json：{q.get('key')} 是可选项，必须给 recommended")
         if q.get("ask") != "when_prompted" and q.get("stage") not in ("install", "customize"):
             problems.append(f"deploy_questions.json：{q.get('key')} 的答案不会被记录（只有 install 阶段记录），ask 应为 when_prompted")
-        by_key = {p["key"]: p for p in mf.questions() if p.get("key") in keys}     # 问题树：只能依赖前面的项
+        if q.get("stage") == "install" and q.get("ask") != "when_prompted":         # 提问树：每项属于一批，一批最多 4 题
+            if not q.get("group"):
+                problems.append(f"deploy_questions.json：{q.get('key')} 缺少 group（install 阶段按 group 分批提问）")
+            groups.setdefault(q.get("group"), []).append(q.get("key"))
+        by_key = {p["key"]: p for p in qs if p.get("key") in keys}     # 问题树：只能依赖前面的项
+        for r in q.get("recommended_when", []):
+            for k, v in r.get("when", {}).items():
+                if k not in by_key:
+                    problems.append(f"deploy_questions.json：{q.get('key')} 的 recommended_when 引用了不在它前面的 {k}")
+                elif by_key[k].get("options") and set(v if isinstance(v, list) else [v]) - set(by_key[k]["options"]):
+                    problems.append(f"deploy_questions.json：{q.get('key')} 的 recommended_when 里 {k} 的取值不在它的 options 里")
+            if q.get("options") and r.get("value") not in q["options"]:
+                problems.append(f"deploy_questions.json：{q.get('key')} 的 recommended_when 的 value 不在 options 里")
         for k, v in q.get("when", {}).items():
             vals = v if isinstance(v, list) else [v]
             if k not in by_key:
@@ -216,6 +234,8 @@ def check_questions():
             problems.append(f"deploy_questions.json：{q.get('key')} 的 recommended 不在 options 里")
         keys.add(q.get("key"))
         covers |= set(q.get("covers", []))
+    problems += [f"deploy_questions.json：group {g} 有 {len(ks)} 题（{'、'.join(ks)}），一批最多 4 题" for g, ks in groups.items()
+                 if g and len(ks) > 4]
     want = {f"rules/{n}.md" for n in slots.SLOTS} | {f"rules/params.json:{k}" for k in slots.params()}
     for item in sorted(want - covers):
         problems.append(f"deploy_questions.json 没有登记槽位 {item}（加到 customize 阶段的 covers）")
@@ -326,7 +346,7 @@ def check_ma_test():
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     checks = [("prompts.md", check_prompts), ("链接", check_links), ("步骤名", check_steps),
-              ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test),
+              ("模板路径", check_template_refs), ("版本", check_version), ("stage 测试", check_stage_test), ("intake 测试", check_intake_test),
               ("check_tasks 测试", check_tasks_test),
               ("check_owns 测试", check_owns_test), ("precommit 测试", check_precommit_test),
               ("接收文档", check_arch_refs), ("步骤结构", check_structure),

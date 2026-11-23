@@ -14,7 +14,8 @@ CUSTOMIZABLE = SLOTS + ("params",)
 # 链接模式的源仓库里，docs/prompts.md 和自检按出厂规则生成（定制是本机的事，不进版本库）：check_docs.py 设这个变量
 USE_CUSTOM = not os.environ.get("MA_NO_CUSTOM")
 TITLES = {"git": "Git 规则", "coding": "编码规则"}
-GUARD_PARAMS = ("T_IDLE", "T_DECISION", "T_HOLD", "T_STALE", "T_DEDUP")
+GUARD_PARAMS = ("T_IDLE", "T_DECISION", "T_HOLD", "T_STALE", "T_DEDUP", "T_GATE")
+ZERO_OK = ("T_GATE",)     # 可以设为 0（= 关闭）的阈值
 
 
 def slot_path(name, root=None):
@@ -58,9 +59,9 @@ def params(root=None):
         out["guard"] = {**out.get("guard", {}), **mine.get("guard", {})}
     nums = {k: v for k, v in out.items() if k != "guard"}
     nums.update(out.get("guard", {}))
-    bad = [k for k, v in nums.items() if type(v) is not int or v <= 0]
+    bad = [k for k, v in nums.items() if type(v) is not int or v < 0 or (v == 0 and k not in ZERO_OK)]
     if bad:
-        raise SystemExit(f"rules/params.json（或 custom 中的覆盖）里这些值必须是正整数：{bad}")
+        raise SystemExit(f"rules/params.json（或 custom 中的覆盖）里这些值必须是正整数（{ZERO_OK} 可以是 0）：{bad}")
     return out
 
 

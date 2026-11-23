@@ -22,6 +22,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from urllib.parse import urlparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE).replace("\\", "/")
@@ -34,8 +35,8 @@ GUARD_NAME = "多Agent 守护"
 ACCEPT_TMP_PREFIX = "【部署验收临时】"     # AGENTS.md B3 建的临时任务的标题前缀；doctor 列出遗留的这类任务
 # 安装后还能用 answer 改的键；workspace_id、install_mode、home 决定了安装本身，要改就重新安装
 # project_defaults.* 都可以改（改完重写 custom/project-defaults.json）
-EDITABLE = ("profiles", "guard_automation", "python", "kandev_url", "setup_style", "model_strategy", "vendors",
-            "reviewer_cross_vendor")
+EDITABLE = ("profiles", "guard_automation", "python", "kandev_url", "setup_style", "model_strategy", "review_access")
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")          # kandev_url 的主机不在其中时 install 停下（--remote-kandev）
 
 
 def bw():
@@ -106,7 +107,8 @@ def custom_slots(root=None):
 
 # ------------------------------------------------------------------ questions
 ASK_TAGS = {"always": "必须问", "guided": "guided / custom 才问", "custom": "选了 custom 才问",
-            "when_prompted": "ma.py 停下来时才问"}
+            "detect": "不问，agent 检测后填", "when_prompted": "ma.py 停下来时才问"}
+SOURCE_TAGS = {"user": "用户", "agent": "agent 检测", "recommended": "推荐值", "otherwise": "不适用，取 otherwise"}
 
 
 def when_text(q):
@@ -114,13 +116,22 @@ def when_text(q):
     return "；".join(conds)
 
 
-def print_question(q, indent=""):
+def print_question(q, indent="", out=None):
+    """out：已有的答案（逐批提问时给出），推荐值按它算；不给时打印出厂推荐值和条件推荐。"""
     when = when_text(q)
-    print(f"{indent}[{q['stage']}] {q['key']}（{ASK_TAGS[q['ask']]}" + (f"；仅当 {when}" if when else "") + "）")
+    group = f"；第 {q['group']} 批" if q.get("group") else ""
+    print(f"{indent}[{q['stage']}] {q['key']}（{ASK_TAGS[q['ask']]}{group}" + (f"；仅当 {when}" if when else "") + "）")
     print(f"{indent}  问题：{q['question']}")
-    for k, label in (("options", "选项"), ("recommended", "推荐"), ("otherwise", "不适用时"), ("why", "理由"),
-                     ("how", "做法"), ("flag", "同意后")):
-        if k in q:
+    rec = mf.recommended(q, out) if out is not None else q.get("recommended")
+    for k, label in (("options", "选项"), ("recommended", "推荐"), ("recommended_when", "条件推荐"), ("otherwise", "不适用时"),
+                     ("why", "理由"), ("how", "做法"), ("flag", "同意后")):
+        if k == "recommended" and rec is not None:
+            print(f"{indent}  {label}：{rec}")
+        elif k == "recommended_when" and k in q and out is None:
+            print(f"{indent}  {label}：" + "；".join(
+                "、".join(f"{c} 为 {' / '.join(v) if isinstance(v, list) else v}" for c, v in r["when"].items())
+                + f" 时推荐 {r['value']}" for r in q[k]))
+        elif k not in ("recommended", "recommended_when") and k in q:
             print(f"{indent}  {label}：{' / '.join(q[k]) if isinstance(q[k], list) else q[k]}")
     print()
 
@@ -140,37 +151,63 @@ def cmd_questions(a):
     for q in mf.questions(a.stage):
         print_question(q, "    " * depth(q, by_key))
     print("install 阶段的答案写成一个 JSON 文件（键 = 上面的 key），交给 ma.py install --answers。"
-          "「必须问」的项要有用户的明确回答，不能替用户填。\n"
-          "逐批问：python kandev/ma.py questions --stage install --answers <已有答案的文件>，只列出现在该问的项。")
+          "「必须问」的项要有用户的明确回答，不能替用户填；你检测后自己填的项列进答案的 _agent。\n"
+          "逐批问：python kandev/ma.py questions --stage install --answers <已有答案的文件>，只列出这一批该问的项。")
+
+
+def sources(answers, items):
+    """总表里每一项的来源：user（答案文件里写明）/ agent（列在 _agent 里）/ recommended / otherwise。"""
+    agent = set(mf.agent_keys(answers))
+    out = {}
+    for q, st, _ in items:
+        if st == "answered":
+            out[q["key"]] = "agent" if q["key"] in agent else "user"
+        elif st == "default":
+            out[q["key"]] = "recommended"
+        elif st == "skipped" and "otherwise" in q:
+            out[q["key"]] = "otherwise"
+    return out
 
 
 def questions_loop(answers):
-    """只列出现在该问、还没回答的项；都答完时打印总表供用户确认。"""
+    """只列出这一批（一个 group）该问、还没回答的项；都答完时打印标明来源的总表供用户确认。"""
     out, items = mf.walk(answers)
     _, problems = mf.validate(answers)
-    unknown = [(k, msg) for k, msg in problems if msg.startswith(("不认识的键", "应为 {"))]
-    for k, msg in unknown:
+    tree_keys = {q["key"] for q, _, _ in items}
+    file_problems = [(k, msg) for k, msg in problems if k not in tree_keys or msg.startswith("应为 {")]
+    for k, msg in file_problems:
         print(f"答案文件有问题：{k}：{msg}")
     todo = [(q, st, msg) for q, st, msg in items if st in ("pending", "invalid")]
     for q, st, msg in todo:
         if st == "invalid":
             print(f"（已有答案不合格，要重新问：{msg}）")
-        print_question(q)
-    later = [q["key"] for q, st, _ in items if st == "deferred"]
+        print_question(q, out=out)
+    later = [q["key"] for q, st, _ in items if st in ("later", "deferred")]
     if todo:
-        print(f"这一批 {len(todo)} 个问题，合并成一次提问（每题给选项、推荐答案和一句理由；工具一次最多 4 题时按顺序分几次）；回答写进答案文件后再运行本命令。")
+        batch = next((q.get("group") for q, st, _ in todo if st == "pending"), None)
+        print(f"这一批{f'（{batch}）' if batch else ''} {len(todo)} 个问题，合并成一次提问（每题给选项、推荐答案和一句理由）；"
+              "回答写进答案文件后再运行本命令。")
         if later:
-            print("回答之后可能还要问：" + "、".join(later))
-        return 2 if unknown else 0
-    if unknown:
+            print("之后的批次可能还要问：" + "、".join(later))
+        return 2 if file_problems else 0
+    if file_problems:
+        return 2
+    cross, notes = mf.cross_checks(out)
+    if cross:
+        for k, msg in cross:
+            print(f"答案之间有冲突，问用户改哪一项：{k}：{msg}")
         return 2
     print("没有待问的问题，可以运行 install。")
-    print("下面是将要记录的全部取值（「推荐值」是没有问用户、按推荐或检测决定的项）。quick 安装时把这张表给用户确认：")
-    for q, st, _ in items:
-        if st in ("answered", "default") or (st == "skipped" and "otherwise" in q):
-            val = out.get(q["key"])
-            shown = json.dumps(val, ensure_ascii=False) if isinstance(val, (dict, list)) else val
-            print(f"  {q['key']} = {shown}" + ("（推荐值）" if st == "default" else "（不适用，取 otherwise）" if st == "skipped" else ""))
+    print("下面是将要记录的全部取值，括号里是来源：用户 = 用户的回答；agent 检测 = 你列在 _agent 里、自己填的；"
+          "推荐值 = 没有问、按推荐值取的。把这张表给用户确认（quick 安装时必须做）：")
+    shown, src = mf.resolve(out, ROOT), sources(answers, items)
+    for q, _, _ in items:
+        if q["key"] in src:
+            val = shown.get(q["key"])
+            text = json.dumps(val, ensure_ascii=False) if isinstance(val, (dict, list)) else val
+            print(f"  {q['key']} = {text}（{SOURCE_TAGS[src[q['key']]]}）")
+    for n in notes:
+        print(f"  提示：{n}")
     return 0
 
 
@@ -232,17 +269,31 @@ def check_paths(answers):
     return problems
 
 
+def is_local_url(url):
+    try:
+        return (urlparse(url).hostname or "").lower() in LOCAL_HOSTS
+    except ValueError:
+        return False
+
+
 def cmd_install(a):
-    answers, problems = mf.validate(json.load(open(a.answers, encoding="utf-8-sig")))
+    raw = json.load(open(a.answers, encoding="utf-8-sig"))
+    answers, problems = mf.validate(raw)
     if problems:
         die("答案有问题，先向用户确认：\n  " + "\n  ".join(f"{k}：{msg}" for k, msg in problems), 2)
-    ws, link = answers["workspace_id"], answers["install_mode"] == "link"
-    if answers["python"].startswith("<"):
-        answers["python"] = sys.executable.replace("\\", "/")
-    answers["home"] = home = ROOT if link else mf.norm(answers["home"].replace("<workspace id 前 8 位>", ws[:8]))
+    # explicit：答案文件里写明的键。其余是推荐值，不当成用户的答案（answer 改了前面的项时它们跟着重新取值）。
+    # python、home 记下解析后的实际值，之后不再变。
+    explicit = sorted(set(mf.explicit_keys(raw)) | {"python", "home"})
+    answers = mf.resolve(answers, ROOT)
+    ws, link, home = answers["workspace_id"], answers["install_mode"] == "link", answers["home"]
     problems = check_paths(answers)
     if problems:
         die("\n".join(problems), 2)
+    if not is_local_url(answers["kandev_url"]) and not a.remote_kandev:
+        die(f"kandev_url（{answers['kandev_url']}）不是本机地址。安装目录（{home}）和守护用的解释器（{answers['python']}）"
+            "必须在运行 Kandev 的那台机器上：守护每 20 分钟在那台机器上运行其中的脚本。\n"
+            "问用户：现在运行 ma.py 的这台就是运行 Kandev 的机器吗？是（只是用主机名或局域网地址访问）→ 加上 --remote-kandev 重新运行；"
+            "不是 → 到那台机器上克隆本仓库再安装。", 2)
     if not link:
         if mf.norm(home) == mf.norm(ROOT):
             die("安装目录不能是源仓库本身；要直接使用本仓库请选 install_mode=link。", 2)
@@ -265,8 +316,8 @@ def cmd_install(a):
         m["files"] = {rel: mf.sha(os.path.join(home, rel)) for rel in mf.shipped_files(home)}
     ids = ids_name(home, m, ws)
     prof = "profiles.local.json" if ids == "kandev_ids.json" else f"profiles.{ws[:8]}.local.json"
-    m["deployments"][ws] = {**m["deployments"].get(ws, {}), "answers": answers, "ids": f"kandev/{ids}",
-                            "profiles": f"kandev/{prof}"}
+    m["deployments"][ws] = {**m["deployments"].get(ws, {}), "answers": answers, "explicit": explicit,
+                            "agent": mf.agent_keys(raw), "ids": f"kandev/{ids}", "profiles": f"kandev/{prof}"}
     mf.save(home, m)
     pd = write_project_defaults(home, answers)
     py = answers["python"]
@@ -282,8 +333,12 @@ def cmd_install(a):
 def cmd_answer(a):
     m = mf.load(ROOT)
     ws, dep = pick_deployment(m, a.workspace)
-    new, changed = mf.flatten(dep["answers"]), []
-    types = {q["key"]: q.get("type") for q in mf.questions("install")}
+    # 只从写明的答案出发（explicit；早于这个字段的安装：记录的都算写明的），其余按改动后的答案重新取推荐值
+    stored = mf.flatten(dep["answers"])
+    explicit = dep.get("explicit") or list(stored)
+    new, changed = {k: v for k, v in stored.items() if k in explicit}, []
+    before = mf.flatten(mf.validate(new, strict=False)[0])
+    types = {q["key"]: q.get("type") for q in mf.tree()}
     editable = [k for k in types if k in EDITABLE or k.startswith(tuple(g + "." for g in mf.GROUPS))]
     for item in a.set:
         key, eq, val = item.partition("=")
@@ -298,16 +353,29 @@ def cmd_answer(a):
                 die(f"{key} 的值要是 JSON（shell 里注意引号，或改答案文件后重新 install）：{e}", 2)
         new[key] = val
         changed.append(key)
-    problems = mf.validate(new, strict=False)[1]
+    full, problems = mf.validate(new, strict=False)
     problems = [f"{k}：{msg}" for k, msg in problems] + (check_paths(new) if "python" in changed else [])
     if problems:
         die("没有改动：\n  " + "\n  ".join(problems), 2)
-    dep["answers"] = mf.nest(new)
+    if "kandev_url" in changed and not is_local_url(new["kandev_url"]):
+        print(f"注意：{new['kandev_url']} 不是本机地址。安装目录和守护用的解释器必须在运行 Kandev 的那台机器上。")
+    for k in ("home", "python"):                  # 安装时解析好的实际值；链接模式的 home 不在提问树里
+        if not full.get(k) and stored.get(k):
+            full[k] = stored[k]
+    dep["answers"] = full
+    dep["explicit"] = sorted(set(explicit) | set(changed))
+    dep["agent"] = [k for k in dep.get("agent", []) if k not in changed]
     mf.save(ROOT, m)
     print("已更新：" + "、".join(changed))
-    if any(k.startswith("project_defaults.") for k in changed):
+    followed = [f"{k}={v}" for k, v in mf.flatten(full).items() if k not in changed and before.get(k) != v]
+    if followed:
+        print("没有单独回答过、跟着变成新推荐值的项：" + "、".join(followed))
+    if "review_access" in changed or any(k.startswith("project_defaults.") for k in changed + followed):
         print(f"项目缺省值已写入 {write_project_defaults(ROOT, dep['answers'])}（之后启动的项目生效）")
-    if {"python", "profiles"} & set(changed):
+    if "python" in changed:
+        print("python 写在「接收」步骤的 prompt 和守护的命令里：要重新部署才生效（ma.py diff → 问用户 → ma.py apply --confirmed <值>），"
+              "然后运行 ma.py guard，并按交接文件更新 automation。")
+    elif "profiles" in changed:
         print("守护的命令或 profile 可能变了：重新部署后运行 ma.py guard，并按交接文件更新 automation。")
 
 
@@ -338,21 +406,21 @@ def workflow_state(found):
     return "update" if all(i["version"] and b.series(i["version"]) == b.series(b.VERSION) for i in found.values()) else "retire"
 
 
-def workflows_for(found):
-    """用 workspace 里已有的 ID 和本目录的路径渲染三套 workflow（还不存在的 workflow 的 ID 留占位）。"""
+def workflows_for(found, python=None):
+    """用 workspace 里已有的 ID、本目录的路径和部署答案里的解释器渲染三套 workflow（还不存在的 workflow 的 ID 留占位）。"""
     b, ids = bw(), {}
     w3, w2 = found.get(b.W3_NAME), found.get(b.W2_NAME)
     if w3 and {"开发", "待开发"} <= set(w3["steps"]):
         ids["w3"] = (w3["workflow_id"], w3["steps"]["开发"], w3["steps"]["待开发"])
     if w2 and "模块规划" in w2["steps"]:
         ids["w2"] = (w2["workflow_id"], w2["steps"]["模块规划"])
-    return b.all_workflows(ids, ROOT)
+    return b.all_workflows(ids, ROOT, python or b.PY_PLACEHOLDER)
 
 
-def drift(k, found):
+def drift(k, found, python=None):
     """已部署的与将要部署的差异：([(workflow, 步骤, 已部署的 prompt, 新 prompt)], [结构差异的说明])。"""
     b, prompts, structure = bw(), [], []
-    for wf in workflows_for(found):
+    for wf in workflows_for(found, python):
         info = found.get(wf["name"])
         if not info:
             structure.append(f"{wf['name']}：还不存在，将新建")
@@ -412,7 +480,7 @@ def cmd_diff(a):
     try:
         found = discover(k, ws)
         state = workflow_state(found)
-        prompts, structure = drift(k, found) if state == "update" else ([], [])
+        prompts, structure = drift(k, found, dep["answers"].get("python")) if state == "update" else ([], [])
     except (RuntimeError, KeyError) as e:
         die(f"读不到已部署的 workflow：{e}")
     h = fingerprint()
@@ -447,7 +515,7 @@ def render_guard(ws, dep):
     out1, out2 = guard_files(ws)          # 不用 guard-automation.local.md：那是用户手填副本的名字
     values = {"{WORKSPACE_ID}": ws, "{ARCH_ROOT}": ROOT, "{ARCH_REPO_ID}": "", "{PYTHON}": ans["python"],
               "{IDS_FILE}": os.path.basename(dep["ids"]), "{GUARD_PROMPT_FILE}": out2.replace("\\", "/"),
-              "{GUARD_PROFILE_ID}": mf.full_profiles(ans["profiles"])["mechanical"], "{KANDEV_URL}": url_of(dep)}
+              "{GUARD_PROFILE_ID}": mf.full_profiles(ans["profiles"])["guard"], "{KANDEV_URL}": url_of(dep)}
     text = open(os.path.join(HERE, "handoff", "guard-automation.md"), encoding="utf-8").read()
     for key, v in values.items():
         text = text.replace(key, v)
@@ -537,6 +605,29 @@ def cmd_apply(a):
 
 
 # ------------------------------------------------------------------ doctor
+def delivery_checks(pd, offline):
+    """缺省就要推送时（缺省值的 remote 是 push / pr，或 review_access=remote_only），预检本机的 git / gh。
+    只给 WARN：检查的是运行 doctor 的机器和用户，agent 执行器里的环境可能不同；仓库级的推送权限要到项目启动时才知道。"""
+    if pd.get("remote") not in ("push", "pr") and pd.get("review_access") != "remote_only":
+        return []
+    note = "（检查的是运行 doctor 的这台机器和这个用户；agent 执行器的环境不同时以那边为准）"
+    if not shutil.which("git"):
+        return [("WARN", "交付预检：PATH 里找不到 git，项目无法推送" + note)]
+    if not shutil.which("gh"):
+        return [("WARN", "交付预检：PATH 里找不到 gh（GitHub CLI）：remote=pr 时「收尾合并」只推送分支，PR 要用户自己开；"
+                         "ci=remote 时拿不到远端 CI 结果" + note)]
+    if offline:
+        return [("OK", "交付预检：git、gh 都在 PATH 里（--offline：没有检查 gh 的登录状态）")]
+    try:
+        r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [("WARN", f"交付预检：gh auth status 运行失败（{e}）" + note)]
+    if r.returncode != 0:
+        return [("WARN", "交付预检：gh 没有登录（gh auth status 失败）：开 PR 和查看远端 CI 会失败，请用户在这台机器上运行 gh auth login"
+                         + note)]
+    return [("OK", "交付预检：git、gh 可用，gh 已登录" + note)]
+
+
 def cmd_doctor(a):
     b = bw()
     res = []          # (级别, 说明)：OK / WARN / FAIL
@@ -569,9 +660,17 @@ def cmd_doctor(a):
     pd = read_project_defaults(ROOT)
     if pd:
         add("OK", "项目缺省值（" + mf.PROJECT_DEFAULTS + "）：" + "，".join(f"{k}={v}" for k, v in pd.items() if not k.startswith("_")))
+        if pd.get("_schema") != mf.PROJECT_DEFAULTS_SCHEMA:
+            add("WARN", f"{mf.PROJECT_DEFAULTS} 是旧格式（没有 review_access、run_policy）：「接收」把缺的键按 ask 处理；"
+                        "运行 ma.py answer --set review_access=ask（或别的值）可以重写成新格式")
+        if m and m.get("mode") == "link" and len(m.get("deployments", {})) > 1:
+            add("WARN", f"链接模式下 {len(m['deployments'])} 个 workspace 共用一份 {mf.PROJECT_DEFAULTS}："
+                        "内容是最后一次 install / answer 写入的那个 workspace 的缺省值")
+        for level, msg in delivery_checks(pd, a.offline):
+            add(level, msg)
     elif m:
         add("WARN", f"没有 {mf.PROJECT_DEFAULTS}（在新增这项之前安装的）：「接收」按出厂缺省处理；"
-                    "要生成就运行 ma.py answer --set project_defaults.remote=auto（或别的值）")
+                    "要生成就运行 ma.py answer --set review_access=ask（或别的值）")
     want_steps = {wf["name"]: {s["name"] for s in wf["steps"]} for wf in b.all_workflows()}
     for ws, dep in ((m or {}).get("deployments", {})).items():
         if a.workspace and ws != a.workspace:
@@ -605,7 +704,7 @@ def cmd_doctor(a):
                 if workflow_state(found) != "update":
                     add("FAIL", tag + "workspace 里找不到当前系列的三套 workflow（被改名或删除了？）")
                 else:
-                    prompts, structure = drift(k, found)
+                    prompts, structure = drift(k, found, dep["answers"].get("python"))
                     if prompts or structure:
                         names = [f"{w.split('· ')[-1]}·{s}" for w, s, _, _ in prompts] + structure
                         add("WARN", tag + "已部署的 workflow 与本目录不一致：" + "、".join(names[:8])
@@ -750,6 +849,8 @@ def main():
     q.add_argument("--answers", help="已有答案的 JSON 文件：只列出现在该问、还没回答的项")
     i = sub.add_parser("install")
     i.add_argument("--answers", required=True)
+    i.add_argument("--remote-kandev", action="store_true",
+                   help="kandev_url 不是本机地址，但运行 ma.py 的这台就是运行 Kandev 的机器（用户已确认）")
     for name in ("diff", "apply", "guard", "doctor", "answer"):
         s = sub.add_parser(name)
         s.add_argument("--workspace")

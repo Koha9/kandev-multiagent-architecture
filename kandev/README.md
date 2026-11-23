@@ -23,7 +23,7 @@
 
 ## 前提
 
-- Kandev 正在运行，外部 MCP 端点可用（默认 `http://localhost:38429/mcp`；不同时在答案里写 `kandev_url`）。
+- Kandev 正在运行，外部 MCP 端点可用（默认 `http://localhost:38429/mcp`；不同时在答案里写 `kandev_url`）。本仓库和安装目录要在运行 Kandev 的那台机器上：`kandev_url` 不是本机地址（localhost / 127.0.0.1 / ::1）时 `install` 会停下，确认这台就是 Kandev 主机后加 `--remote-kandev`。
 - Python 3.9+。脚本只用标准库，不需要安装依赖。
 - 已在 Kandev 里为各角色准备好 agent profile，选法和约束见 [docs/workflow.md](../docs/workflow.md)「角色与 profile」；`ma.py install` 会校验。
 
@@ -33,7 +33,7 @@
 
 ```
 python kandev/ma.py questions --stage install                        # 部署前要确认的事项（整棵提问树）
-python kandev/ma.py questions --stage install --answers answers.json # 只列出现在该问、还没回答的项
+python kandev/ma.py questions --stage install --answers answers.json # 只列出这一批该问、还没回答的项
 python kandev/ma.py install --answers answers.json     # 记录答案；独立安装时复制到安装目录 <home>
 python <home>/kandev/ma.py diff                        # workspace 里的现状，和将要改变的内容
 python <home>/kandev/ma.py apply                       # 自检 → 导入 / 就地更新 → 守护交接文件 → 导出
@@ -42,25 +42,33 @@ python <home>/kandev/ma.py doctor                      # 检查安装目录、�
 
 ### 提问树
 
-install 阶段的提问是一棵树（`deploy_questions.json`）：
+install 阶段的提问是一棵树（`deploy_questions.json`），按 `group` 分批，一批最多 4 题：
 
 ```
-setup_style  quick | guided | custom        workspace_id        guard_automation
-├─ model_strategy  auto | vendor | per_role                        （guided 起）
-│   └─ vendor 时：vendors（厂商 / CLI 列表）、reviewer_cross_vendor  yes | no
-├─ profiles（必须问；在模型选法之后，最后一张表给用户确认）
-├─ project_defaults.remote  auto | none | push | pr                （guided 起）
-│   └─ 不是 none 时：project_defaults.ci  auto | none | local | remote
-├─ project_defaults.autonomy  ask | 1 | 2 | 3 | 4、.plan_only  ask | true | false、
-│  .integration_test  ask | auto | off、.paid_calls  ask | deny | allow   （guided 起）
-└─ install_mode  standalone | link                                 （custom）
-    ├─ standalone 时：home
-    └─ python、kandev_url
+批          提问                                                                 什么时候问
+basics      setup_style  quick | guided | custom                                 必须问
+            workspace_id、guard_automation  yes | skip                           必须问
+            kandev_url                                                           不问，agent 检测后填
+models      review_access  ask | local | remote_only                             guided 起
+            model_strategy  auto | scoped | per_role                             guided 起
+profiles    profiles（最后一张表给用户确认；可选角色含 guard）                   必须问
+delivery    project_defaults.remote  auto | none | push | pr                     guided 起
+              （review_access=remote_only 时推荐 pr，不能是 none）
+            project_defaults.ci  auto | none | local | remote                    guided 起
+              （remote 需要 remote 不是 none；local 不需要推送）
+            project_defaults.autonomy  ask | 1 | 2 | 3 | 4                       guided 起
+policy      project_defaults.plan_only  ask | true | false                       guided 起，仅 autonomy 为 ask / 3 / 4
+            project_defaults.run_policy  ask | active | conservative             guided 起
+            project_defaults.integration_test  auto | off                        guided 起
+            project_defaults.paid_calls  ask | deny | allow                      guided 起
+install     install_mode  standalone | link；standalone 时 home；python          custom
 ```
 
-- `ask=always` 的项每种方式都问；`guided` 的项选了 guided 或 custom 才问；`custom` 的项只有选了 custom 才问。没问到的项用推荐值（quick 下 agent 按推荐值或检测结果决定）。`when` 不匹配的项不适用，答案里写了也忽略。没有推荐值的项（`vendors`）只要适用就必须回答。
-- 逐批问：把已有答案写进答案文件，运行 `ma.py questions --stage install --answers <文件>`。它只列出这一批要问的项（依赖还没回答的项的，留到下一批），回答后写回文件再运行，直到打印「没有待问的问题，可以运行 install」和一张全部取值的总表（没问的项标「推荐值」）。quick 安装时把这张总表给用户确认。
-- 模型选法（`model_strategy` 等）只记录 agent 是怎么选 profile 的，部署只用 `profiles`。
+- `ask=always` 的项每种方式都问；`guided` 的项选了 guided 或 custom 才问；`custom` 的项只有选了 custom 才问；`detect` 的项（`kandev_url`）从不问，agent 确认连通时用的地址不是默认值就写进答案。没问到的项用推荐值（quick 下 agent 按推荐值或检测结果决定）。`when` 不匹配的项不适用，答案里写了也忽略。
+- 逐批问：把已有答案写进答案文件，运行 `ma.py questions --stage install --answers <文件>`。它只列出这一批（一个 group）要问的项，推荐值按已有答案算；回答后写回文件再运行，直到打印「没有待问的问题，可以运行 install」和一张全部取值的总表。总表每项标来源：用户 / agent 检测 / 推荐值，`home`、`python` 显示解析后的实际路径，后面列出需要用户留意的组合（例如 autonomy=4 且 remote=push）。把这张总表给用户确认（quick 安装时必须做）。
+- agent 没问用户、按检测结果自己填的键列进答案文件的 `_agent`（例如 `"_agent": ["kandev_url"]`），总表标成「agent 检测」；必须问的项不能列进去。
+- 模型选法（`model_strategy`）只记录 agent 是怎么选 profile 的，部署只用 `profiles`。scoped 的范围（哪些厂商 / CLI）在对话里说，不记录。
+- 答案之间的约束：`ci=remote` 或 `review_access=remote_only` 时 `remote` 不能是 `none`，否则 `install` 和 `answer` 拒绝。
 
 ### 答案文件
 
@@ -79,33 +87,44 @@ guided 再加：
 
 ```json
 {
+  "review_access": "remote_only",
   "model_strategy": "auto",
-  "project_defaults": {"remote": "auto", "ci": "auto", "autonomy": "ask", "plan_only": "ask",
-                       "integration_test": "ask", "paid_calls": "ask"}
+  "project_defaults": {"remote": "pr", "ci": "auto", "autonomy": "ask", "plan_only": "ask", "run_policy": "ask",
+                       "integration_test": "auto", "paid_calls": "ask"},
+  "kandev_url": "http://localhost:38430/mcp",
+  "_agent": ["kandev_url"]
 }
 ```
 
-`setup_style` 为 `custom` 时还要写 `install_mode`、`home`（链接模式不用）、`python`、`kandev_url`。缺必问项、有不认识的键、取值不在选项里、profile 违反约束、路径含空格时，`install` 逐条列出并拒绝执行。有选项的项可以写 JSON 的数字和布尔值（`"autonomy": 3`），记成字符串。
+`setup_style` 为 `custom` 时还要写 `install_mode`、`home`（链接模式不用）、`python`。缺必问项、有不认识的键、取值不在选项里、profile 违反约束、答案之间冲突、路径含空格时，`install` 逐条列出并拒绝执行。有选项的项可以写 JSON 的数字和布尔值（`"autonomy": 3`），记成字符串。以 `_` 开头的顶层键不是答案（`_agent` 之外的被忽略）。
 
-在新增这些提问之前记录的答案（没有 `model_strategy`、`project_defaults`）照样有效：`apply`、`doctor`、`answer` 对已记录的答案只要求必问项，缺的按推荐值处理。
+清单记录补全后的答案，另外记下哪些键是答案文件里写明的（`explicit`）：没写明的项是推荐值，之后用 `answer` 改了它依赖的项时会跟着重新取值（例如把 `review_access` 改成 `remote_only`，没回答过的 `remote` 变成 `pr`）；写明过的不跟着变。
+
+旧版记录的答案照样有效：`apply`、`doctor`、`answer` 对已记录的答案只要求必问项，缺的按推荐值处理；已删除的 `vendors`、`reviewer_cross_vendor` 被忽略，`model_strategy: vendor` 读成 `scoped`，`integration_test: ask` 读成 `auto`。
 
 ### 项目缺省值
 
-`install` 把 `project_defaults.*` 写成 `<home>/custom/project-defaults.json`，W1「接收」把它当作每个新项目的缺省值（`ask` 表示每个项目再问）：
+`install` 把 `review_access` 和 `project_defaults.*` 写成 `<home>/custom/project-defaults.json`，W1「接收」把它当作每个新项目的缺省值（`ask` 表示每个项目再问）。这个文件的键和取值是与「接收」的约定（[docs/intake.md](../docs/intake.md)「部署缺省值」），`_schema` 是约定的版本：
 
 ```json
 {
-  "_source": "ma.py install 根据部署提问的答案生成；改用 ma.py answer --set project_defaults.<键>=<值>",
+  "_schema": "2",
+  "_source": "ma.py install 根据部署提问的答案生成；改用 ma.py answer --set …",
+  "review_access": "ask|local|remote_only",
   "remote": "auto|none|push|pr",
   "ci": "auto|none|local|remote",
   "autonomy": "ask|1|2|3|4",
   "plan_only": "ask|true|false",
-  "integration_test": "ask|auto|off",
+  "run_policy": "ask|active|conservative",
+  "integration_test": "auto|off",
   "paid_calls": "ask|deny|allow"
 }
 ```
 
-值都是字符串；`remote` 为 `none` 时 `ci` 写 `none`。不手改：用 `ma.py answer --set project_defaults.remote=pr` 改，它会重写这个文件（旧内容另存 `.bak`），之后启动的项目生效，不需要重新部署。`custom/` 属于用户，不随安装复制，升级不动。`doctor` 打印当前取值；早于这个功能的安装没有这个文件，`doctor` 只给 WARN，「接收」按出厂缺省处理。
+- 值都是字符串。`plan_only` 在 `autonomy` 固定为 1 或 2 时不适用，写 `ask`。`ci` 不随 `remote` 改写（`ci=local` 不需要推送）。
+- 不手改：用 `ma.py answer --set project_defaults.remote=pr`（`review_access` 用 `--set review_access=remote_only`）改，它会重写这个文件（旧内容另存 `.bak`），之后启动的项目生效，不需要重新部署。
+- `custom/` 属于用户，不随安装复制，升级不动。链接模式下多个 workspace 共用这一个文件，内容是最后一次 `install` / `answer` 写入的那个 workspace 的缺省值（`doctor` 会提示）。
+- `doctor` 打印当前取值；没有这个文件或是旧格式（没有 `_schema`）时只给 WARN，「接收」把缺的键按 `ask`（`remote`、`ci`、`integration_test` 按 `auto`）处理。缺省就要推送时（`remote` 是 push / pr，或 `review_access=remote_only`）`doctor` 还预检本机的 git、gh 和 gh 的登录状态（`--offline` 时不查登录），有问题给 WARN；它查的是运行 `doctor` 的机器和用户，仓库级的推送权限要到项目启动时才知道。
 
 ### 安装方式与维护
 
@@ -115,7 +134,7 @@ guided 再加：
   - 其他系列：必须带 `--retire`。旧版改名为"<名称> (<旧版本号>)"，任务都保留，再导入新版；旧版上进行中的项目在旧 workflow 上跑完，但守护不再巡检它们。
 - **定制**：规则槽位见 [../rules/README.md](../rules/README.md)，覆盖文件放在 `<home>/custom/rules/`，改完重新 `diff` + `apply`。
 - **升级**：在新版仓库中运行 `python kandev/ma.py upgrade --home <home>`（先 `--dry-run` 看会改什么），再在 `<home>` 中 `diff` + `apply`。各版本要注意的事（包括守护 prompt 有没有变、要不要重新交接）见 [../CHANGELOG.md](../CHANGELOG.md)。
-- **改答案**：`ma.py answer --set key=value`（可改 profiles、guard_automation、python、kandev_url、setup_style、model_strategy、vendors、reviewer_cross_vendor 和 `project_defaults.*`；workspace 和安装方式要改就重新安装）。
+- **改答案**：`ma.py answer --set key=value`（可改 profiles、guard_automation、python、kandev_url、setup_style、model_strategy、review_access 和 `project_defaults.*`；workspace 和安装方式要改就重新安装）。改了 profiles（含 `guard`）或 python 后重新 `ma.py guard`，按新的交接文件更新守护 automation。
 - 部署后按 [AGENTS.md](../AGENTS.md)「B. 验收部署」核对。
 - **`doctor`** 不带 `--offline` 时连 Kandev 核对：已部署的 workflow 与本目录一致、守护 automation 和心跳；三套 workflow 里还有标题以 `【部署验收临时】`（`ma.py` 的 `ACCEPT_TMP_PREFIX`）开头的任务时给 WARN，列出标题、id 和所在步骤：这是验收 B3 建的临时任务没删，请用户删除（脚本不删）。
 

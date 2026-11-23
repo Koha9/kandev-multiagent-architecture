@@ -22,9 +22,9 @@
 
 ## 合并与推送
 <!-- 按 pm 任务 [TASK v1] 头的 remote、push_branch、ci 填写（没有这几行时都按 none）。baseline 模块据此写 environment.md「合并方式」「合并门禁」。 -->
-- 交付（remote）：<none：只在本地合入基线分支，不推送 | push：本地合入后推送 `<push_branch>` 到 `<远端>` | pr：把集成分支推送成 `<push_branch，缺省 ma/<project>>` 并开 PR，不在本地合入基线分支>
+- 交付（remote）：<none：只在本地合入基线分支，不推送 | push：本地合入后推送 `<push_branch>` 到 `<远端>` | pr：验收通过后把集成分支推送成 `<push_branch，缺省 ma/<project>>` 并开 draft PR 供用户审查，批准后转为 ready，不在本地合入基线分支>
 - 远端：`<远端名>`（缺省为基线分支的 upstream，没有时 origin）
-- 推送授权：只有「收尾合并」推送，开发期间推送地址保持 `DISABLED`；不 force push。autonomy ≤3 时用户在「人工终审」批准推送才推送；autonomy 4 时按本节直接推送
+- 推送授权：开发期间推送地址保持 `DISABLED`；不 force push。pr：用户在接收时选 pr 即同意「人工终审」入口的预览推送（draft PR；这是禁用推送地址的例外，pm 推完立即改回 `DISABLED`），批准后「收尾合并」转为 ready。push：只有「收尾合并」推送，autonomy ≤3 时用户在「人工终审」批准推送才推送，autonomy 4 时按本节直接推送
 - CI（ci）：<none | local：CI 配置 `<.github/workflows/xx.yml>` 中的检查 `<命令>` 写进 environment.md「合并门禁」 | remote：推送后等远端 CI 结果，写进 final-report「收尾」>
 
 ## 接口
@@ -41,7 +41,7 @@
 <!-- 每条约束写明执行方式。baseline 模块负责落实，尽量把"仅 prompt"升级为代码强制，具体命令写进 environment.md「约束落实」。被代码拦下时停下上报，不得绕过。 -->
 | 约束 | 执行方式 | 落实 |
 |---|---|---|
-| 不推送远端（除非下面「其他约定」明确允许；「合并与推送」的推送只在「收尾合并」恢复地址后做） | 代码强制 | push 地址设为 `DISABLED` |
+| 不推送远端（除非下面「其他约定」明确允许；「合并与推送」的推送只在「人工终审」预览推送和「收尾合并」时临时恢复或恢复地址后做） | 代码强制 | push 地址设为 `DISABLED` |
 | 开发只改 owns 内的文件 | 检查脚本 | 开发上报前、审核时运行 `tools/check_owns.py` |
 | 真实调用默认关闭 | 代码强制 | 环境变量开关 + conftest 检查 |
 | 真实调用次数上限 | 代码强制 | `tools/quota.py` 额度账本 |
@@ -66,5 +66,5 @@
 - 在消息或文档中写入密钥
 
 ## 其他约定
-<!-- 任务描述中的「运行策略」（用户在接收时做的决定）照录在这里，按已决定执行。 -->
+<!-- 任务描述中的「运行策略」（用户在接收时做的决定，或接收采用的缺省）照录在这里，按已决定执行。 -->
 - 无

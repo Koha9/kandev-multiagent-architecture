@@ -19,7 +19,7 @@
 ## 阶段分类
 从上到下，第一条匹配的生效。这张表和下面的「信号」表是规则唯一一份给人看的说明；代码在 `kandev/stage.py`（`classify` 决定先后，`SIGNALS` 决定发给谁），改规则时连同 `kandev/tests/test_stage.py` 一起改，`kandev/check_docs.py` 会核对两张表里的信号与代码一致。
 
-表里的分钟数是出厂值（`rules/params.json`），可以在 `custom/rules/params.json` 的 `guard` 里改（`T_IDLE` 停留 / 空闲 10、`T_DECISION` 等待决策 10、`T_HOLD` 可放行 10、`T_STALE` 没有更新 45、`T_DEDUP` 去重 60）；唤醒次数 15 是同一文件的 `refresh_wakes`。"停留"从守护第一次看到任务在这一步算起，所以停留 ≥10 分钟的规则实际要连续两次巡检都看到才告警。
+表里的分钟数是出厂值（`rules/params.json`），可以在 `custom/rules/params.json` 的 `guard` 里改（`T_IDLE` 停留 / 空闲 10、`T_DECISION` 等待决策 10、`T_HOLD` 可放行 10、`T_STALE` 没有更新 45、`T_DEDUP` 去重 60、`T_GATE` 立项确认的提问挂了多久算超时 30，设为 0 关闭）；唤醒次数 15 是同一文件的 `refresh_wakes`。"停留"从守护第一次看到任务在这一步算起，所以停留 ≥10 分钟的规则实际要连续两次巡检都看到才告警。
 
 | # | 分类（stage.md 中的状态） | 条件 | 信号 |
 |---|---|---|---|
@@ -28,6 +28,7 @@
 | 3 | 完成（tasks.json 未登记） | 同上，但模块任务在其他步骤或已完成（没有模块 agent 能处理） | — |
 | 4 | 完成 | 步骤=完成，或任务 COMPLETED（tasks.json 中查不到该任务时也归这里） | — |
 | 5 | 等人：权限请求 | 有待处理的权限请求 | — |
+| 5a | 等人：立项确认（超时） | 步骤=立项确认，有待处理的用户提问，最新会话 ≥30 分钟（`T_GATE`）没有更新，且 `[TASK v1]` 头 `autonomy: 2`、`plan_only` 不是 true（排在"提问"之前）。没有待答的提问（用户选了"先不决定"）、pm 刚发出下一批提问、autonomy 1、3、4、没有 autonomy 行的旧头、`T_GATE`=0 都不告警。告警能否送到正挂着提问的会话没有实测（见第 10 条：发给进行中轮次的消息会排队） | `gate_timeout` |
 | 6 | 等人：提问 | 有待处理的用户提问 | — |
 | 7 | 等人：立项确认 / 等人：人工终审 | 步骤=立项确认 / 人工终审（分类名是"等人："加步骤名） | — |
 | 8 | 等上限：已重置，待恢复 | 最新会话停在用量上限，已过重置时间 2 分钟（见「用量上限」） | `limit_resume` |
@@ -65,6 +66,7 @@
 | `limit_resume` | 任务自己的原会话（带 `session_id` 和要发的 `message`） | 重发（不升级，见「用量上限」） | continue |
 | `session_stuck` | pm | 重发（不升级：pm 也取消不了那一轮） | 完整的处理方法：登记 attention.md，请用户在界面取消那一轮 |
 | `parent_done` | pm | 重发（不升级） | 完整的处理方法：请用户取消，或建修复模块接手 |
+| `gate_timeout` | 任务自己（pm；立项确认不是常驻步骤） | 重发（不升级：60 分钟后任务仍在立项确认时再发一次，pm 判断仍不能继续就保持停下） | 完整的处理方法：按「立项确认」第 6 步，条件满足时按推荐答案继续，否则保持停下 |
 | `decision_pending` | 上级 | 升级为 `pm_unresponsive`（只对开发任务告警，实际不会发生） | unblock |
 | `session_failed` | 上级 | 升级为 `pm_unresponsive` | unblock |
 | `session_not_started` | 上级 | 升级为 `pm_unresponsive`（只对开发任务告警，实际不会发生） | 完整的处理方法：移到「等待决策」再移回；再次出现就新建任务取代 |

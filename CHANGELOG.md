@@ -8,6 +8,67 @@
 
 （进行中的改动，发布时移到新版本一节。）
 
+- **按评审修正问题树（部署侧）**：
+  - 分批：install 阶段的提问按 group 分批（basics / models / profiles / delivery / policy / install），一批最多 4 题，`ma.py questions --answers` 一次只列一批。
+  - 新增两项：
+    - `review_access`：用户在哪里看结果。remote_only 时 `remote` 推荐 pr，不能是 none。
+    - `project_defaults.run_policy`：ask / active / conservative。
+  - 改动的项：
+    - `ci` 不再依赖 `remote`；`ci=remote` 且 `remote=none` 时拒绝。
+    - `plan_only` 只在 autonomy 为 ask / 3 / 4 时问。
+    - `integration_test` 去掉 ask。
+    - `model_strategy` 改为 auto / scoped / per_role，删除 `vendors`、`reviewer_cross_vendor`。
+    - `kandev_url` 由部署 agent 检测后填；不是本机地址时 `install` 停下（`--remote-kandev`）。
+    - profiles 新增可选角色 `guard`（守护用，缺省 = intake，再缺省 = mechanical）。
+  - 总表每项标来源（用户 / agent 检测 / 推荐值），并解析 `home`、`python` 的占位。清单另记写明的答案（`explicit`），修复 `remote=none` 安装后改回 pr 时 `ci` 卡在 none 的问题。
+  - `doctor` 在缺省就要推送时，预检 git、gh 和 gh 登录。
+  - 契约：`custom/project-defaults.json` 升到 `_schema: "2"`，键为 review_access、remote、ci、autonomy、plan_only、run_policy、integration_test、paid_calls。
+  - 升级：
+    - 旧答案照样有效：删掉的键被忽略，`model_strategy: vendor` 读成 scoped，`integration_test: ask` 读成 auto。
+    - 旧的 project-defaults.json 没有 `_schema` 时，doctor 给 WARN；运行 `ma.py answer --set review_access=<值>` 重写。
+    - 已设 intake 且没设 guard 的安装，守护 profile 会从 mechanical 变成 intake，要重新 `ma.py guard` 并更新 automation。
+- **按评审修正问题树（启动与交付侧）**：
+  - 「接收」通常两次提问：
+    - 第 1 轮问需求、自主程度（选项写明各级在哪里停下等人）、交付和审查位置、运行策略预设（积极 / 保守 / 逐项自定，推荐积极）。
+    - 条件项多一轮，最后确认汇总。上限从 6 次降到 4 次。
+    - 结合测试、CI、"是否改变已有行为"不再提问，取检测值或缺省值。
+    - autonomy 4 也写「运行策略」（缺省积极）。
+    - 检测和缺省值解析由只读脚本 `kandev/intake.py probe` 完成（含 push_branch 撞名、gh 是否可用）。
+  - remote: pr 时，pm 在「人工终审」入口把集成分支推成 draft PR，终审提问给出地址；批准后「收尾合并」转为 ready。在接收的确认汇总里选 pr 即同意预览推送。
+  - 立项确认超时：autonomy 2 的任务在「立项确认」停留满 30 分钟（`guard.T_GATE`，0 关闭）没有答复时，守护发 `gate_timeout`。评审通过且没有必须由用户决定的项时，pm 按推荐答案继续，等用户追认。人工终审不设超时。
+  - 「收尾合并」：
+    - 先恢复推送地址、fetch 并做祖先检查，再合入。
+    - pr 模式不要求主目录在基线分支。
+    - ci=remote 改为轮询（先等 2 分钟，单次 ≤5 分钟，累计 30 分钟）。
+    - git 命令设 `GIT_TERMINAL_PROMPT=0`。
+  - 原样放行多查 remote / push_branch / ci 的组合。
+  - 原因：Fable 评审和实测，具体如下。
+    - 立项确认停了 1 小时 37 分，4 题全选了推荐。
+    - 用户只能在 GitHub 上审查，推送却在终审之后。
+    - 运行策略的保守推荐会重演 3 个修复模块。
+    - push 模式先合入后检查。
+  - 代价：步骤 prompt 合计 +1855 字符（接收 +427，立项确认 +301，人工终审 +615，收尾合并 +440）；`docs/intake.md` +3674 字符。
+  - 升级：
+    - 旧头照旧：没有 autonomy 行的任务不触发超时；没有「运行策略」节的按积极处理。
+    - 代码：`stage.py` 新增信号 `gate_timeout`、参数 `T_GATE`；新增 `kandev/intake.py`。
+    - 守护 prompt：无变化。
+- **复审修正**（独立 Fable 复审的 9 项）：
+  - 立项确认超时（autonomy 2）的触发条件收紧：只在 pm 的提问还挂着、且 pm 会话 `T_GATE` 分钟没有更新时触发。
+    - 用户选了"先不决定"、或刚答完一批而 pm 又发出下一批时，不会自动继续；`plan_only: true` 时不超时。
+    - **这条路径未实测**：它依赖守护的 ALERT 能送到正挂着提问的 pm 会话。送不到时没有副作用，等同不设超时。
+  - 「接收」运行 `intake.py probe` 用部署时记录的解释器：答案里的 `python` 渲染进 prompt，文档版本显示 `<python>`，不再写"本机的 Python 3"。`ma.py answer --set python=...` 之后要重新部署才生效。
+  - 预览推送先 fetch 和祖先检查，通过后才恢复推送地址，推完立即改回 DISABLED。这是"禁用推送地址"规则写明的例外。PR 地址写进 final-report「预览 PR」。
+  - `intake.py probe` 的 `resolved` 经过组合检查，不再给出 remote none + ci remote 这样的组合；gh 不可用时不推荐 pr；push_branch 同日撞名时加 `-2`…`-9`。
+  - 升级注意：
+    - 这次改了三套 workflow 的 prompt 和 `stage.py`，升级后要 `ma.py diff` → `ma.py apply --confirmed <值>`。
+      - 旧部署的「接收」里没有解释器路径，doctor 会报与本目录不一致，apply 后消失。
+      - 守护 prompt 无变化，automation 不用更新。
+    - 升级前已经以 `remote: pr` 启动、还没到人工终审的项目：pm 进入人工终审时会先问一次是否推送预览 PR，不会未经同意推送。
+    - 进行中的 autonomy 2 项目从下一次进入「立项确认」起适用超时。不想要就在 `custom/rules/params.json` 写 `{"guard": {"T_GATE": 0}}` 后重新部署。
+    - 旧安装的答案里没有 `explicit` 记录时，`project_defaults.ci` 会停在 none。运行一次 `ma.py answer --set project_defaults.ci=auto` 即可。
+  - 代价：这一轮步骤 prompt 再 +292 字符（相对上次提交合计约 +2147）。
+  - 代码：`build_workflows.py`、`verify_export.py` 也有变化。
+
 - **部署提问改成问题树**：`setup_style` 增加 guided，第一次部署推荐用它。新增两组问题：
   - 模型选法：`model_strategy`、`vendors`、`reviewer_cross_vendor`。
   - 项目缺省值：`project_defaults.remote/ci/autonomy/plan_only/integration_test/paid_calls`。

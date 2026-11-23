@@ -26,7 +26,10 @@
 ## 规则
 
 - **按提问清单问用户**。部署、定制、升级之前运行 `python kandev/ma.py questions --stage <install|customize|redeploy|upgrade>`：
-  - 「必须问」的项要有用户的明确回答，不能替用户填；「选了自定义才问」的项，用户选快速安装时用推荐值。
+  - 「必须问」的项要有用户的明确回答，不能替用户填。
+  - 「guided / custom 才问」「选了 custom 才问」的项，没问到时用推荐值。
+  - 「不问，agent 检测后填」的项（`kandev_url`）由你检测。
+  - 你没问用户、自己按检测结果填的键，都列进答案文件的 `_agent`，总表会标成「agent 检测」。必须问的项不能列进去。
   - 「ma.py 停下来时才问」的项平时不用问：`ma.py` 遇到那种情况会停下并说明，这时问用户，同意后带上它给出的参数重新运行。
   - 相关问题合并成一次提问，每题给选项、推荐答案和一句理由。
 - **改动 Kandev 之前先说明**要做什么、影响哪个 workspace。导入或更新 workflow 由上面的清单覆盖；清单之外的改动（创建任务、启动会话、创建 automation）单独征得同意。只读查询不用问。
@@ -44,18 +47,34 @@
 
 前提：源仓库在运行 Kandev 的那台机器上（安装目录也建在这台机器上，守护每 20 分钟要运行其中的脚本）。
 
-1. **确认 Kandev**：调用 `list_workspaces_kandev`。连不上就停下，请用户启动 Kandev 或给出 MCP 地址（地址不是默认值时写进答案的 `kandev_url`）。
+1. **确认 Kandev**：调用 `list_workspaces_kandev`。连不上就停下，请用户启动 Kandev 或给出 MCP 地址。
+   - 用的地址不是默认值时，写进答案的 `kandev_url`，并把 `kandev_url` 列进 `_agent`。
+   - 地址不是本机（localhost / 127.0.0.1 / ::1）时 `ma.py install` 会停下。问用户现在这台是不是运行 Kandev 的机器：是就加 `--remote-kandev` 重新运行，不是就到那台机器上克隆本仓库再安装。
 2. **提问**（问题树，逐批问）：先运行 `python kandev/ma.py questions --stage install` 看整棵树，再逐批问：
-   - 第一批固定是 `setup_style`、`workspace_id`、`guard_automation`。`workspace_id` 先调用 `list_workspaces_kandev` 列给用户选；`setup_style` 第一次部署推荐 guided，并说明 quick 会由你按推荐值和检测结果决定其余各项，最后给一张总表确认。
-   - 每批回答后写进答案文件（例如 `kandev/answers.local.json`），运行 `python kandev/ma.py questions --stage install --answers kandev/answers.local.json`，它只列出现在该问的项。照着问下一批，直到它打印「没有待问的问题」。每批合并成一次提问（一次最多 4 题时按顺序分几次），每题给选项、推荐答案和一句理由。
-   - `profiles`：先调用 `list_agent_profiles_kandev`，按 `model_strategy` 的答案选。auto：按 [docs/workflow.md](docs/workflow.md)「角色与 profile」选；vendor：只在用户选的厂商里选，`reviewer_cross_vendor=yes` 时 reviewer、auditor 换厂商；per_role：逐个角色请用户选。无论哪种都把结果列成表给用户确认（mode 应能无人值守执行；缺合适的 profile 时告诉用户需要新建什么样的，不要自己创建）。
-   - `project_defaults.*` 是之后每个项目的缺省值（推送、CI、自主程度、plan_only、结合测试、付费调用），由「接收」读取；`ask` 表示每个项目再问。
-   - 最后把 `questions --answers` 打印的总表给用户确认。quick 时必须做：表里标「推荐值」的项是你决定的。
+   - **第一批（basics）**固定是 `setup_style`、`workspace_id`、`guard_automation`。
+     - `workspace_id`：先调用 `list_workspaces_kandev` 列给用户选。
+     - `setup_style`：第一次部署推荐 guided。并说明 quick 会由你按推荐值和检测结果决定其余各项，最后给一张标明来源的总表确认。
+   - **逐批问**：每批回答后写进答案文件（例如 `kandev/answers.local.json`），运行 `python kandev/ma.py questions --stage install --answers kandev/answers.local.json`。
+     - 它只列出这一批（一个 group，最多 4 题）该问的项，推荐值已按前面的回答算好。
+     - 一批合并成一次提问，每题给选项、推荐答案和一句理由，直到它打印「没有待问的问题」。
+     - guided 的顺序：basics → models（`review_access`、`model_strategy`）→ profiles → delivery（`remote`、`ci`、`autonomy`）→ policy（`plan_only`、`run_policy`、`integration_test`、`paid_calls`）。custom 再加 install。
+   - **`review_access`**：用户在哪里看结果。Kandev 跑在远程主机、用户只能在 GitHub 上看时选 remote_only，这时 `remote` 推荐 pr，不能是 none。
+   - **`profiles`**：先调用 `list_agent_profiles_kandev`，按 `model_strategy` 的答案选：
+     - auto：按 [docs/workflow.md](docs/workflow.md)「角色与 profile」选。
+     - scoped：先请用户说出限定的厂商 / CLI（不记录），只在这个范围内选；范围里有两个以上厂商时，reviewer、auditor 换厂商。
+     - per_role：逐个角色请用户选。
+
+     可选角色 `guard` 是守护用的，选便宜模型；没写时取 intake，再没有取 mechanical。无论哪种都把结果列成表（角色、profile 名称、模型）给用户确认。mode 应能无人值守执行。缺合适的 profile 时，告诉用户需要新建什么样的，不要自己创建。
+   - **`project_defaults.*` 和 `review_access`** 是之后每个项目的缺省值（交付方式、CI、自主程度、plan_only、运行策略、结合测试、付费调用）。它们写进 `<home>/custom/project-defaults.json`，由「接收」读取；`ask` 表示每个项目再问。
+   - **最后确认总表**：把 `questions --answers` 打印的总表给用户确认，quick 时必须做。
+     - 表里每项标了来源，「推荐值」和「agent 检测」的项是你决定的，要让用户看到。
+     - 表后有「提示」时（例如 autonomy=4 且 remote=push），逐条讲给用户。
+     - 它报「答案之间有冲突」时，问用户改哪一项。
 3. **安装**：把答案写成 JSON 文件（留在源仓库，例如 `kandev/answers.local.json`，格式见 [kandev/README.md](kandev/README.md)），运行：
    ```
    python kandev/ma.py install --answers kandev/answers.local.json
    ```
-   答案不合格（缺必问项、profile 违反"必须不同"的约束、路径含空格等）时它会逐条列出，照着问用户或改正。独立安装会把文件复制到 `<home>`；`<home>` 已存在且不为空时它会停下，不覆盖。之后的命令都在 `<home>` 中运行。
+   答案不合格（缺必问项、profile 违反"必须不同"的约束、答案之间冲突、路径含空格等）时它会逐条列出，照着问用户或改正。独立安装会把文件复制到 `<home>`；`<home>` 已存在且不为空时它会停下，不覆盖。之后的命令都在 `<home>` 中运行。
 4. **定制**（用户选了自定义时）：做 F 的第 1、2 步。
 5. **部署**：
    ```
@@ -73,6 +92,8 @@
 
 1. **自检**：`python kandev/check_docs.py` 全部 OK。
 2. **部署一致**：`python kandev/ma.py doctor` 没有 FAIL，WARN 逐条说明。它核对：已部署的三套 workflow（prompt、步骤顺序、事件、开关、会话策略）与安装目录一致；写进 Kandev 的路径指向本目录；ids 文件里的步骤与脚本一致；守护 automation 存在。再看一眼 `python kandev/verify_export.py --ids <ids 文件>` 的输出：所有带 prompt 的步骤 `prof=` 不是 `-`，并且是第 A2 步确认的模型（接收 = intake，立项评审 = plan_auditor，W2 验收调查 = module_auditor，W2 其余 = module）。
+   - 守护的 profile 是 `guard`（没写时取 intake / mechanical），看交接文件里的 `agent profile` 一行。
+   - `doctor` 的「交付预检」WARN（git / gh 不可用，或 gh 没登录）要讲给用户：缺省就要推送的部署需要先解决。
 3. **「待开发」行为**（会启动一次真实会话：先问用户，不做就记 unverified）：
    | # | 操作 | 期望 |
    |---|---|---|
@@ -90,16 +111,27 @@
 
 用户自己在 Kandev 里新建任务时只需要写需求：W1 的「接收」步骤会推导参数、向用户提问并补全 `[TASK v1]` 头。你代用户启动项目时写好完整的头，「接收」会原样放行，不再提问。
 
-1. 按 [docs/intake.md](docs/intake.md) 第 3 节的字段逐项向用户确认：
+1. 按 [docs/intake.md](docs/intake.md) 第 3、4 节向用户确认。先运行 `python <home>/kandev/intake.py probe --repo <仓库>` 看检测结果和部署缺省值（`python` 用 `ma.py doctor` 第一行显示的解释器），再合并成一次提问：
    - 目标仓库和基线分支；需求（按重要度排序，一条一行）。
-   - `autonomy`（1–4）。`mode` 由它导出：1、2 → attended，3、4 → unattended；1 时 `plan_only: true`。
-   - `plan_only`、`integration_test`。
-   - 交付方式：`remote`（none / push / pr）与 `push_branch`，以及 `ci`。
-   - autonomy 1–3 时的运行策略：缺陷本轮修还是只记录、旧产物保留还是删除、是否允许改变已有行为。写进正文「运行策略」节。
-   - 技术栈与环境要求、额度约定（见 [docs/project-conventions.md](docs/project-conventions.md)）。
+   - `autonomy`（1–4），并告诉用户各级在哪里停下等人：
+     - 1、2 在立项确认和人工终审停下。2 的立项确认 30 分钟没有答复、且没有必须由用户决定的项时，按推荐继续。
+     - 3、4 只在人工终审停下。
 
-   安装目录有 `custom/project-defaults.json` 时，其中的具体值作为推荐答案。
-2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `<home>/kandev/` 下该 workspace 的 ids 文件，选好仓库），描述按 intake.md 第 6 节的格式。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写 `<home>/mgmt-template` 的绝对路径。头写全（含 autonomy、remote、ci）时「接收」不提问，只校验 autonomy 与 mode / plan_only 是否一致。
+     `mode` 由它导出：1、2 → attended，3、4 → unattended。1 时 `plan_only: true`；3 时问 `plan_only`。
+   - 交付和审查位置：`remote`（none / push / pr）与 `push_branch`。
+     - 部署缺省 `review_access` 是 remote_only 时推荐 pr，不能是 none。
+     - pr 表示验收通过后先推 draft PR，供用户在网页上审查，批准后转为 ready。用户选 pr 即同意这次预览推送，要明确告诉用户。
+   - 运行策略：
+     - 部署缺省 `run_policy` 是 active / conservative 时，直接用对应的预设。
+     - 是 ask 时，问用户选预设：积极（推荐：范围内的小缺陷本轮修，被替换的旧产物删除）/ 保守 / 逐项自定。
+
+     写进正文「运行策略」节。
+   - `ci`、`integration_test` 不用问，取 probe 的 `resolved` 值，在确认时列出。
+   - 额度约定：只在需求依赖付费调用或凭据时问。
+   - 技术栈与环境要求：用户主动提供时照录进正文，不逐项追问（由 pm 在立项规划处理）。
+
+   安装目录有 `custom/project-defaults.json` 时，其中的具体值作为推荐答案或直接采用。
+2. 在「多Agent · 项目管理」中创建任务（`create_task_kandev`，`workflow_id` 取自 `<home>/kandev/` 下该 workspace 的 ids 文件，选好仓库），描述按 intake.md 第 6 节的格式。`mgmt_root` 放在仓库和 worktree 之外；`mgmt_template` 写 `<home>/mgmt-template` 的绝对路径。头写全（含 autonomy、remote、ci）时「接收」不提问，只校验 autonomy 与 mode / plan_only 是否一致，以及 remote / push_branch / ci 的组合。
 3. 经用户同意后启动任务。之后用户只需要看两处：`<mgmt_root>/project/attention.md`（需要用户决定的事）和 `<mgmt_root>/agents/guard/stage.md`（现在在等谁）。
 
 ## D. 跑基准项目
